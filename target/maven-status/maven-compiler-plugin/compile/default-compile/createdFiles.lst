@@ -52,9 +52,9 @@ com/saffron/cashflow/report/ProfitLossTemplate.class
 com/saffron/cashflow/dto/DeleteEntryRequest.class
 com/saffron/cashflow/util/AuditContext.class
 com/saffron/cashflow/domain/DailyEntry.class
+com/saffron/cashflow/config/AdminBootstrap.class
 com/saffron/cashflow/domain/AlertType.class
 com/saffron/cashflow/repository/ExpenseItemRepository.class
-com/saffron/cashflow/config/DataInitializer.class
 com/saffron/cashflow/dto/ExpenseItemRequest.class
 com/saffron/cashflow/util/EntryCalculator.class
 com/saffron/cashflow/repository/NotificationDispatchRepository.class
