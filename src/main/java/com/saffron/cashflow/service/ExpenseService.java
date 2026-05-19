@@ -189,18 +189,21 @@ public class ExpenseService {
     public Map<String, Object> uploadInvoice(String expenseId, MultipartFile invoice) throws IOException {
         ExpenseItem item = expenseRepository.findByIdWithInvoices(expenseId)
                 .orElseThrow(() -> new NotFoundException("Expense not found"));
-        DailyEntry entry = verifyEntryAccess(item.getEntryId());
-        assertEditable(entry);
+        DailyEntry entry = requireEditableExpense(item);
         if (invoice == null || invoice.isEmpty()) {
             throw new BadRequestException("No file uploaded");
         }
         int before = item.getInvoices().size();
         item.addInvoice(storeFile(entry, item, invoice, "expense-invoice"));
         item = expenseRepository.save(item);
-        entryService.recalculateEntry(entry.getId());
+        if (entry != null) {
+            entryService.recalculateEntry(entry.getId());
+        }
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "ExpenseItem", item.getId(),
                 Map.of("invoiceCount", before), Map.of("invoiceCount", item.getInvoices().size()),
-                Map.of("entryId", entry.getId(), "invoice", true));
+                entry != null
+                        ? Map.of("entryId", entry.getId(), "invoice", true)
+                        : Map.of("standalone", true, "invoice", true));
         return mapExpense(item.getId());
     }
 
@@ -208,8 +211,7 @@ public class ExpenseService {
     public Map<String, Object> deleteInvoice(String expenseId, String fileId) {
         ExpenseItem item = expenseRepository.findByIdWithInvoices(expenseId)
                 .orElseThrow(() -> new NotFoundException("Expense not found"));
-        DailyEntry entry = verifyEntryAccess(item.getEntryId());
-        assertEditable(entry);
+        DailyEntry entry = requireEditableExpense(item);
         ReceiptFile target = item.getInvoices().stream()
                 .filter(f -> f.getId().equals(fileId))
                 .findFirst()
@@ -217,10 +219,12 @@ public class ExpenseService {
         item.getInvoices().remove(target);
         deleteFile(target.getPath());
         expenseRepository.save(item);
-        entryService.recalculateEntry(entry.getId());
+        if (entry != null) {
+            entryService.recalculateEntry(entry.getId());
+        }
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "ExpenseItem", item.getId(),
                 Map.of("deletedFileId", fileId), Map.of("invoiceCount", item.getInvoices().size()),
-                Map.of("entryId", entry.getId()));
+                entry != null ? Map.of("entryId", entry.getId()) : Map.of("standalone", true));
         return mapExpense(item.getId());
     }
 
@@ -406,6 +410,17 @@ public class ExpenseService {
         if (AuthHelper.isCashier() && !entry.getCashierId().equals(user.id())) {
             throw new ForbiddenException("Forbidden");
         }
+        return entry;
+    }
+
+    /** Standalone post-close expenses: operations only. Shift expenses: entry access + editable check. */
+    private DailyEntry requireEditableExpense(ExpenseItem item) {
+        if (item.isStandalone()) {
+            AuthHelper.requireOperations();
+            return null;
+        }
+        DailyEntry entry = verifyEntryAccess(item.getEntryId());
+        assertEditable(entry);
         return entry;
     }
 
