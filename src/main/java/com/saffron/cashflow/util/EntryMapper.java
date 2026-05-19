@@ -9,6 +9,7 @@ import com.saffron.cashflow.dto.EntryRequest;
 import org.hibernate.Hibernate;
 import java.math.BigDecimal;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -167,7 +168,16 @@ public final class EntryMapper {
     }
 
     private static Map<String, Object> cashierMap(User u) {
-        return Map.of("id", u.getId(), "name", u.getName(), "email", u.getEmail());
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", u.getId());
+        m.put("name", u.getName());
+        if (u.getEmail() != null && !u.getEmail().isBlank()) {
+            m.put("email", u.getEmail());
+        }
+        if (u.getUsername() != null && !u.getUsername().isBlank()) {
+            m.put("username", u.getUsername());
+        }
+        return m;
     }
 
     private static Map<String, Object> fileMap(ReceiptFile f) {
