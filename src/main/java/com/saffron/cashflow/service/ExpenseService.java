@@ -111,7 +111,7 @@ public class ExpenseService {
         item = expenseRepository.save(item);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.CREATE, "ExpenseItem", item.getId(),
                 Map.of(), AuditSnapshots.expense(item), Map.of("standalone", true));
-        return EntryMapper.expenseToMap(item);
+        return mapExpense(item.getId());
     }
 
     @Transactional
@@ -131,7 +131,7 @@ public class ExpenseService {
         item = expenseRepository.save(item);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "ExpenseItem", item.getId(),
                 before, AuditSnapshots.expense(item), Map.of("standalone", true));
-        return EntryMapper.expenseToMap(item);
+        return mapExpense(item.getId());
     }
 
     @Transactional
@@ -163,12 +163,12 @@ public class ExpenseService {
         entryService.recalculateEntry(entryId);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.CREATE, "ExpenseItem", item.getId(),
                 Map.of(), AuditSnapshots.expense(item), Map.of("entryId", entryId));
-        return EntryMapper.expenseToMap(item);
+        return mapExpense(item.getId());
     }
 
     @Transactional
     public Map<String, Object> update(String expenseId, ExpenseItemRequest req, MultipartFile invoice) throws IOException {
-        ExpenseItem item = expenseRepository.findById(expenseId)
+        ExpenseItem item = expenseRepository.findByIdWithInvoices(expenseId)
                 .orElseThrow(() -> new NotFoundException("Expense not found"));
         DailyEntry entry = verifyEntryAccess(item.getEntryId());
         assertEditable(entry);
@@ -182,12 +182,12 @@ public class ExpenseService {
         entryService.recalculateEntry(entry.getId());
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "ExpenseItem", item.getId(),
                 before, AuditSnapshots.expense(item), Map.of("entryId", entry.getId()));
-        return EntryMapper.expenseToMap(item);
+        return mapExpense(item.getId());
     }
 
     @Transactional
     public Map<String, Object> uploadInvoice(String expenseId, MultipartFile invoice) throws IOException {
-        ExpenseItem item = expenseRepository.findById(expenseId)
+        ExpenseItem item = expenseRepository.findByIdWithInvoices(expenseId)
                 .orElseThrow(() -> new NotFoundException("Expense not found"));
         DailyEntry entry = verifyEntryAccess(item.getEntryId());
         assertEditable(entry);
@@ -201,12 +201,12 @@ public class ExpenseService {
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "ExpenseItem", item.getId(),
                 Map.of("invoiceCount", before), Map.of("invoiceCount", item.getInvoices().size()),
                 Map.of("entryId", entry.getId(), "invoice", true));
-        return EntryMapper.expenseToMap(item);
+        return mapExpense(item.getId());
     }
 
     @Transactional
     public Map<String, Object> deleteInvoice(String expenseId, String fileId) {
-        ExpenseItem item = expenseRepository.findById(expenseId)
+        ExpenseItem item = expenseRepository.findByIdWithInvoices(expenseId)
                 .orElseThrow(() -> new NotFoundException("Expense not found"));
         DailyEntry entry = verifyEntryAccess(item.getEntryId());
         assertEditable(entry);
@@ -221,12 +221,12 @@ public class ExpenseService {
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "ExpenseItem", item.getId(),
                 Map.of("deletedFileId", fileId), Map.of("invoiceCount", item.getInvoices().size()),
                 Map.of("entryId", entry.getId()));
-        return EntryMapper.expenseToMap(item);
+        return mapExpense(item.getId());
     }
 
     @Transactional
     public void delete(String expenseId) {
-        ExpenseItem item = expenseRepository.findById(expenseId)
+        ExpenseItem item = expenseRepository.findByIdWithInvoices(expenseId)
                 .orElseThrow(() -> new NotFoundException("Expense not found"));
         DailyEntry entry = verifyEntryAccess(item.getEntryId());
         assertEditable(entry);
@@ -263,7 +263,7 @@ public class ExpenseService {
 
         for (ExpenseItemRequest req : items) {
             if (req.getId() != null && !req.getId().isBlank()) {
-                var matched = expenseRepository.findByIdAndEntryId(req.getId(), entryId);
+                var matched = expenseRepository.findByIdAndEntryIdWithInvoices(req.getId(), entryId);
                 if (matched.isPresent()) {
                     applyRequest(matched.get(), req);
                     expenseRepository.save(matched.get());
@@ -341,8 +341,14 @@ public class ExpenseService {
         }
     }
 
+    private Map<String, Object> mapExpense(String expenseId) {
+        return expenseRepository.findByIdWithInvoices(expenseId)
+                .map(EntryMapper::expenseToMap)
+                .orElseThrow(() -> new NotFoundException("Expense not found"));
+    }
+
     private ExpenseItem loadStandalone(String expenseId) {
-        ExpenseItem item = expenseRepository.findById(expenseId)
+        ExpenseItem item = expenseRepository.findByIdWithInvoices(expenseId)
                 .orElseThrow(() -> new NotFoundException("Expense not found"));
         if (!item.isStandalone()) {
             throw new BadRequestException("This expense belongs to a shift report — edit it on that report");

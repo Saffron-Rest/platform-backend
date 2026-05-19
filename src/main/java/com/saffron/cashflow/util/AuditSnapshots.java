@@ -3,6 +3,7 @@ package com.saffron.cashflow.util;
 import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.ExpenseItem;
 import com.saffron.cashflow.domain.User;
+import org.hibernate.Hibernate;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -47,7 +48,11 @@ public final class AuditSnapshots {
         m.put("description", item.getDescription());
         m.put("amount", EntryCalculator.toDouble(item.getAmount()));
         m.put("paymentSource", item.getPaymentSource() != null ? item.getPaymentSource().name() : null);
-        m.put("invoiceCount", item.getInvoices().size());
+        int invoiceCount = 0;
+        if (Hibernate.isInitialized(item.getInvoices()) && item.getInvoices() != null) {
+            invoiceCount = item.getInvoices().size();
+        }
+        m.put("invoiceCount", invoiceCount);
         return m;
     }
 

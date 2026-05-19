@@ -90,6 +90,11 @@ public final class EntryMapper {
     }
 
     public static Map<String, Object> toMap(DailyEntry e, TreasurySettings treasury) {
+        return toMap(e, treasury, null);
+    }
+
+    /** Pass {@code expenseLines} when invoices were loaded via {@code findByEntryIdWithInvoice}. */
+    public static Map<String, Object> toMap(DailyEntry e, TreasurySettings treasury, List<ExpenseItem> expenseLines) {
         Map<String, Object> m = new HashMap<>();
         m.put("id", e.getId());
         m.put("date", e.getDate().toString());
@@ -129,7 +134,7 @@ public final class EntryMapper {
         if (Hibernate.isInitialized(e.getFiles()) && e.getFiles() != null && !e.getFiles().isEmpty()) {
             m.put("files", e.getFiles().stream().map(EntryMapper::fileMap).collect(Collectors.toList()));
         }
-        List<ExpenseItem> items = expenseItems(e);
+        List<ExpenseItem> items = expenseLines != null ? expenseLines : expenseItems(e);
         if (!items.isEmpty()) {
             m.put("expenses", items.stream().map(EntryMapper::expenseToMap).collect(Collectors.toList()));
         } else {
@@ -171,7 +176,7 @@ public final class EntryMapper {
             m.put("entryId", item.getEntry().getId());
             m.put("entryDate", item.getEntry().getDate().toString());
         }
-        if (!item.getInvoices().isEmpty()) {
+        if (Hibernate.isInitialized(item.getInvoices()) && item.getInvoices() != null && !item.getInvoices().isEmpty()) {
             List<Map<String, Object>> files = item.getInvoices().stream().map(EntryMapper::fileMap).toList();
             m.put("invoices", files);
             m.put("invoice", files.get(0));

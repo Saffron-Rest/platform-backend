@@ -7,7 +7,9 @@ import com.saffron.cashflow.domain.Role;
 import com.saffron.cashflow.domain.ShiftType;
 import com.saffron.cashflow.dto.EntryRequest;
 import com.saffron.cashflow.domain.SystemSetting;
+import com.saffron.cashflow.domain.ExpenseItem;
 import com.saffron.cashflow.repository.DailyEntryRepository;
+import com.saffron.cashflow.repository.ExpenseItemRepository;
 import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.util.TreasurySettings;
@@ -38,6 +40,7 @@ import java.util.stream.Collectors;
 public class EntryService {
 
     private final DailyEntryRepository entryRepository;
+    private final ExpenseItemRepository expenseRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
     private final AlertService alertService;
@@ -47,6 +50,7 @@ public class EntryService {
 
     public EntryService(
             DailyEntryRepository entryRepository,
+            ExpenseItemRepository expenseRepository,
             UserRepository userRepository,
             AuditService auditService,
             AlertService alertService,
@@ -54,6 +58,7 @@ public class EntryService {
             SystemSettingRepository settingRepository,
             ManualDeliveryService manualDeliveryService) {
         this.entryRepository = entryRepository;
+        this.expenseRepository = expenseRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
         this.alertService = alertService;
@@ -77,7 +82,7 @@ public class EntryService {
         Specification<DailyEntry> spec = EntrySpecification.filter(filterCashier, fromDate, toDate, st);
         return entryRepository.findAll(spec, Sort.by(Sort.Direction.DESC, "date")).stream()
                 .map(e -> mapEntry(load(e.getId())))
-                .collect(Collectors.toList());
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -306,7 +311,12 @@ public class EntryService {
 
     private Map<String, Object> mapEntry(DailyEntry entry) {
         TreasurySettings treasury = loadTreasurySettings();
-        return enrichWithShift(EntryMapper.toMap(entry, treasury), entry.getCashierId(), entry.getDate(), treasury);
+        List<ExpenseItem> expenseLines = expenseRepository.findByEntryIdWithInvoice(entry.getId());
+        return enrichWithShift(
+                EntryMapper.toMap(entry, treasury, expenseLines),
+                entry.getCashierId(),
+                entry.getDate(),
+                treasury);
     }
 
     private TreasurySettings loadTreasurySettings() {

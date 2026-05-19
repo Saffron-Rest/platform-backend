@@ -15,6 +15,12 @@ public interface ExpenseItemRepository extends JpaRepository<ExpenseItem, String
     @Query("SELECT e FROM ExpenseItem e WHERE e.id = :id AND e.entry.id = :entryId")
     Optional<ExpenseItem> findByIdAndEntryId(String id, String entryId);
 
+    @Query("SELECT DISTINCT e FROM ExpenseItem e LEFT JOIN FETCH e.invoices WHERE e.id = :id")
+    Optional<ExpenseItem> findByIdWithInvoices(String id);
+
+    @Query("SELECT DISTINCT e FROM ExpenseItem e LEFT JOIN FETCH e.invoices WHERE e.id = :id AND e.entry.id = :entryId")
+    Optional<ExpenseItem> findByIdAndEntryIdWithInvoices(String id, String entryId);
+
     @Query("""
             SELECT DISTINCT e FROM ExpenseItem e
             LEFT JOIN FETCH e.invoices
