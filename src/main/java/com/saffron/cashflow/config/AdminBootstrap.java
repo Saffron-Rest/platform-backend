@@ -28,7 +28,6 @@ public class AdminBootstrap {
                 return;
             }
 
-            removeLegacyDemoUsers(jdbc);
             ensureAdmin(users, encoder);
         };
     }
@@ -55,19 +54,6 @@ public class AdminBootstrap {
                 """);
     }
 
-    /** Old dev seed users — safe to delete; real staff are created in Admin → Team. */
-    private static void removeLegacyDemoUsers(JdbcTemplate jdbc) {
-        jdbc.update(
-                """
-                DELETE FROM app_user
-                WHERE role <> 'ADMIN'
-                  AND (
-                    username IN ('cashier', 'manager')
-                    OR email IN ('cashier@saffron.local', 'manager@saffron.local')
-                  )
-                """);
-    }
-
     private static void ensureAdmin(UserRepository users, PasswordEncoder encoder) {
         if (users.existsByUsername("admin")) {
             return;
@@ -89,7 +75,7 @@ public class AdminBootstrap {
         String password = System.getenv("APP_SEED_ADMIN_PASSWORD");
         if (password == null || password.isBlank()) {
             throw new IllegalStateException(
-                    "Set APP_SEED_ADMIN_PASSWORD before bootstrap (required to create the admin user).");
+                    "Set APP_SEED_ADMIN_PASSWORD (required when creating the admin user or wiping the database).");
         }
         User admin = new User();
         admin.setUsername("admin");
