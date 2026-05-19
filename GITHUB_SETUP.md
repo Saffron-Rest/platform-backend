@@ -52,31 +52,33 @@ Repo → **Settings → Secrets and variables → Actions → New repository sec
 |--------|--------|
 | `VPS_HOST` | `76.13.130.67` |
 | `VPS_USER` | `root` |
-| `VPS_SSH_KEY` | Full private key file (`~/.ssh/id_ed25519`) |
-| `POSTGRES_PASSWORD` | From `~/Desktop/saffron-app/deploy/.env` on your Mac |
-| `JWT_SECRET` | From same `.env` file |
-| `GHCR_TOKEN` | GitHub PAT with `read:packages` (only if image is private) |
-
-**Easier:** after first build, go to **Packages** → open `platform-backend` → **Package settings → Change visibility → Public** (then skip `GHCR_TOKEN`).
+| `SSH_PRIVATE_KEY` or `VPS_SSH_KEY` | Full private key (same as frontend repo) |
+| `SSH_PASSPHRASE` | Only if your key has a passphrase |
+| `GHCR_USERNAME` | Your GitHub username |
+| `GHCR_TOKEN` | PAT with `read:packages` |
+| `POSTGRES_USER` | `saffron` |
+| `POSTGRES_DB` | `cashflow` |
+| `POSTGRES_PASSWORD` | Must match VPS Postgres (see `deploy/vps-credentials.env` in monorepo) |
+| `JWT_SECRET` | Same as VPS / local `.env` |
 
 ---
 
 ## Step 3 — Run deploy
 
-1. **Actions** tab → workflow **Deploy** → **Run workflow** → branch `main`
+1. **Actions** tab → workflow **pipeline** → **Run workflow** → branch `main`
 2. Or push any commit to `main` (auto-runs)
 
-Jobs: **build-and-push** → **deploy**
+Jobs: **1 · Test** → **2 · Build & push image** → **3 · Deploy API to VPS**
 
 ---
 
 ## Step 4 — Check it works
 
 ```bash
-curl http://76.13.130.67/api/health
+curl http://cash-flow.saffron.waw.pl/api/health
 ```
 
-Expected: `{"ok":true}`
+Expected: `{"ok":true}` (Kong routes `/api` to the backend)
 
 (Postgres must already run on VPS as `saffron-postgres` on network `saffron_net`.)
 
@@ -88,8 +90,7 @@ Expected: `{"ok":true}`
 |------|---------|
 | `src/` | Spring Boot API |
 | `Dockerfile` | Production image |
-| `.github/workflows/ci.yml` | Test on every push |
-| `.github/workflows/deploy.yml` | Build + deploy to VPS |
+| `.github/workflows/pipeline.yml` | Test, build (linux/amd64), deploy to VPS |
 | `deploy/` | VPS compose + script |
 
 Image URL after deploy:  

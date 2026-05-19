@@ -4,9 +4,11 @@ APP_DIR="${VPS_APP_DIR:-/docker/saffron-backend}"
 cd "$APP_DIR"
 
 REGISTRY_HOST="${REGISTRY_HOST:-ghcr.io}"
-if [[ -n "${REGISTRY_PASSWORD:-}" && -n "${REGISTRY_USER:-}" ]]; then
-  echo "$REGISTRY_PASSWORD" | docker login -u "$REGISTRY_USER" "$REGISTRY_HOST" --password-stdin
+if [[ -z "${REGISTRY_PASSWORD:-}" || -z "${REGISTRY_USER:-}" ]]; then
+  echo "ERROR: REGISTRY_USER and REGISTRY_PASSWORD required to pull from GHCR." >&2
+  exit 1
 fi
+echo "$REGISTRY_PASSWORD" | docker login -u "$REGISTRY_USER" --password-stdin "$REGISTRY_HOST"
 
 cat > .env <<EOF
 BACKEND_IMAGE=${BACKEND_IMAGE:?BACKEND_IMAGE required}
