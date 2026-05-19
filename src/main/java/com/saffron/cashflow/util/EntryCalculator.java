@@ -91,11 +91,26 @@ public final class EntryCalculator {
                 .subtract(totalPayouts(e)));
     }
 
+    /** Card sales − card refunds − card expenses (no delivery settlement). */
     public static BigDecimal cardBalance(DailyEntry e) {
         BigDecimal cardExpenses = hasExpenseItems(e)
                 ? sumExpenseItems(e.getExpenseItems(), PaymentSource.CARD)
                 : BigDecimal.ZERO;
         return round(e.getCardSales().subtract(e.getCardRefunds()).subtract(cardExpenses));
+    }
+
+    /**
+     * Net card/bank movement for treasury: settled card sales + delivery to card − refunds − card expenses
+     * + bank deposits.
+     */
+    public static BigDecimal cardNetForTreasury(DailyEntry e, TreasurySettings settings) {
+        BigDecimal settledCardSales = e.getCardSales().multiply(settings.getCardSalesSettlementRate());
+        BigDecimal deliveryToCard = PlatformSettlement.totalDeliverySettledToCard(e, settings);
+        BigDecimal out = e.getCardRefunds().add(e.getPlatformRefunds());
+        if (hasExpenseItems(e)) {
+            out = out.add(sumExpenseItems(e.getExpenseItems(), PaymentSource.CARD));
+        }
+        return round(settledCardSales.add(deliveryToCard).subtract(out).add(e.getBankDeposit()));
     }
 
     private static BigDecimal expenseTotalForCashClosing(DailyEntry e) {

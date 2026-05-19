@@ -3,10 +3,13 @@ package com.saffron.cashflow.service;
 import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.report.PdfReportBuilder;
 import com.saffron.cashflow.domain.EntryStatus;
+import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.repository.DailyEntryRepository;
+import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.EntryCalculator;
 import com.saffron.cashflow.util.EntryMapper;
+import com.saffron.cashflow.util.TreasurySettings;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -15,6 +18,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.*;
@@ -24,10 +28,21 @@ public class ReportService {
 
     private final DailyEntryRepository entryRepository;
     private final AuditService auditService;
+    private final ManualDeliveryService manualDeliveryService;
+    private final ExpenseService expenseService;
+    private final SystemSettingRepository settingRepository;
 
-    public ReportService(DailyEntryRepository entryRepository, AuditService auditService) {
+    public ReportService(
+            DailyEntryRepository entryRepository,
+            AuditService auditService,
+            ManualDeliveryService manualDeliveryService,
+            ExpenseService expenseService,
+            SystemSettingRepository settingRepository) {
         this.entryRepository = entryRepository;
         this.auditService = auditService;
+        this.manualDeliveryService = manualDeliveryService;
+        this.expenseService = expenseService;
+        this.settingRepository = settingRepository;
     }
 
     public Map<String, Object> summary(
@@ -119,7 +134,11 @@ public class ReportService {
         for (DailyEntry e : entries) {
             loaded.add(entryRepository.findActiveByIdWithExpenses(e.getId()).orElse(e));
         }
-        List<Map<String, Object>> rows = loaded.stream().map(EntryMapper::toMap).toList();
+        TreasurySettings treasury = settingRepository.findById(TreasurySettings.SETTINGS_KEY)
+                .map(SystemSetting::getValue)
+                .map(TreasurySettings::fromMap)
+                .orElseGet(TreasurySettings::new);
+        List<Map<String, Object>> rows = loaded.stream().map(e -> EntryMapper.toMap(e, treasury)).toList();
 
         double sales = 0, cashSales = 0, cardSales = 0, returns = 0, expenses = 0, payouts = 0;
         double expectedCash = 0, actualCash = 0, difference = 0, cardBalance = 0;
@@ -134,15 +153,30 @@ public class ReportService {
             expectedCash += EntryCalculator.toDouble(e.getClosingBalance());
             actualCash += EntryCalculator.toDouble(e.getActualCashCounted());
             difference += EntryCalculator.toDouble(e.getDifference());
-            cardBalance += EntryCalculator.toDouble(EntryCalculator.cardBalance(e));
+            cardBalance += EntryCalculator.toDouble(EntryCalculator.cardNetForTreasury(e, treasury));
             if (e.getStatus() == EntryStatus.DRAFT) {
                 draftCount++;
             } else if (e.getStatus() == EntryStatus.LOCKED) {
                 lockedCount++;
             }
         }
+
+        BigDecimal manualDelivery = manualDeliveryService.totalGrossBetween(range.from(), range.to());
+        double manualDeliveryD = EntryCalculator.toDouble(manualDelivery);
+        double manualDeliveryToCard = EntryCalculator.toDouble(
+                manualDeliveryService.totalCardCreditBetween(range.from(), range.to(), treasury));
+        sales += manualDeliveryD;
+        cardBalance += manualDeliveryToCard;
+
+        BigDecimal standaloneExpenses = expenseService.sumStandaloneBetween(range.from(), range.to());
+        double standaloneExpensesD = EntryCalculator.toDouble(standaloneExpenses);
+        expenses += standaloneExpensesD;
+
         Map<String, Object> totals = new LinkedHashMap<>();
         totals.put("sales", sales);
+        totals.put("manualDeliverySales", manualDeliveryD);
+        totals.put("manualDeliveryToCard", manualDeliveryToCard);
+        totals.put("standaloneExpenses", standaloneExpensesD);
         totals.put("cashSales", cashSales);
         totals.put("cardSales", cardSales);
         totals.put("returns", returns);

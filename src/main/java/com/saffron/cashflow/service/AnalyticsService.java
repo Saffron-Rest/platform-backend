@@ -2,10 +2,14 @@ package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.EntryStatus;
+import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.repository.DailyEntryRepository;
+import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.EntryCalculator;
 import com.saffron.cashflow.util.EntryMapper;
+import com.saffron.cashflow.util.TreasurySettings;
+import java.math.BigDecimal;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -19,9 +23,16 @@ import java.util.*;
 public class AnalyticsService {
 
     private final DailyEntryRepository entryRepository;
+    private final SystemSettingRepository settingRepository;
+    private final ManualDeliveryService manualDeliveryService;
 
-    public AnalyticsService(DailyEntryRepository entryRepository) {
+    public AnalyticsService(
+            DailyEntryRepository entryRepository,
+            SystemSettingRepository settingRepository,
+            ManualDeliveryService manualDeliveryService) {
         this.entryRepository = entryRepository;
+        this.settingRepository = settingRepository;
+        this.manualDeliveryService = manualDeliveryService;
     }
 
     @Transactional(readOnly = true)
@@ -45,12 +56,14 @@ public class AnalyticsService {
             loaded.add(entryRepository.findActiveByIdWithExpenses(e.getId()).orElse(e));
         }
 
+        TreasurySettings treasury = loadTreasurySettings();
         Totals totals = new Totals();
         Map<LocalDate, List<DailyEntry>> byDate = new TreeMap<>(Comparator.reverseOrder());
         for (DailyEntry e : loaded) {
-            totals.add(e);
+            totals.add(e, treasury);
             byDate.computeIfAbsent(e.getDate(), d -> new ArrayList<>()).add(e);
         }
+        totals.addManualDelivery(manualDeliveryService.totalCardCreditBetween(from, to, treasury));
 
         List<Map<String, Object>> days = new ArrayList<>();
         for (var dayEntry : byDate.entrySet()) {
@@ -62,12 +75,13 @@ public class AnalyticsService {
 
             DayTotals dayTotals = new DayTotals();
             for (DailyEntry e : dayList) {
-                dayTotals.add(e);
+                dayTotals.add(e, treasury);
             }
+            dayTotals.addManualDelivery(manualDeliveryService.totalCardCreditForDate(date, treasury));
 
             List<Map<String, Object>> reports = new ArrayList<>();
             for (DailyEntry e : dayList) {
-                Map<String, Object> row = new LinkedHashMap<>(EntryMapper.toMap(e));
+                Map<String, Object> row = new LinkedHashMap<>(EntryMapper.toMap(e, treasury));
                 row.put("totalSales", EntryCalculator.toDouble(EntryCalculator.totalSales(e)));
                 row.put("totalReturns", EntryCalculator.toDouble(EntryCalculator.totalReturns(e)));
                 row.put("totalExpenses", EntryCalculator.toDouble(EntryCalculator.totalExpenses(e)));
@@ -111,6 +125,13 @@ public class AnalyticsService {
         return e.getId();
     }
 
+    private TreasurySettings loadTreasurySettings() {
+        return settingRepository.findById(TreasurySettings.SETTINGS_KEY)
+                .map(SystemSetting::getValue)
+                .map(TreasurySettings::fromMap)
+                .orElseGet(TreasurySettings::new);
+    }
+
     private static LocalDate parseDate(String s, LocalDate fallback) {
         if (s == null || s.isBlank()) {
             return fallback;
@@ -133,7 +154,7 @@ public class AnalyticsService {
         int draftCount;
         int lockedCount;
 
-        void add(DailyEntry e) {
+        void add(DailyEntry e, TreasurySettings treasury) {
             totalSales += EntryCalculator.toDouble(EntryCalculator.totalSales(e));
             cashSales += EntryCalculator.toDouble(e.getCashSales());
             cardSales += EntryCalculator.toDouble(e.getCardSales());
@@ -148,12 +169,16 @@ public class AnalyticsService {
             expectedCash += EntryCalculator.toDouble(e.getClosingBalance());
             actualCash += EntryCalculator.toDouble(e.getActualCashCounted());
             difference += EntryCalculator.toDouble(e.getDifference());
-            cardBalance += EntryCalculator.toDouble(EntryCalculator.cardBalance(e));
+            cardBalance += EntryCalculator.toDouble(EntryCalculator.cardNetForTreasury(e, treasury));
             if (e.getStatus() == EntryStatus.DRAFT) {
                 draftCount++;
             } else if (e.getStatus() == EntryStatus.LOCKED) {
                 lockedCount++;
             }
+        }
+
+        void addManualDelivery(BigDecimal manualToCard) {
+            cardBalance += EntryCalculator.toDouble(manualToCard);
         }
 
         Map<String, Object> toMap() {
@@ -181,22 +206,30 @@ public class AnalyticsService {
         double cardSales;
         double expenses;
         double difference;
+        double cardBalance;
 
-        void add(DailyEntry e) {
+        void add(DailyEntry e, TreasurySettings treasury) {
             totalSales += EntryCalculator.toDouble(EntryCalculator.totalSales(e));
             cashSales += EntryCalculator.toDouble(e.getCashSales());
             cardSales += EntryCalculator.toDouble(e.getCardSales());
             expenses += EntryCalculator.toDouble(EntryCalculator.totalExpenses(e));
             difference += EntryCalculator.toDouble(e.getDifference());
+            cardBalance += EntryCalculator.toDouble(EntryCalculator.cardNetForTreasury(e, treasury));
+        }
+
+        void addManualDelivery(BigDecimal manualToCard) {
+            cardBalance += EntryCalculator.toDouble(manualToCard);
         }
 
         Map<String, Object> toMap() {
-            return Map.of(
-                    "totalSales", totalSales,
-                    "cashSales", cashSales,
-                    "cardSales", cardSales,
-                    "expenses", expenses,
-                    "difference", difference);
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("totalSales", totalSales);
+            m.put("cashSales", cashSales);
+            m.put("cardSales", cardSales);
+            m.put("expenses", expenses);
+            m.put("difference", difference);
+            m.put("cardBalance", cardBalance);
+            return m;
         }
     }
 }

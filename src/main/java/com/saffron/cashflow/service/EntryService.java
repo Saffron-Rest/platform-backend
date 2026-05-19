@@ -6,8 +6,11 @@ import com.saffron.cashflow.domain.EntryStatus;
 import com.saffron.cashflow.domain.Role;
 import com.saffron.cashflow.domain.ShiftType;
 import com.saffron.cashflow.dto.EntryRequest;
+import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.repository.DailyEntryRepository;
+import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
+import com.saffron.cashflow.util.TreasurySettings;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.security.AuthUser;
 import com.saffron.cashflow.security.ForbiddenException;
@@ -39,18 +42,24 @@ public class EntryService {
     private final AuditService auditService;
     private final AlertService alertService;
     private final WorkShiftService workShiftService;
+    private final SystemSettingRepository settingRepository;
+    private final ManualDeliveryService manualDeliveryService;
 
     public EntryService(
             DailyEntryRepository entryRepository,
             UserRepository userRepository,
             AuditService auditService,
             AlertService alertService,
-            WorkShiftService workShiftService) {
+            WorkShiftService workShiftService,
+            SystemSettingRepository settingRepository,
+            ManualDeliveryService manualDeliveryService) {
         this.entryRepository = entryRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
         this.alertService = alertService;
         this.workShiftService = workShiftService;
+        this.settingRepository = settingRepository;
+        this.manualDeliveryService = manualDeliveryService;
     }
 
     @Transactional(readOnly = true)
@@ -67,7 +76,7 @@ public class EntryService {
         EntryStatus st = status != null && !status.isBlank() ? EntryStatus.valueOf(status) : null;
         Specification<DailyEntry> spec = EntrySpecification.filter(filterCashier, fromDate, toDate, st);
         return entryRepository.findAll(spec, Sort.by(Sort.Direction.DESC, "date")).stream()
-                .map(e -> enrichWithShift(EntryMapper.toMap(load(e.getId())), e.getCashierId(), e.getDate()))
+                .map(e -> mapEntry(load(e.getId())))
                 .collect(Collectors.toList());
     }
 
@@ -87,7 +96,7 @@ public class EntryService {
         }
         if (entry == null) return null;
         DailyEntry loaded = load(entry.getId());
-        return enrichWithShift(EntryMapper.toMap(loaded), loaded.getCashierId(), loaded.getDate());
+        return mapEntry(loaded);
     }
 
     /**
@@ -145,7 +154,7 @@ public class EntryService {
         if (AuthHelper.isCashier() && !entry.getCashierId().equals(user.id())) {
             throw new ForbiddenException("Forbidden");
         }
-        return enrichWithShift(EntryMapper.toMap(entry), entry.getCashierId(), entry.getDate());
+        return mapEntry(entry);
     }
 
     @Transactional
@@ -180,7 +189,7 @@ public class EntryService {
             DailyEntry saved = load(entry.getId());
             auditService.logChange(user.id(), AuditAction.UPDATE, "DailyEntry", entry.getId(), beforeRestore, AuditSnapshots.entry(saved),
                     Map.of("restored", true));
-            return enrichWithShift(EntryMapper.toMap(saved), saved.getCashierId(), saved.getDate());
+            return mapEntry(saved);
         }
 
         DailyEntry entry = new DailyEntry();
@@ -194,7 +203,7 @@ public class EntryService {
         DailyEntry saved = load(entry.getId());
         auditService.logChange(user.id(), AuditAction.CREATE, "DailyEntry", entry.getId(), Map.of(), AuditSnapshots.entry(saved),
                 Map.of("date", date.toString(), "cashierId", cashierId));
-        return enrichWithShift(EntryMapper.toMap(saved), saved.getCashierId(), saved.getDate());
+        return mapEntry(saved);
     }
 
     @Transactional
@@ -214,7 +223,7 @@ public class EntryService {
         recalculateEntry(id);
         DailyEntry saved = load(id);
         auditService.logChange(user.id(), AuditAction.UPDATE, "DailyEntry", entry.getId(), before, AuditSnapshots.entry(saved), null);
-        return enrichWithShift(EntryMapper.toMap(saved), saved.getCashierId(), saved.getDate());
+        return mapEntry(saved);
     }
 
     @Transactional
@@ -235,7 +244,7 @@ public class EntryService {
         DailyEntry saved = load(entry.getId());
         auditService.logChange(user.id(), AuditAction.SUBMIT, "DailyEntry", entry.getId(), before,
                 Map.of("status", saved.getStatus().name(), "submittedAt", saved.getSubmittedAt().toString()), null);
-        return enrichWithShift(EntryMapper.toMap(saved), saved.getCashierId(), saved.getDate());
+        return mapEntry(saved);
     }
 
     @Transactional
@@ -252,7 +261,7 @@ public class EntryService {
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UNLOCK, "DailyEntry", entry.getId(), before,
                 Map.of("status", EntryStatus.DRAFT.name()), null);
         DailyEntry saved = load(entry.getId());
-        return enrichWithShift(EntryMapper.toMap(saved), saved.getCashierId(), saved.getDate());
+        return mapEntry(saved);
     }
 
     @Transactional
@@ -295,11 +304,30 @@ public class EntryService {
         }
     }
 
-    private Map<String, Object> enrichWithShift(Map<String, Object> map, String cashierId, LocalDate date) {
+    private Map<String, Object> mapEntry(DailyEntry entry) {
+        TreasurySettings treasury = loadTreasurySettings();
+        return enrichWithShift(EntryMapper.toMap(entry, treasury), entry.getCashierId(), entry.getDate(), treasury);
+    }
+
+    private TreasurySettings loadTreasurySettings() {
+        return settingRepository.findById(TreasurySettings.SETTINGS_KEY)
+                .map(SystemSetting::getValue)
+                .map(TreasurySettings::fromMap)
+                .orElseGet(TreasurySettings::new);
+    }
+
+    private Map<String, Object> enrichWithShift(
+            Map<String, Object> map, String cashierId, LocalDate date, TreasurySettings treasury) {
         Map<String, Object> schedule = workShiftService.scheduleFor(cashierId, date);
         map.put("schedule", schedule);
         map.put("shiftType", schedule.get("shiftType"));
         map.put("closingOnly", schedule.get("closingOnly"));
+        if (AuthHelper.isOperationsRole()) {
+            var manualToCard = manualDeliveryService.totalCardCreditForDate(date, treasury);
+            if (manualToCard.signum() > 0) {
+                map.put("manualDeliveryToCard", EntryCalculator.toDouble(manualToCard));
+            }
+        }
         return map;
     }
 

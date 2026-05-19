@@ -12,7 +12,7 @@ public class ReceiptFile {
     private String id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "entry_id", nullable = false)
+    @JoinColumn(name = "entry_id")
     private DailyEntry entry;
 
     @ManyToOne(fetch = FetchType.LAZY)

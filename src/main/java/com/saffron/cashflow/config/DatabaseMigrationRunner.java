@@ -29,7 +29,51 @@ public class DatabaseMigrationRunner {
             migrateSalaryPayments(jdbc);
             migratePayRateHistory(jdbc);
             migrateDeliverySettledToCard(jdbc);
+            migrateManualDeliveryIncome(jdbc);
+            migrateStandaloneExpenses(jdbc);
         };
+    }
+
+    private static void migrateManualDeliveryIncome(JdbcTemplate jdbc) {
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS manual_delivery_income (
+                  id VARCHAR(255) PRIMARY KEY,
+                  effective_date DATE NOT NULL,
+                  platform VARCHAR(16) NOT NULL,
+                  gross_amount NUMERIC(12,2) NOT NULL,
+                  settled_to_card NUMERIC(12,2),
+                  notes TEXT,
+                  created_by VARCHAR(255) NOT NULL,
+                  created_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute(
+                "CREATE INDEX IF NOT EXISTS idx_manual_delivery_income_date "
+                        + "ON manual_delivery_income (effective_date DESC)");
+    }
+
+    private static void migrateStandaloneExpenses(JdbcTemplate jdbc) {
+        jdbc.execute("ALTER TABLE expense_item ADD COLUMN IF NOT EXISTS effective_date DATE");
+        jdbc.update(
+                """
+                UPDATE expense_item ei
+                SET effective_date = de.date
+                FROM daily_entry de
+                WHERE ei.entry_id = de.id
+                  AND ei.effective_date IS NULL
+                """);
+        jdbc.update("UPDATE expense_item SET effective_date = CURRENT_DATE WHERE effective_date IS NULL");
+        try {
+            jdbc.execute("ALTER TABLE expense_item ALTER COLUMN entry_id DROP NOT NULL");
+        } catch (Exception ex) {
+            System.err.println("Warning: expense_item entry_id nullable: " + ex.getMessage());
+        }
+        try {
+            jdbc.execute("ALTER TABLE receipt_file ALTER COLUMN entry_id DROP NOT NULL");
+        } catch (Exception ex) {
+            System.err.println("Warning: receipt_file entry_id nullable: " + ex.getMessage());
+        }
     }
 
     private static void migrateDeliverySettledToCard(JdbcTemplate jdbc) {

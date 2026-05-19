@@ -3,6 +3,7 @@ package com.saffron.cashflow.service;
 import com.saffron.cashflow.domain.*;
 import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.dto.ExpenseItemRequest;
+import com.saffron.cashflow.dto.StandaloneExpenseRequest;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.ExpenseItemRepository;
 import com.saffron.cashflow.security.AuthHelper;
@@ -22,6 +23,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -59,6 +61,92 @@ public class ExpenseService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> listAll(String fromParam, String toParam) {
+        AuthHelper.requireOperations();
+        LocalDate from = LocalDate.parse(fromParam);
+        LocalDate to = LocalDate.parse(toParam);
+        if (from.isAfter(to)) {
+            throw new BadRequestException("'from' must be on or before 'to'");
+        }
+        return expenseRepository.findByEffectiveDateBetweenWithInvoices(from, to).stream()
+                .map(EntryMapper::expenseToMap)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public BigDecimal sumStandaloneBetween(LocalDate from, LocalDate to, PaymentSource source) {
+        return expenseRepository.findStandaloneBetweenWithInvoices(from, to).stream()
+                .filter(i -> i.getPaymentSource() == source)
+                .map(ExpenseItem::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    @Transactional(readOnly = true)
+    public BigDecimal sumStandaloneBetween(LocalDate from, LocalDate to) {
+        return expenseRepository.findStandaloneBetweenWithInvoices(from, to).stream()
+                .map(ExpenseItem::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ExpenseItem> findStandaloneBetween(LocalDate from, LocalDate to) {
+        return expenseRepository.findStandaloneBetweenWithInvoices(from, to);
+    }
+
+    @Transactional
+    public Map<String, Object> createStandalone(StandaloneExpenseRequest req, MultipartFile invoice)
+            throws IOException {
+        AuthHelper.requireOperations();
+        if (req.getAmount() == null || req.getAmount().signum() <= 0) {
+            throw new BadRequestException("Amount must be greater than zero");
+        }
+        ExpenseItem item = new ExpenseItem();
+        item.setEntry(null);
+        item.setEffectiveDate(LocalDate.parse(req.getEffectiveDate()));
+        applyStandaloneRequest(item, req);
+        if (invoice != null && !invoice.isEmpty()) {
+            item.addInvoice(storeFile(null, item, invoice, "expense-invoice"));
+        }
+        item = expenseRepository.save(item);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.CREATE, "ExpenseItem", item.getId(),
+                Map.of(), AuditSnapshots.expense(item), Map.of("standalone", true));
+        return EntryMapper.expenseToMap(item);
+    }
+
+    @Transactional
+    public Map<String, Object> updateStandalone(String expenseId, StandaloneExpenseRequest req, MultipartFile invoice)
+            throws IOException {
+        AuthHelper.requireOperations();
+        ExpenseItem item = loadStandalone(expenseId);
+        Map<String, Object> before = AuditSnapshots.expense(item);
+        if (req.getAmount() == null || req.getAmount().signum() <= 0) {
+            throw new BadRequestException("Amount must be greater than zero");
+        }
+        item.setEffectiveDate(LocalDate.parse(req.getEffectiveDate()));
+        applyStandaloneRequest(item, req);
+        if (invoice != null && !invoice.isEmpty()) {
+            item.addInvoice(storeFile(null, item, invoice, "expense-invoice"));
+        }
+        item = expenseRepository.save(item);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "ExpenseItem", item.getId(),
+                before, AuditSnapshots.expense(item), Map.of("standalone", true));
+        return EntryMapper.expenseToMap(item);
+    }
+
+    @Transactional
+    public void deleteStandalone(String expenseId) {
+        AuthHelper.requireOperations();
+        ExpenseItem item = loadStandalone(expenseId);
+        Map<String, Object> before = AuditSnapshots.expense(item);
+        for (ReceiptFile inv : new ArrayList<>(item.getInvoices())) {
+            deleteFile(inv.getPath());
+        }
+        expenseRepository.delete(item);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE, "ExpenseItem", expenseId, before,
+                Map.of(), Map.of("standalone", true));
+    }
+
     @Transactional
     public Map<String, Object> create(String entryId, ExpenseItemRequest req, MultipartFile invoice) throws IOException {
         DailyEntry entry = verifyEntryAccess(entryId);
@@ -66,6 +154,7 @@ public class ExpenseService {
 
         ExpenseItem item = new ExpenseItem();
         item.setEntry(entry);
+        item.setEffectiveDate(entry.getDate());
         applyRequest(item, req);
         if (invoice != null && !invoice.isEmpty()) {
             item.addInvoice(storeFile(entry, item, invoice, "expense-invoice"));
@@ -181,12 +270,14 @@ public class ExpenseService {
                 } else {
                     ExpenseItem item = new ExpenseItem();
                     item.setEntry(entry);
+                    item.setEffectiveDate(entry.getDate());
                     applyRequest(item, req);
                     expenseRepository.save(item);
                 }
             } else {
                 ExpenseItem item = new ExpenseItem();
                 item.setEntry(entry);
+                item.setEffectiveDate(entry.getDate());
                 applyRequest(item, req);
                 expenseRepository.save(item);
             }
@@ -228,10 +319,35 @@ public class ExpenseService {
         if (amount == null || amount.signum() <= 0) return List.of();
         ExpenseItem item = new ExpenseItem();
         item.setEntry(entry);
+        item.setEffectiveDate(entry.getDate());
         item.setCategory(cat);
         item.setDescription(desc);
         item.setAmount(amount);
         return List.of(item);
+    }
+
+    private void applyStandaloneRequest(ExpenseItem item, StandaloneExpenseRequest req) {
+        try {
+            item.setCategory(ExpenseCategory.valueOf(req.getCategory()));
+        } catch (IllegalArgumentException e) {
+            item.setCategory(ExpenseCategory.OTHER);
+        }
+        item.setDescription(req.getDescription() != null ? req.getDescription().trim() : "");
+        item.setAmount(req.getAmount());
+        try {
+            item.setPaymentSource(PaymentSource.valueOf(req.getPaymentSource()));
+        } catch (IllegalArgumentException e) {
+            item.setPaymentSource(PaymentSource.CASH);
+        }
+    }
+
+    private ExpenseItem loadStandalone(String expenseId) {
+        ExpenseItem item = expenseRepository.findById(expenseId)
+                .orElseThrow(() -> new NotFoundException("Expense not found"));
+        if (!item.isStandalone()) {
+            throw new BadRequestException("This expense belongs to a shift report — edit it on that report");
+        }
+        return item;
     }
 
     private void applyRequest(ExpenseItem item, ExpenseItemRequest req) {

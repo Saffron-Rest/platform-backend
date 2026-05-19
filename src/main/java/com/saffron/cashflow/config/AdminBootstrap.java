@@ -42,6 +42,7 @@ public class AdminBootstrap {
                 TRUNCATE TABLE
                   notification_dispatch,
                   push_token,
+                  manual_delivery_income,
                   pay_rate_change,
                   salary_payment,
                   audit_log,

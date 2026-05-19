@@ -86,6 +86,10 @@ public final class EntryMapper {
     }
 
     public static Map<String, Object> toMap(DailyEntry e) {
+        return toMap(e, null);
+    }
+
+    public static Map<String, Object> toMap(DailyEntry e, TreasurySettings treasury) {
         Map<String, Object> m = new HashMap<>();
         m.put("id", e.getId());
         m.put("date", e.getDate().toString());
@@ -135,7 +139,13 @@ public final class EntryMapper {
         m.put("expenseCashTotal", EntryCalculator.toDouble(EntryCalculator.sumExpenseItems(items, PaymentSource.CASH)));
         m.put("expenseCardTotal", EntryCalculator.toDouble(EntryCalculator.sumExpenseItems(items, PaymentSource.CARD)));
         m.put("payoutsTotal", EntryCalculator.toDouble(EntryCalculator.totalPayouts(e)));
-        m.put("cardBalance", EntryCalculator.toDouble(EntryCalculator.cardBalance(e)));
+        if (treasury != null) {
+            m.put("cardBalance", EntryCalculator.toDouble(EntryCalculator.cardNetForTreasury(e, treasury)));
+            m.put("deliveryToCard", EntryCalculator.toDouble(
+                    PlatformSettlement.totalDeliverySettledToCard(e, treasury)));
+        } else {
+            m.put("cardBalance", EntryCalculator.toDouble(EntryCalculator.cardBalance(e)));
+        }
         return m;
     }
 
@@ -153,6 +163,14 @@ public final class EntryMapper {
         m.put("description", item.getDescription());
         m.put("amount", EntryCalculator.toDouble(item.getAmount()));
         m.put("paymentSource", item.getPaymentSource().name());
+        if (item.getEffectiveDate() != null) {
+            m.put("effectiveDate", item.getEffectiveDate().toString());
+        }
+        m.put("standalone", item.isStandalone());
+        if (item.getEntry() != null) {
+            m.put("entryId", item.getEntry().getId());
+            m.put("entryDate", item.getEntry().getDate().toString());
+        }
         if (!item.getInvoices().isEmpty()) {
             List<Map<String, Object>> files = item.getInvoices().stream().map(EntryMapper::fileMap).toList();
             m.put("invoices", files);
@@ -181,11 +199,14 @@ public final class EntryMapper {
     }
 
     private static Map<String, Object> fileMap(ReceiptFile f) {
-        return Map.of(
-                "id", f.getId(),
-                "entryId", f.getEntryId(),
-                "filename", f.getFilename(),
-                "path", f.getPath(),
-                "createdAt", f.getCreatedAt().toString());
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", f.getId());
+        if (f.getEntryId() != null) {
+            m.put("entryId", f.getEntryId());
+        }
+        m.put("filename", f.getFilename());
+        m.put("path", f.getPath());
+        m.put("createdAt", f.getCreatedAt().toString());
+        return m;
     }
 }

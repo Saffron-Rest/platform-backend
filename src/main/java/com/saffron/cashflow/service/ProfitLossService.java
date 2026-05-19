@@ -1,6 +1,7 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.DailyEntry;
+import com.saffron.cashflow.domain.ManualDeliveryIncome;
 import com.saffron.cashflow.domain.EntryStatus;
 import com.saffron.cashflow.domain.ExpenseCategory;
 import com.saffron.cashflow.domain.ExpenseItem;
@@ -47,18 +48,24 @@ public class ProfitLossService {
     private final WorkShiftRepository workShiftRepository;
     private final SettingsService settingsService;
     private final SalaryPaymentRepository salaryPaymentRepository;
+    private final ManualDeliveryService manualDeliveryService;
+    private final ExpenseService expenseService;
 
     public ProfitLossService(
             DailyEntryRepository entryRepository,
             UserRepository userRepository,
             WorkShiftRepository workShiftRepository,
             SettingsService settingsService,
-            SalaryPaymentRepository salaryPaymentRepository) {
+            SalaryPaymentRepository salaryPaymentRepository,
+            ManualDeliveryService manualDeliveryService,
+            ExpenseService expenseService) {
         this.entryRepository = entryRepository;
         this.userRepository = userRepository;
         this.workShiftRepository = workShiftRepository;
         this.settingsService = settingsService;
         this.salaryPaymentRepository = salaryPaymentRepository;
+        this.manualDeliveryService = manualDeliveryService;
+        this.expenseService = expenseService;
     }
 
     @Transactional(readOnly = true)
@@ -104,6 +111,13 @@ public class ProfitLossService {
             revenue.add(e);
             accumulateExpenses(e, byCategory);
             payouts.add(e);
+        }
+        for (ManualDeliveryIncome manual : manualDeliveryService.findBetween(from, to)) {
+            revenue.addManual(manual);
+        }
+        for (ExpenseItem standalone : expenseService.findStandaloneBetween(from, to)) {
+            ExpenseCategory cat = standalone.getCategory() != null ? standalone.getCategory() : ExpenseCategory.OTHER;
+            byCategory.merge(cat, standalone.getAmount(), BigDecimal::add);
         }
 
         BigDecimal cogs = sumCategories(byCategory, COGS);
@@ -463,6 +477,19 @@ public class ProfitLossService {
                     .add(e.getGlovoSales()).add(e.getOtherPlatformSales());
             gross = gross.add(EntryCalculator.totalSales(e));
             returns = returns.add(EntryCalculator.totalReturns(e));
+        }
+
+        void addManual(ManualDeliveryIncome m) {
+            BigDecimal g = m.getGrossAmount();
+            gross = gross.add(g);
+            platform = platform.add(g);
+            switch (m.getPlatform()) {
+                case WOLT -> wolt = wolt.add(g);
+                case BOLT -> bolt = bolt.add(g);
+                case UBER_EATS -> uber = uber.add(g);
+                case GLOVO -> glovo = glovo.add(g);
+                case OTHER -> otherPlatform = otherPlatform.add(g);
+            }
         }
     }
 

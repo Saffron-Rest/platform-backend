@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import org.hibernate.annotations.BatchSize;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -16,8 +17,12 @@ public class ExpenseItem {
     private String id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "entry_id", nullable = false)
+    @JoinColumn(name = "entry_id")
     private DailyEntry entry;
+
+    /** Business date for reporting (shift date or post-close purchase date). */
+    @Column(name = "effective_date", nullable = false)
+    private LocalDate effectiveDate;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -45,12 +50,18 @@ public class ExpenseItem {
     void onCreate() {
         if (id == null) id = UUID.randomUUID().toString();
         createdAt = Instant.now();
+        if (effectiveDate == null && entry != null) {
+            effectiveDate = entry.getDate();
+        }
     }
 
     public String getId() { return id; }
     public DailyEntry getEntry() { return entry; }
     public void setEntry(DailyEntry entry) { this.entry = entry; }
     public String getEntryId() { return entry != null ? entry.getId() : null; }
+    public LocalDate getEffectiveDate() { return effectiveDate; }
+    public void setEffectiveDate(LocalDate effectiveDate) { this.effectiveDate = effectiveDate; }
+    public boolean isStandalone() { return entry == null; }
     public ExpenseCategory getCategory() { return category; }
     public void setCategory(ExpenseCategory category) { this.category = category; }
     public String getDescription() { return description; }

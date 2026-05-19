@@ -15,7 +15,6 @@ import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.EntryCalculator;
-import com.saffron.cashflow.util.PlatformSettlement;
 import com.saffron.cashflow.util.SalaryPaymentPeriod;
 import com.saffron.cashflow.util.TreasurySettings;
 import com.saffron.cashflow.web.BadRequestException;
@@ -39,18 +38,24 @@ public class TreasuryService {
     private final SalaryPaymentRepository salaryPaymentRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
+    private final ManualDeliveryService manualDeliveryService;
+    private final ExpenseService expenseService;
 
     public TreasuryService(
             SystemSettingRepository settingRepository,
             DailyEntryRepository entryRepository,
             SalaryPaymentRepository salaryPaymentRepository,
             UserRepository userRepository,
-            AuditService auditService) {
+            AuditService auditService,
+            ManualDeliveryService manualDeliveryService,
+            ExpenseService expenseService) {
         this.settingRepository = settingRepository;
         this.entryRepository = entryRepository;
         this.salaryPaymentRepository = salaryPaymentRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
+        this.manualDeliveryService = manualDeliveryService;
+        this.expenseService = expenseService;
     }
 
     /** Default settlement % — any logged-in user (for shift report form). */
@@ -75,11 +80,19 @@ public class TreasuryService {
         List<DailyEntry> entries = entryRepository.findLockedBetweenWithExpenses(from, to, EntryStatus.LOCKED);
 
         BigDecimal cashFromEntries = BigDecimal.ZERO;
-        BigDecimal cardFromEntries = BigDecimal.ZERO;
+        BigDecimal cardFromShiftReports = BigDecimal.ZERO;
         for (DailyEntry e : entries) {
             cashFromEntries = cashFromEntries.add(cashNetFromEntry(e));
-            cardFromEntries = cardFromEntries.add(cardNetFromEntry(e, settings));
+            cardFromShiftReports = cardFromShiftReports.add(EntryCalculator.cardNetForTreasury(e, settings));
         }
+
+        BigDecimal cardFromManualDelivery =
+                manualDeliveryService.totalCardCreditBetween(from, to, settings);
+        BigDecimal cardFromEntries = cardFromShiftReports.add(cardFromManualDelivery);
+        cashFromEntries = cashFromEntries.subtract(
+                expenseService.sumStandaloneBetween(from, to, PaymentSource.CASH));
+        cardFromEntries = cardFromEntries.subtract(
+                expenseService.sumStandaloneBetween(from, to, PaymentSource.CARD));
 
         BigDecimal salaryCashOut = BigDecimal.ZERO;
         BigDecimal salaryCardOut = BigDecimal.ZERO;
@@ -104,6 +117,8 @@ public class TreasuryService {
         result.put("cardBalance", toDouble(cardBalance));
         result.put("cashFromEntries", toDouble(cashFromEntries));
         result.put("cardFromEntries", toDouble(cardFromEntries));
+        result.put("cardFromShiftReports", toDouble(cardFromShiftReports));
+        result.put("cardFromManualDelivery", toDouble(cardFromManualDelivery));
         result.put("salaryPaidFromCash", toDouble(salaryCashOut));
         result.put("salaryPaidFromCard", toDouble(salaryCardOut));
         result.put("currency", "PLN");
@@ -219,19 +234,6 @@ public class TreasuryService {
             out = out.add(EntryCalculator.legacyExpenseFields(e));
         }
         return in.subtract(out);
-    }
-
-    /** Net card/bank pool movement including partial delivery settlement. */
-    private static BigDecimal cardNetFromEntry(DailyEntry e, TreasurySettings settings) {
-        BigDecimal settledSales = e.getCardSales()
-                .multiply(settings.getCardSalesSettlementRate())
-                .add(PlatformSettlement.totalDeliverySettledToCard(e, settings));
-
-        BigDecimal out = e.getCardRefunds().add(e.getPlatformRefunds());
-        if (hasExpenseItems(e)) {
-            out = out.add(EntryCalculator.sumExpenseItems(e.getExpenseItems(), PaymentSource.CARD));
-        }
-        return settledSales.subtract(out).add(e.getBankDeposit());
     }
 
     private static boolean hasExpenseItems(DailyEntry e) {
