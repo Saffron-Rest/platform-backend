@@ -9,6 +9,7 @@ public enum ExpenseCategory {
     UTILITIES,
     CLEANING,
     MAINTENANCE,
+    RENT,
     MARKETING,
     OTHER
 }

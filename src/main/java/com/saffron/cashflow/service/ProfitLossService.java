@@ -448,6 +448,7 @@ public class ProfitLossService {
             case UTILITIES -> L.utilities;
             case CLEANING -> L.cleaning;
             case MAINTENANCE -> L.maintenance;
+            case RENT -> L.rent;
             case MARKETING -> L.marketing;
             default -> L.other;
         };
@@ -527,6 +528,7 @@ public class ProfitLossService {
         final String utilities;
         final String cleaning;
         final String maintenance;
+        final String rent;
         final String marketing;
         final String other;
 
@@ -556,6 +558,7 @@ public class ProfitLossService {
                 String utilities,
                 String cleaning,
                 String maintenance,
+                String rent,
                 String marketing,
                 String other) {
             this.revenueSection = revenueSection;
@@ -583,6 +586,7 @@ public class ProfitLossService {
             this.utilities = utilities;
             this.cleaning = cleaning;
             this.maintenance = maintenance;
+            this.rent = rent;
             this.marketing = marketing;
             this.other = other;
         }
@@ -615,6 +619,7 @@ public class ProfitLossService {
                         "Utilities",
                         "Cleaning",
                         "Maintenance",
+                        "Rent",
                         "Marketing",
                         "Other operating");
                 case EU -> new Labels(
@@ -643,6 +648,7 @@ public class ProfitLossService {
                         "Utilities",
                         "Cleaning",
                         "Maintenance",
+                        "Rent",
                         "Marketing",
                         "Other");
                 case PL -> new Labels(
@@ -671,6 +677,7 @@ public class ProfitLossService {
                         "Media",
                         "Sprzątanie",
                         "Konserwacja",
+                        "Czynsz",
                         "Marketing",
                         "Inne");
                 default -> new Labels(
@@ -699,6 +706,7 @@ public class ProfitLossService {
                         "Utilities",
                         "Cleaning",
                         "Maintenance",
+                        "Rent",
                         "Marketing",
                         "Other");
             };
