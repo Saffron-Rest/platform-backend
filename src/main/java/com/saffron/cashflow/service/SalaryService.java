@@ -2,10 +2,13 @@ package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.PayType;
 import com.saffron.cashflow.domain.Role;
+import com.saffron.cashflow.domain.SalaryPayment;
 import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.domain.WorkShift;
+import com.saffron.cashflow.repository.SalaryPaymentRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.repository.WorkShiftRepository;
+import com.saffron.cashflow.util.SalaryPaymentPeriod;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.SalaryCalculator;
 import com.saffron.cashflow.util.WeeklyOperatingHours;
@@ -32,16 +35,19 @@ public class SalaryService {
     private final WorkShiftRepository workShiftRepository;
     private final SettingsService settingsService;
     private final PayRateService payRateService;
+    private final SalaryPaymentRepository salaryPaymentRepository;
 
     public SalaryService(
             UserRepository userRepository,
             WorkShiftRepository workShiftRepository,
             SettingsService settingsService,
-            PayRateService payRateService) {
+            PayRateService payRateService,
+            SalaryPaymentRepository salaryPaymentRepository) {
         this.userRepository = userRepository;
         this.workShiftRepository = workShiftRepository;
         this.settingsService = settingsService;
         this.payRateService = payRateService;
+        this.salaryPaymentRepository = salaryPaymentRepository;
     }
 
     @Transactional(readOnly = true)
@@ -64,8 +70,14 @@ public class SalaryService {
                 .sorted(Comparator.comparing(User::getName, String.CASE_INSENSITIVE_ORDER))
                 .toList();
 
+        List<SalaryPayment> periodPayments = salaryPaymentRepository.findApplicableToPayrollPeriod(from, to);
+        Map<String, BigDecimal> paidByUser = SalaryPaymentPeriod.sumPaidByUser(periodPayments, from, to);
+        Map<String, List<SalaryPayment>> paymentsByUser =
+                SalaryPaymentPeriod.paymentsByUser(periodPayments, from, to);
+
         List<Map<String, Object>> employees = new ArrayList<>();
         BigDecimal grandTotal = BigDecimal.ZERO;
+        BigDecimal grandPaid = BigDecimal.ZERO;
         BigDecimal grandHours = BigDecimal.ZERO;
 
         for (User cashier : cashiers) {
@@ -155,6 +167,12 @@ public class SalaryService {
             grandTotal = grandTotal.add(totalPay);
             grandHours = grandHours.add(totalHours);
 
+            BigDecimal paidAmount = paidByUser.getOrDefault(cashier.getId(), BigDecimal.ZERO)
+                    .setScale(2, RoundingMode.HALF_UP);
+            BigDecimal remainingPay = totalPay.subtract(paidAmount).max(BigDecimal.ZERO)
+                    .setScale(2, RoundingMode.HALF_UP);
+            grandPaid = grandPaid.add(paidAmount);
+
             boolean multipleRates = payRateService.hasMultipleRates(cashier.getId())
                     || monthlyDaysByRate.size() > 1;
 
@@ -177,9 +195,16 @@ public class SalaryService {
             emp.put("shiftCount", userShifts.size());
             emp.put("totalHours", toDouble(totalHours));
             emp.put("totalPay", toDouble(totalPay));
+            emp.put("paidAmount", toDouble(paidAmount));
+            emp.put("remainingPay", toDouble(remainingPay));
+            emp.put("fullyPaid", remainingPay.compareTo(BigDecimal.ZERO) <= 0 && totalPay.compareTo(BigDecimal.ZERO) > 0);
+            emp.put("payments", paymentMaps(paymentsByUser.getOrDefault(cashier.getId(), List.of())));
             emp.put("shifts", shiftRows);
             employees.add(emp);
         }
+
+        BigDecimal grandRemaining = grandTotal.subtract(grandPaid).max(BigDecimal.ZERO)
+                .setScale(2, RoundingMode.HALF_UP);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("from", from.toString());
@@ -192,8 +217,28 @@ public class SalaryService {
         result.put("employees", employees);
         result.put("grandTotalHours", toDouble(grandHours));
         result.put("grandTotalPay", toDouble(grandTotal));
+        result.put("grandTotalPaid", toDouble(grandPaid));
+        result.put("grandTotalRemaining", toDouble(grandRemaining));
+        result.put("periodPayments", paymentMaps(periodPayments));
         result.put("rules", payrollRules());
         return result;
+    }
+
+    private List<Map<String, Object>> paymentMaps(List<SalaryPayment> payments) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (SalaryPayment p : payments) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("id", p.getId());
+            m.put("userId", p.getUserId());
+            m.put("amount", toDouble(p.getAmount()));
+            m.put("paidDate", p.getPaidDate().toString());
+            m.put("source", p.getPaymentSource().name());
+            if (p.getPeriodFrom() != null) m.put("periodFrom", p.getPeriodFrom().toString());
+            if (p.getPeriodTo() != null) m.put("periodTo", p.getPeriodTo().toString());
+            if (p.getNotes() != null && !p.getNotes().isBlank()) m.put("notes", p.getNotes());
+            rows.add(m);
+        }
+        return rows;
     }
 
     private static String rateKey(PayType payType, BigDecimal payAmount) {

@@ -28,7 +28,16 @@ public class DatabaseMigrationRunner {
             migrateExpenseInvoices(jdbc);
             migrateSalaryPayments(jdbc);
             migratePayRateHistory(jdbc);
+            migrateDeliverySettledToCard(jdbc);
         };
+    }
+
+    private static void migrateDeliverySettledToCard(JdbcTemplate jdbc) {
+        jdbc.execute("ALTER TABLE daily_entry ADD COLUMN IF NOT EXISTS wolt_settled_to_card NUMERIC(12,2)");
+        jdbc.execute("ALTER TABLE daily_entry ADD COLUMN IF NOT EXISTS bolt_settled_to_card NUMERIC(12,2)");
+        jdbc.execute("ALTER TABLE daily_entry ADD COLUMN IF NOT EXISTS uber_eats_settled_to_card NUMERIC(12,2)");
+        jdbc.execute("ALTER TABLE daily_entry ADD COLUMN IF NOT EXISTS glovo_settled_to_card NUMERIC(12,2)");
+        jdbc.execute("ALTER TABLE daily_entry ADD COLUMN IF NOT EXISTS other_settled_to_card NUMERIC(12,2)");
     }
 
     private static void migratePayRateHistory(JdbcTemplate jdbc) {

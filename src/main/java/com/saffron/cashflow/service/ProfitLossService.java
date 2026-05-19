@@ -9,9 +9,12 @@ import com.saffron.cashflow.domain.Role;
 import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.domain.WorkShift;
 import com.saffron.cashflow.report.ProfitLossTemplate;
+import com.saffron.cashflow.domain.SalaryPayment;
 import com.saffron.cashflow.repository.DailyEntryRepository;
+import com.saffron.cashflow.repository.SalaryPaymentRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.repository.WorkShiftRepository;
+import com.saffron.cashflow.util.SalaryPaymentPeriod;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.EntryCalculator;
 import com.saffron.cashflow.util.SalaryCalculator;
@@ -43,16 +46,19 @@ public class ProfitLossService {
     private final UserRepository userRepository;
     private final WorkShiftRepository workShiftRepository;
     private final SettingsService settingsService;
+    private final SalaryPaymentRepository salaryPaymentRepository;
 
     public ProfitLossService(
             DailyEntryRepository entryRepository,
             UserRepository userRepository,
             WorkShiftRepository workShiftRepository,
-            SettingsService settingsService) {
+            SettingsService settingsService,
+            SalaryPaymentRepository salaryPaymentRepository) {
         this.entryRepository = entryRepository;
         this.userRepository = userRepository;
         this.workShiftRepository = workShiftRepository;
         this.settingsService = settingsService;
+        this.salaryPaymentRepository = salaryPaymentRepository;
     }
 
     @Transactional(readOnly = true)
@@ -102,7 +108,9 @@ public class ProfitLossService {
 
         BigDecimal cogs = sumCategories(byCategory, COGS);
         BigDecimal operatingEx = sumCategories(byCategory, allExcept(COGS));
-        BigDecimal labor = includeLabor ? computeLabor(from, to) : BigDecimal.ZERO;
+        BigDecimal laborAccrued = includeLabor ? computeLaborAccrued(from, to) : BigDecimal.ZERO;
+        BigDecimal laborPaid = includeLabor ? computeLaborPaid(from, to) : BigDecimal.ZERO;
+        BigDecimal labor = laborPaid.compareTo(BigDecimal.ZERO) > 0 ? laborPaid : laborAccrued;
 
         double grossRevenue = EntryCalculator.toDouble(revenue.gross);
         double returns = EntryCalculator.toDouble(revenue.returns);
@@ -127,6 +135,9 @@ public class ProfitLossService {
         result.put("generatedAt", Instant.now().toString());
         result.put("currency", "PLN");
         result.put("includeLabor", includeLabor);
+        result.put("laborUsesPaidAmounts", includeLabor && laborPaid.compareTo(BigDecimal.ZERO) > 0);
+        result.put("laborAccrued", EntryCalculator.toDouble(laborAccrued));
+        result.put("laborPaid", EntryCalculator.toDouble(laborPaid));
         result.put("footerNote", footerNote(template));
         result.put("margins", margins);
         result.put("totals", totalsMap(
@@ -332,7 +343,12 @@ public class ProfitLossService {
         }
     }
 
-    private BigDecimal computeLabor(LocalDate from, LocalDate to) {
+    private BigDecimal computeLaborPaid(LocalDate from, LocalDate to) {
+        List<SalaryPayment> paid = salaryPaymentRepository.findByPaidDateBetween(from, to);
+        return SalaryPaymentPeriod.totalPaidInRange(paid, from, to).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal computeLaborAccrued(LocalDate from, LocalDate to) {
         WeeklyOperatingHours hours = settingsService.loadWeeklyHours();
         long calendarDays = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
         List<WorkShift> shifts = workShiftRepository.findWorkingBetween(from, to);

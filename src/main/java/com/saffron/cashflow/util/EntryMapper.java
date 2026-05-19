@@ -33,6 +33,11 @@ public final class EntryMapper {
         entry.setUberEatsSales(BigDecimal.ZERO);
         entry.setGlovoSales(BigDecimal.ZERO);
         entry.setOtherPlatformSales(BigDecimal.ZERO);
+        entry.setWoltSettledToCard(null);
+        entry.setBoltSettledToCard(null);
+        entry.setUberEatsSettledToCard(null);
+        entry.setGlovoSettledToCard(null);
+        entry.setOtherSettledToCard(null);
         entry.setCashRefunds(BigDecimal.ZERO);
         entry.setCardRefunds(BigDecimal.ZERO);
         entry.setPlatformRefunds(BigDecimal.ZERO);
@@ -56,6 +61,11 @@ public final class EntryMapper {
         entry.setUberEatsSales(req.getUberEatsSales());
         entry.setGlovoSales(req.getGlovoSales());
         entry.setOtherPlatformSales(req.getOtherPlatformSales());
+        entry.setWoltSettledToCard(req.getWoltSettledToCard());
+        entry.setBoltSettledToCard(req.getBoltSettledToCard());
+        entry.setUberEatsSettledToCard(req.getUberEatsSettledToCard());
+        entry.setGlovoSettledToCard(req.getGlovoSettledToCard());
+        entry.setOtherSettledToCard(req.getOtherSettledToCard());
         entry.setCashRefunds(req.getCashRefunds());
         entry.setCardRefunds(req.getCardRefunds());
         entry.setPlatformRefunds(req.getPlatformRefunds());
@@ -88,6 +98,11 @@ public final class EntryMapper {
         m.put("uberEatsSales", EntryCalculator.toDouble(e.getUberEatsSales()));
         m.put("glovoSales", EntryCalculator.toDouble(e.getGlovoSales()));
         m.put("otherPlatformSales", EntryCalculator.toDouble(e.getOtherPlatformSales()));
+        putOptionalAmount(m, "woltSettledToCard", e.getWoltSettledToCard());
+        putOptionalAmount(m, "boltSettledToCard", e.getBoltSettledToCard());
+        putOptionalAmount(m, "uberEatsSettledToCard", e.getUberEatsSettledToCard());
+        putOptionalAmount(m, "glovoSettledToCard", e.getGlovoSettledToCard());
+        putOptionalAmount(m, "otherSettledToCard", e.getOtherSettledToCard());
         m.put("cashRefunds", EntryCalculator.toDouble(e.getCashRefunds()));
         m.put("cardRefunds", EntryCalculator.toDouble(e.getCardRefunds()));
         m.put("platformRefunds", EntryCalculator.toDouble(e.getPlatformRefunds()));
@@ -143,6 +158,12 @@ public final class EntryMapper {
             m.put("invoice", files.get(0));
         }
         return m;
+    }
+
+    private static void putOptionalAmount(Map<String, Object> m, String key, BigDecimal value) {
+        if (value != null) {
+            m.put(key, EntryCalculator.toDouble(value));
+        }
     }
 
     private static Map<String, Object> cashierMap(User u) {

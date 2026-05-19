@@ -23,6 +23,11 @@ public class TreasuryController {
         return treasuryService.overview();
     }
 
+    @GetMapping("/settlement-defaults")
+    public Map<String, Object> settlementDefaults() {
+        return treasuryService.settlementDefaults();
+    }
+
     @PutMapping("/settings")
     public Map<String, Object> updateSettings(@Valid @RequestBody TreasurySettingsRequest request) {
         return treasuryService.updateSettings(request);
@@ -31,8 +36,11 @@ public class TreasuryController {
     @GetMapping("/salary-payments")
     public List<Map<String, Object>> salaryPayments(
             @RequestParam(required = false) String from,
-            @RequestParam(required = false) String to) {
-        return treasuryService.listSalaryPayments(from, to);
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String source,
+            @RequestParam(required = false) String matchPeriod) {
+        return treasuryService.listSalaryPayments(from, to, userId, source, matchPeriod);
     }
 
     @PostMapping("/salary-payments")

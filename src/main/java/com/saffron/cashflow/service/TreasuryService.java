@@ -15,6 +15,8 @@ import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.EntryCalculator;
+import com.saffron.cashflow.util.PlatformSettlement;
+import com.saffron.cashflow.util.SalaryPaymentPeriod;
 import com.saffron.cashflow.util.TreasurySettings;
 import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.NotFoundException;
@@ -49,6 +51,19 @@ public class TreasuryService {
         this.salaryPaymentRepository = salaryPaymentRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
+    }
+
+    /** Default settlement % — any logged-in user (for shift report form). */
+    @Transactional(readOnly = true)
+    public Map<String, Object> settlementDefaults() {
+        AuthHelper.currentUser();
+        TreasurySettings settings = loadSettings();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("cardSalesSettlementRate", settings.getCardSalesSettlementRate().doubleValue());
+        Map<String, Double> rates = new LinkedHashMap<>();
+        settings.getPlatformSettlementRates().forEach((k, v) -> rates.put(k, v.doubleValue()));
+        result.put("platformSettlementRates", rates);
+        return result;
     }
 
     @Transactional(readOnly = true)
@@ -118,17 +133,32 @@ public class TreasuryService {
     }
 
     @Transactional(readOnly = true)
-    public List<Map<String, Object>> listSalaryPayments(String fromParam, String toParam) {
+    public List<Map<String, Object>> listSalaryPayments(
+            String fromParam, String toParam, String userId, String source, String matchPeriod) {
         AuthHelper.requireAdmin();
         List<SalaryPayment> payments;
         if (fromParam != null && toParam != null) {
-            payments = salaryPaymentRepository.findByPaidDateBetween(
-                    LocalDate.parse(fromParam), LocalDate.parse(toParam));
+            LocalDate from = LocalDate.parse(fromParam);
+            LocalDate to = LocalDate.parse(toParam);
+            if ("payroll".equalsIgnoreCase(matchPeriod)) {
+                payments = salaryPaymentRepository.findApplicableToPayrollPeriod(from, to);
+            } else {
+                payments = salaryPaymentRepository.findByPaidDateBetween(from, to);
+            }
         } else {
             payments = salaryPaymentRepository.findAllByOrderByPaidDateDescCreatedAtDesc();
         }
         List<Map<String, Object>> rows = new ArrayList<>();
         for (SalaryPayment p : payments) {
+            if (userId != null && !userId.isBlank() && !userId.equals(p.getUserId())) {
+                continue;
+            }
+            if (source != null && !source.isBlank()) {
+                PaymentSource wanted = PaymentSource.valueOf(source.toUpperCase());
+                if (p.getPaymentSource() != wanted) {
+                    continue;
+                }
+            }
             rows.add(paymentToMap(p));
         }
         return rows;
@@ -193,12 +223,9 @@ public class TreasuryService {
 
     /** Net card/bank pool movement including partial delivery settlement. */
     private static BigDecimal cardNetFromEntry(DailyEntry e, TreasurySettings settings) {
-        BigDecimal settledSales = e.getCardSales().multiply(settings.getCardSalesSettlementRate())
-                .add(e.getWoltSales().multiply(settings.platformRate("wolt")))
-                .add(e.getBoltSales().multiply(settings.platformRate("bolt")))
-                .add(e.getUberEatsSales().multiply(settings.platformRate("uberEats")))
-                .add(e.getGlovoSales().multiply(settings.platformRate("glovo")))
-                .add(e.getOtherPlatformSales().multiply(settings.platformRate("other")));
+        BigDecimal settledSales = e.getCardSales()
+                .multiply(settings.getCardSalesSettlementRate())
+                .add(PlatformSettlement.totalDeliverySettledToCard(e, settings));
 
         BigDecimal out = e.getCardRefunds().add(e.getPlatformRefunds());
         if (hasExpenseItems(e)) {

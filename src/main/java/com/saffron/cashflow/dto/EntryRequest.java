@@ -16,6 +16,12 @@ public class EntryRequest {
     @DecimalMin("0") private BigDecimal uberEatsSales = BigDecimal.ZERO;
     @DecimalMin("0") private BigDecimal glovoSales = BigDecimal.ZERO;
     @DecimalMin("0") private BigDecimal otherPlatformSales = BigDecimal.ZERO;
+  /** Null = use treasury %; set to override amount credited to card/bank for this shift. */
+    @DecimalMin("0") private BigDecimal woltSettledToCard;
+    @DecimalMin("0") private BigDecimal boltSettledToCard;
+    @DecimalMin("0") private BigDecimal uberEatsSettledToCard;
+    @DecimalMin("0") private BigDecimal glovoSettledToCard;
+    @DecimalMin("0") private BigDecimal otherSettledToCard;
     @DecimalMin("0") private BigDecimal cashRefunds = BigDecimal.ZERO;
     @DecimalMin("0") private BigDecimal cardRefunds = BigDecimal.ZERO;
     @DecimalMin("0") private BigDecimal platformRefunds = BigDecimal.ZERO;
@@ -51,6 +57,18 @@ public class EntryRequest {
     public void setGlovoSales(BigDecimal glovoSales) { this.glovoSales = glovoSales; }
     public BigDecimal getOtherPlatformSales() { return nz(otherPlatformSales); }
     public void setOtherPlatformSales(BigDecimal otherPlatformSales) { this.otherPlatformSales = otherPlatformSales; }
+    public BigDecimal getWoltSettledToCard() { return woltSettledToCard; }
+    public void setWoltSettledToCard(BigDecimal woltSettledToCard) { this.woltSettledToCard = woltSettledToCard; }
+    public BigDecimal getBoltSettledToCard() { return boltSettledToCard; }
+    public void setBoltSettledToCard(BigDecimal boltSettledToCard) { this.boltSettledToCard = boltSettledToCard; }
+    public BigDecimal getUberEatsSettledToCard() { return uberEatsSettledToCard; }
+    public void setUberEatsSettledToCard(BigDecimal uberEatsSettledToCard) {
+        this.uberEatsSettledToCard = uberEatsSettledToCard;
+    }
+    public BigDecimal getGlovoSettledToCard() { return glovoSettledToCard; }
+    public void setGlovoSettledToCard(BigDecimal glovoSettledToCard) { this.glovoSettledToCard = glovoSettledToCard; }
+    public BigDecimal getOtherSettledToCard() { return otherSettledToCard; }
+    public void setOtherSettledToCard(BigDecimal otherSettledToCard) { this.otherSettledToCard = otherSettledToCard; }
     public BigDecimal getCashRefunds() { return nz(cashRefunds); }
     public void setCashRefunds(BigDecimal cashRefunds) { this.cashRefunds = cashRefunds; }
     public BigDecimal getCardRefunds() { return nz(cardRefunds); }

@@ -37,6 +37,18 @@ public class DailyEntry {
     @Column(nullable = false, precision = 12, scale = 2) private BigDecimal glovoSales = BigDecimal.ZERO;
     @Column(nullable = false, precision = 12, scale = 2) private BigDecimal otherPlatformSales = BigDecimal.ZERO;
 
+    /** When set, overrides treasury % for how much of that platform's sales count toward card/bank. */
+    @Column(name = "wolt_settled_to_card", precision = 12, scale = 2)
+    private BigDecimal woltSettledToCard;
+    @Column(name = "bolt_settled_to_card", precision = 12, scale = 2)
+    private BigDecimal boltSettledToCard;
+    @Column(name = "uber_eats_settled_to_card", precision = 12, scale = 2)
+    private BigDecimal uberEatsSettledToCard;
+    @Column(name = "glovo_settled_to_card", precision = 12, scale = 2)
+    private BigDecimal glovoSettledToCard;
+    @Column(name = "other_settled_to_card", precision = 12, scale = 2)
+    private BigDecimal otherSettledToCard;
+
     @Column(nullable = false, precision = 12, scale = 2) private BigDecimal cashRefunds = BigDecimal.ZERO;
     @Column(nullable = false, precision = 12, scale = 2) private BigDecimal cardRefunds = BigDecimal.ZERO;
     @Column(nullable = false, precision = 12, scale = 2) private BigDecimal platformRefunds = BigDecimal.ZERO;
@@ -109,6 +121,16 @@ public class DailyEntry {
     public void setGlovoSales(BigDecimal glovoSales) { this.glovoSales = glovoSales; }
     public BigDecimal getOtherPlatformSales() { return otherPlatformSales; }
     public void setOtherPlatformSales(BigDecimal otherPlatformSales) { this.otherPlatformSales = otherPlatformSales; }
+    public BigDecimal getWoltSettledToCard() { return woltSettledToCard; }
+    public void setWoltSettledToCard(BigDecimal woltSettledToCard) { this.woltSettledToCard = woltSettledToCard; }
+    public BigDecimal getBoltSettledToCard() { return boltSettledToCard; }
+    public void setBoltSettledToCard(BigDecimal boltSettledToCard) { this.boltSettledToCard = boltSettledToCard; }
+    public BigDecimal getUberEatsSettledToCard() { return uberEatsSettledToCard; }
+    public void setUberEatsSettledToCard(BigDecimal uberEatsSettledToCard) { this.uberEatsSettledToCard = uberEatsSettledToCard; }
+    public BigDecimal getGlovoSettledToCard() { return glovoSettledToCard; }
+    public void setGlovoSettledToCard(BigDecimal glovoSettledToCard) { this.glovoSettledToCard = glovoSettledToCard; }
+    public BigDecimal getOtherSettledToCard() { return otherSettledToCard; }
+    public void setOtherSettledToCard(BigDecimal otherSettledToCard) { this.otherSettledToCard = otherSettledToCard; }
     public BigDecimal getCashRefunds() { return cashRefunds; }
     public void setCashRefunds(BigDecimal cashRefunds) { this.cashRefunds = cashRefunds; }
     public BigDecimal getCardRefunds() { return cardRefunds; }
