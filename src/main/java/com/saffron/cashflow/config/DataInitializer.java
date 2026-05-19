@@ -1,19 +1,21 @@
 package com.saffron.cashflow.config;
 
-import com.saffron.cashflow.domain.*;
-import com.saffron.cashflow.repository.DailyEntryRepository;
+import com.saffron.cashflow.domain.AuditAction;
+import com.saffron.cashflow.domain.PayType;
+import com.saffron.cashflow.domain.Role;
+import com.saffron.cashflow.domain.SystemSetting;
+import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
-import com.saffron.cashflow.util.EntryCalculator;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Configuration
@@ -22,7 +24,6 @@ public class DataInitializer {
     @Bean
     CommandLineRunner seed(
             UserRepository users,
-            DailyEntryRepository entries,
             SystemSettingRepository settings,
             PasswordEncoder encoder,
             JdbcTemplate jdbc) {
@@ -36,6 +37,7 @@ public class DataInitializer {
             migrateUserCredentials(jdbc);
             migrateAuditLogActionConstraint(jdbc);
             migrateExpenseInvoices(jdbc);
+
             if (settings.findById("platforms").isEmpty()) {
                 SystemSetting s = new SystemSetting();
                 s.setKey("platforms");
@@ -49,78 +51,7 @@ public class DataInitializer {
                 settings.save(p);
             }
 
-            LocalDate seedStart = LocalDate.of(2024, 1, 1);
-
-            users.findByUsername("admin").orElseGet(() -> {
-                User u = new User();
-                u.setUsername("admin");
-                u.setEmail("admin@saffron.local");
-                u.setPasswordHash(encoder.encode("admin123"));
-                u.setName("Admin");
-                u.setRole(Role.ADMIN);
-                u.setMustChangePassword(false);
-                u.setStartDate(seedStart);
-                return users.save(u);
-            });
-
-            User cashier = users.findByUsername("cashier").or(() -> users.findByEmail("cashier@saffron.local")).orElseGet(() -> {
-                User u = new User();
-                u.setUsername("cashier");
-                u.setEmail("cashier@saffron.local");
-                u.setPasswordHash(encoder.encode("cashier123"));
-                u.setName("Maria Cashier");
-                u.setRole(Role.CASHIER);
-                u.setPayType(PayType.HOURLY);
-                u.setPayAmount(new BigDecimal("28.00"));
-                u.setStartDate(seedStart);
-                return users.save(u);
-            });
-            if (cashier.getStartDate() == null) {
-                cashier.setStartDate(seedStart);
-                users.save(cashier);
-            }
-            if (cashier.getPayAmount() == null || cashier.getPayType() == null) {
-                if (cashier.getPayType() == null) cashier.setPayType(PayType.HOURLY);
-                if (cashier.getPayAmount() == null) cashier.setPayAmount(new BigDecimal("28.00"));
-                users.save(cashier);
-            }
-
-            LocalDate today = LocalDate.now();
-            if (!entries.existsByCashier_IdAndDate(cashier.getId(), today)) {
-                DailyEntry e = new DailyEntry();
-                e.setDate(today);
-                e.setCashier(cashier);
-                e.setStatus(EntryStatus.DRAFT);
-                e.setOpeningBalance(new BigDecimal("500"));
-                e.setCashSales(new BigDecimal("1200"));
-                e.setCardSales(new BigDecimal("800"));
-                e.setWoltSales(new BigDecimal("350"));
-                e.setBoltSales(new BigDecimal("200"));
-                e.setActualCashCounted(new BigDecimal("1850"));
-                BigDecimal closing = EntryCalculator.round(
-                        e.getOpeningBalance().add(EntryCalculator.totalSales(e))
-                                .subtract(EntryCalculator.totalReturns(e))
-                                .subtract(EntryCalculator.totalExpenses(e)));
-                e.setClosingBalance(closing);
-                e.setDifference(e.getActualCashCounted().subtract(closing));
-                entries.save(e);
-            }
-
-            users.findByUsername("manager").or(() -> users.findByEmail("manager@saffron.local")).orElseGet(() -> {
-                User u = new User();
-                u.setUsername("manager");
-                u.setEmail("manager@saffron.local");
-                u.setPasswordHash(encoder.encode("manager123"));
-                u.setName("Alex Manager");
-                u.setRole(Role.MANAGER);
-                u.setStartDate(seedStart);
-                return users.save(u);
-            });
-
-            System.out.println("Seed complete:");
-            System.out.println("  Admin:   admin / admin123");
-            System.out.println("  Manager: manager / manager123");
-            System.out.println("  Cashier: cashier / cashier123");
+            seedAdminIfMissing(users, encoder);
         };
     }
 
@@ -180,10 +111,61 @@ public class DataInitializer {
                     WHERE username IS NULL OR username = ''
                     """);
             jdbc.update("UPDATE app_user SET must_change_password = true WHERE must_change_password IS NULL");
+            deduplicateUsernames(jdbc);
             jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_user_username ON app_user (username)");
         } catch (Exception ex) {
             System.err.println("Warning: user credentials migration: " + ex.getMessage());
         }
+    }
+
+    /** Keep one row per username (prefer ADMIN, then oldest); suffix others so unique index can apply. */
+    private static void deduplicateUsernames(JdbcTemplate jdbc) {
+        int renamed = jdbc.update(
+                """
+                WITH ranked AS (
+                  SELECT id,
+                         ROW_NUMBER() OVER (
+                           PARTITION BY username
+                           ORDER BY CASE role WHEN 'ADMIN' THEN 0 WHEN 'MANAGER' THEN 1 ELSE 2 END,
+                                    created_at NULLS LAST,
+                                    id
+                         ) AS rn
+                  FROM app_user
+                  WHERE username IS NOT NULL AND username <> ''
+                )
+                UPDATE app_user u
+                SET username = LEFT(u.username, 24) || '_' || SUBSTRING(u.id, 1, 6)
+                FROM ranked r
+                WHERE u.id = r.id AND r.rn > 1
+                """);
+        if (renamed > 0) {
+            System.out.println("Database: renamed " + renamed + " duplicate username(s)");
+        }
+    }
+
+    /** Creates the default admin only when no user with username {@code admin} exists. */
+    private static void seedAdminIfMissing(UserRepository users, PasswordEncoder encoder) {
+        if (firstUserByUsername(users, "admin").isPresent()) {
+            return;
+        }
+        String password = System.getenv().getOrDefault("APP_SEED_ADMIN_PASSWORD", "admin123");
+        User u = new User();
+        u.setUsername("admin");
+        u.setEmail("admin@saffron.local");
+        u.setPasswordHash(encoder.encode(password));
+        u.setName("Admin");
+        u.setRole(Role.ADMIN);
+        u.setPayType(PayType.HOURLY);
+        u.setMustChangePassword(true);
+        u.setStartDate(LocalDate.of(2024, 1, 1));
+        users.save(u);
+        System.out.println("Seed: created admin user (username: admin, must change password on first login)");
+    }
+
+    private static Optional<User> firstUserByUsername(UserRepository users, String username) {
+        return users.findAll().stream()
+                .filter(u -> username.equalsIgnoreCase(u.getUsername()))
+                .findFirst();
     }
 
     /** PostgreSQL check constraint from initial schema only allowed ADMIN/CASHIER. */
