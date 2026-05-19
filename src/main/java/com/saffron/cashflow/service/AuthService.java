@@ -2,13 +2,18 @@ package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.User;
+import com.saffron.cashflow.dto.ChangePasswordRequest;
 import com.saffron.cashflow.dto.LoginRequest;
 import com.saffron.cashflow.repository.UserRepository;
+import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.security.AuthUser;
 import com.saffron.cashflow.security.JwtService;
+import com.saffron.cashflow.util.UserCredentials;
+import com.saffron.cashflow.web.BadRequestException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -27,23 +32,68 @@ public class AuthService {
         this.auditService = auditService;
     }
 
+    @Transactional(readOnly = true)
     public Map<String, Object> login(LoginRequest req) {
-        String email = req.email() != null ? req.email().trim().toLowerCase() : "";
-        Optional<User> found = userRepository.findByEmail(email).filter(User::isActive);
+        String username = UserCredentials.normalizeUsername(req.username());
+        Optional<User> found = userRepository.findByUsername(username).filter(User::isActive);
         if (found.isEmpty()) {
-            auditService.logFailedLogin(email, "unknown account");
+            auditService.logFailedLogin(username, "unknown account");
             throw new org.springframework.security.authentication.BadCredentialsException("Invalid credentials");
         }
         User user = found.get();
         if (!passwordEncoder.matches(req.password(), user.getPasswordHash())) {
-            auditService.logFailedLogin(email, "invalid password");
+            auditService.logFailedLogin(username, "invalid password");
             throw new org.springframework.security.authentication.BadCredentialsException("Invalid credentials");
         }
-        AuthUser authUser = new AuthUser(user.getId(), user.getEmail(), user.getRole(), user.getName());
+        AuthUser authUser = toAuthUser(user);
         auditService.log(user.getId(), AuditAction.LOGIN, "User", user.getId(),
-                Map.of("email", user.getEmail()), "Signed in");
+                Map.of("username", user.getUsername()), "Signed in");
+        return authResponse(user, authUser);
+    }
+
+    @Transactional
+    public Map<String, Object> changePassword(ChangePasswordRequest req) {
+        User user = userRepository.findById(AuthHelper.currentUser().id())
+                .orElseThrow(() -> new org.springframework.security.authentication.BadCredentialsException("Unauthorized"));
+        if (!passwordEncoder.matches(req.currentPassword(), user.getPasswordHash())) {
+            throw new org.springframework.security.authentication.BadCredentialsException("Current password is incorrect");
+        }
+        if (passwordEncoder.matches(req.newPassword(), user.getPasswordHash())) {
+            throw new BadRequestException("New password must be different from the current password");
+        }
+        user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
+        user.setMustChangePassword(false);
+        user = userRepository.save(user);
+        AuthUser authUser = toAuthUser(user);
+        auditService.log(user.getId(), AuditAction.UPDATE, "User", user.getId(),
+                Map.of("passwordChanged", true, "mustChangePassword", false), "Password updated");
+        return authResponse(user, authUser);
+    }
+
+    public static AuthUser toAuthUser(User user) {
+        return new AuthUser(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getRole(),
+                user.getName(),
+                user.isMustChangePassword());
+    }
+
+    public static Map<String, Object> userMap(User user) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", user.getId());
+        m.put("username", user.getUsername());
+        if (user.getEmail() != null) m.put("email", user.getEmail());
+        m.put("role", user.getRole().name());
+        m.put("name", user.getName());
+        m.put("mustChangePassword", user.isMustChangePassword());
+        return m;
+    }
+
+    private Map<String, Object> authResponse(User user, AuthUser authUser) {
         return Map.of(
                 "token", jwtService.generateToken(authUser),
-                "user", Map.of("id", user.getId(), "email", user.getEmail(), "role", user.getRole().name(), "name", user.getName()));
+                "user", userMap(user));
     }
 }

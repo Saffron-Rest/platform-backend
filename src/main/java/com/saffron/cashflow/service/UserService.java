@@ -11,6 +11,7 @@ import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.ConflictException;
 import com.saffron.cashflow.util.AuditSnapshots;
+import com.saffron.cashflow.util.UserCredentials;
 import com.saffron.cashflow.web.NotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -46,7 +47,12 @@ public class UserService {
     @Transactional
     public Map<String, Object> create(CreateUserRequest req) {
         AuthHelper.requireAdmin();
-        if (userRepository.findByEmail(req.email()).isPresent()) {
+        String username = UserCredentials.normalizeUsername(req.username());
+        if (userRepository.findByUsername(username).isPresent()) {
+            throw new ConflictException("Username already exists");
+        }
+        String email = UserCredentials.normalizeEmail(req.email());
+        if (email != null && userRepository.findByEmail(email).isPresent()) {
             throw new ConflictException("Email already exists");
         }
         Role role = req.role() != null ? req.role() : Role.CASHIER;
@@ -54,16 +60,18 @@ public class UserService {
             throw new BadRequestException("Cannot create admin users via API");
         }
         User user = new User();
-        user.setEmail(req.email());
+        user.setUsername(username);
+        user.setEmail(email);
         user.setName(req.name());
         user.setPasswordHash(passwordEncoder.encode(req.password()));
+        user.setMustChangePassword(true);
         user.setRole(role);
         if (req.payType() != null) user.setPayType(req.payType());
         if (req.payAmount() != null) user.setPayAmount(req.payAmount());
         user.setStartDate(req.startDate());
         user = userRepository.save(user);
         auditService.log(AuthHelper.currentUser().id(), AuditAction.CREATE, "User", user.getId(),
-                Map.of("email", user.getEmail()));
+                Map.of("username", user.getUsername()));
         return toMap(user);
     }
 
@@ -73,12 +81,20 @@ public class UserService {
         User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
         Map<String, Object> before = AuditSnapshots.user(user);
         if (req.name() != null) user.setName(req.name());
-        if (req.email() != null && !req.email().isBlank()) {
-            if (!req.email().equalsIgnoreCase(user.getEmail())
-                    && userRepository.findByEmail(req.email()).isPresent()) {
+        if (req.username() != null && !req.username().isBlank()) {
+            String username = UserCredentials.normalizeUsername(req.username());
+            if (!username.equals(user.getUsername()) && userRepository.findByUsername(username).isPresent()) {
+                throw new ConflictException("Username already exists");
+            }
+            user.setUsername(username);
+        }
+        if (req.email() != null) {
+            String email = UserCredentials.normalizeEmail(req.email());
+            if (email != null && !email.equalsIgnoreCase(user.getEmail() != null ? user.getEmail() : "")
+                    && userRepository.findByEmail(email).isPresent()) {
                 throw new ConflictException("Email already exists");
             }
-            user.setEmail(req.email().trim().toLowerCase());
+            user.setEmail(email);
         }
         if (req.active() != null) user.setActive(req.active());
         if (req.role() != null) {
@@ -92,6 +108,7 @@ public class UserService {
         }
         if (req.password() != null && !req.password().isBlank()) {
             user.setPasswordHash(passwordEncoder.encode(req.password()));
+            user.setMustChangePassword(true);
         }
         if (req.payType() != null) user.setPayType(req.payType());
         BigDecimal amount = req.payAmount() != null ? req.payAmount() : req.hourlyRate();
@@ -130,8 +147,10 @@ public class UserService {
     private Map<String, Object> toMap(User u) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", u.getId());
-        m.put("email", u.getEmail());
+        m.put("username", u.getUsername());
+        if (u.getEmail() != null) m.put("email", u.getEmail());
         m.put("name", u.getName());
+        m.put("mustChangePassword", u.isMustChangePassword());
         m.put("role", u.getRole().name());
         m.put("active", u.isActive());
         m.put("payType", u.getPayType() != null ? u.getPayType().name() : PayType.HOURLY.name());

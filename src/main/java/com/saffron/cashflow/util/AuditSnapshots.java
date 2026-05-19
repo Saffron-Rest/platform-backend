@@ -53,7 +53,8 @@ public final class AuditSnapshots {
 
     public static Map<String, Object> user(User u) {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("email", u.getEmail());
+        m.put("username", u.getUsername());
+        if (u.getEmail() != null) m.put("email", u.getEmail());
         m.put("name", u.getName());
         m.put("role", u.getRole() != null ? u.getRole().name() : null);
         m.put("active", u.isActive());

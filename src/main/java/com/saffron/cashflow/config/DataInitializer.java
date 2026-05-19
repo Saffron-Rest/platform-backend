@@ -33,6 +33,7 @@ public class DataInitializer {
                 // pay_type column added on first Hibernate schema update
             }
             migrateRoleConstraint(jdbc);
+            migrateUserCredentials(jdbc);
             migrateAuditLogActionConstraint(jdbc);
             migrateExpenseInvoices(jdbc);
             if (settings.findById("platforms").isEmpty()) {
@@ -50,18 +51,21 @@ public class DataInitializer {
 
             LocalDate seedStart = LocalDate.of(2024, 1, 1);
 
-            users.findByEmail("admin@saffron.local").orElseGet(() -> {
+            users.findByUsername("admin").orElseGet(() -> {
                 User u = new User();
+                u.setUsername("admin");
                 u.setEmail("admin@saffron.local");
                 u.setPasswordHash(encoder.encode("admin123"));
                 u.setName("Admin");
                 u.setRole(Role.ADMIN);
+                u.setMustChangePassword(false);
                 u.setStartDate(seedStart);
                 return users.save(u);
             });
 
-            User cashier = users.findByEmail("cashier@saffron.local").orElseGet(() -> {
+            User cashier = users.findByUsername("cashier").or(() -> users.findByEmail("cashier@saffron.local")).orElseGet(() -> {
                 User u = new User();
+                u.setUsername("cashier");
                 u.setEmail("cashier@saffron.local");
                 u.setPasswordHash(encoder.encode("cashier123"));
                 u.setName("Maria Cashier");
@@ -102,8 +106,9 @@ public class DataInitializer {
                 entries.save(e);
             }
 
-            users.findByEmail("manager@saffron.local").orElseGet(() -> {
+            users.findByUsername("manager").or(() -> users.findByEmail("manager@saffron.local")).orElseGet(() -> {
                 User u = new User();
+                u.setUsername("manager");
                 u.setEmail("manager@saffron.local");
                 u.setPasswordHash(encoder.encode("manager123"));
                 u.setName("Alex Manager");
@@ -113,9 +118,9 @@ public class DataInitializer {
             });
 
             System.out.println("Seed complete:");
-            System.out.println("  Admin:   admin@saffron.local / admin123");
-            System.out.println("  Manager: manager@saffron.local / manager123");
-            System.out.println("  Cashier: cashier@saffron.local / cashier123");
+            System.out.println("  Admin:   admin / admin123");
+            System.out.println("  Manager: manager / manager123");
+            System.out.println("  Cashier: cashier / cashier123");
         };
     }
 
@@ -154,6 +159,30 @@ public class DataInitializer {
             System.out.println("Database: audit_log_action_check updated (" + AuditAction.values().length + " actions)");
         } catch (Exception ex) {
             throw new IllegalStateException("Failed to migrate audit_log action constraint: " + ex.getMessage(), ex);
+        }
+    }
+
+    private static void migrateUserCredentials(JdbcTemplate jdbc) {
+        try {
+            jdbc.execute("ALTER TABLE app_user ADD COLUMN IF NOT EXISTS username VARCHAR(32)");
+            jdbc.execute("ALTER TABLE app_user ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT true");
+            jdbc.update(
+                    """
+                    UPDATE app_user
+                    SET username = LOWER(SPLIT_PART(email, '@', 1))
+                    WHERE (username IS NULL OR username = '')
+                      AND email IS NOT NULL AND email <> ''
+                    """);
+            jdbc.update(
+                    """
+                    UPDATE app_user
+                    SET username = 'user_' || SUBSTRING(id, 1, 8)
+                    WHERE username IS NULL OR username = ''
+                    """);
+            jdbc.update("UPDATE app_user SET must_change_password = true WHERE must_change_password IS NULL");
+            jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_user_username ON app_user (username)");
+        } catch (Exception ex) {
+            System.err.println("Warning: user credentials migration: " + ex.getMessage());
         }
     }
 

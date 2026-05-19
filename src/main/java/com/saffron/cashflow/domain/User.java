@@ -13,7 +13,10 @@ public class User {
     @Id
     private String id;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false, unique = true, length = 32)
+    private String username;
+
+    @Column(unique = true)
     private String email;
 
     @Column(nullable = false)
@@ -28,6 +31,9 @@ public class User {
 
     @Column(nullable = false)
     private boolean active = true;
+
+    @Column(nullable = false)
+    private boolean mustChangePassword = true;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "pay_type")
@@ -61,8 +67,12 @@ public class User {
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }
+    public boolean isMustChangePassword() { return mustChangePassword; }
+    public void setMustChangePassword(boolean mustChangePassword) { this.mustChangePassword = mustChangePassword; }
     public String getPasswordHash() { return passwordHash; }
     public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public String getName() { return name; }

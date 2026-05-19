@@ -23,15 +23,18 @@ public class JwtService {
     }
 
     public String generateToken(AuthUser user) {
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(user.id())
-                .claim("email", user.email())
+                .claim("username", user.username())
                 .claim("role", user.role().name())
                 .claim("name", user.name())
+                .claim("mustChangePassword", user.mustChangePassword())
                 .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + expirationMs))
-                .signWith(key)
-                .compact();
+                .expiration(new Date(System.currentTimeMillis() + expirationMs));
+        if (user.email() != null) {
+            builder.claim("email", user.email());
+        }
+        return builder.signWith(key).compact();
     }
 
     public AuthUser parseToken(String token) {
@@ -40,10 +43,13 @@ public class JwtService {
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+        Boolean mustChange = claims.get("mustChangePassword", Boolean.class);
         return new AuthUser(
                 claims.getSubject(),
+                claims.get("username", String.class),
                 claims.get("email", String.class),
                 com.saffron.cashflow.domain.Role.valueOf(claims.get("role", String.class)),
-                claims.get("name", String.class));
+                claims.get("name", String.class),
+                Boolean.TRUE.equals(mustChange));
     }
 }
