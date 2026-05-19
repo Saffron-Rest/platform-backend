@@ -84,15 +84,8 @@ public final class EntryCalculator {
                 .subtract(totalPayouts(e)));
     }
 
-    /**
-     * Displayed/stored expected cash: actual counted − cash expenses when a count exists,
-     * otherwise the book expected drawer.
-     */
+    /** Expected cash in drawer (stored as closingBalance). */
     public static BigDecimal closingBalance(DailyEntry e) {
-        BigDecimal actual = e.getActualCashCounted();
-        if (actual != null && actual.compareTo(BigDecimal.ZERO) > 0) {
-            return round(actual.subtract(expenseTotalForCashClosing(e)));
-        }
         return bookExpectedCash(e);
     }
 
@@ -130,15 +123,11 @@ public final class EntryCalculator {
         return round(e.getActualCashCounted().subtract(bookExpectedCash(e)));
     }
 
-    /** Closing-only shift: expected = actual − cash expenses when counted; difference vs opening. */
+    /** Closing-only shift: same expected formula; difference = actual − expected. */
     public static void recalculateClosingShift(DailyEntry e) {
-        BigDecimal actual = e.getActualCashCounted();
-        if (actual != null && actual.compareTo(BigDecimal.ZERO) > 0) {
-            e.setClosingBalance(round(actual.subtract(expenseTotalForCashClosing(e))));
-        } else {
-            e.setClosingBalance(round(e.getOpeningBalance()));
-        }
-        e.setDifference(round(actual.subtract(e.getOpeningBalance())));
+        BigDecimal expected = bookExpectedCash(e);
+        e.setClosingBalance(expected);
+        e.setDifference(round(e.getActualCashCounted().subtract(expected)));
     }
 
     public static BigDecimal difference(EntryRequest r, BigDecimal closing) {
