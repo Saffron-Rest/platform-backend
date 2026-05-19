@@ -169,11 +169,17 @@ public class AuditService {
         m.put("createdAt", log.getCreatedAt().toString());
         if (log.getUser() != null) {
             User u = log.getUser();
-            m.put("user", Map.of(
-                    "id", u.getId(),
-                    "name", u.getName(),
-                    "email", u.getEmail(),
-                    "role", u.getRole().name()));
+            Map<String, Object> userMap = new LinkedHashMap<>();
+            userMap.put("id", u.getId());
+            userMap.put("name", u.getName());
+            if (u.getEmail() != null && !u.getEmail().isBlank()) {
+                userMap.put("email", u.getEmail());
+            }
+            if (u.getUsername() != null && !u.getUsername().isBlank()) {
+                userMap.put("username", u.getUsername());
+            }
+            userMap.put("role", u.getRole().name());
+            m.put("user", userMap);
         }
         return m;
     }
