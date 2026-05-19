@@ -1,0 +1,15 @@
+# Local dev: Postgres only. Production API runs via GitHub Actions on VPS.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: saffron
+      POSTGRES_PASSWORD: saffron
+      POSTGRES_DB: cashflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

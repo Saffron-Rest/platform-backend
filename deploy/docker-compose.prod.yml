@@ -1,0 +1,29 @@
+# Production backend — uses existing Postgres on network saffron_net (from main stack).
+name: saffron-backend
+
+services:
+  api:
+    image: ${BACKEND_IMAGE:?set BACKEND_IMAGE}
+    container_name: saffron-backend
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://saffron-postgres:5432/${POSTGRES_DB:-cashflow}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-saffron}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      APP_JWT_SECRET: ${JWT_SECRET}
+      APP_UPLOAD_DIR: /data/uploads
+    volumes:
+      - saffron_uploads:/data/uploads
+    networks:
+      - saffron_net
+
+volumes:
+  saffron_uploads:
+    name: saffron_saffron_uploads
+    external: true
+
+networks:
+  saffron_net:
+    name: saffron_net
+    external: true

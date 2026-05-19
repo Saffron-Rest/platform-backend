@@ -1,0 +1,31 @@
+server:
+  port: 3001
+
+spring:
+  application:
+    name: saffron-cashflow-api
+  datasource:
+    url: jdbc:postgresql://localhost:5432/cashflow
+    username: saffron
+    password: saffron
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  servlet:
+    multipart:
+      max-file-size: 5MB
+
+app:
+  timezone: Europe/Warsaw
+  jwt:
+    secret: saffron-dev-jwt-secret-change-in-production-min-32-chars
+    expiration-ms: 604800000
+  upload-dir: ./uploads
+  notifications:
+    tomorrow-reminder-hour: 18
+    missing-report-hour: 12

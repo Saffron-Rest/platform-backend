@@ -1,0 +1,13 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/cashflow}
+    username: ${SPRING_DATASOURCE_USERNAME:saffron}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: update
+
+app:
+  jwt:
+    secret: ${APP_JWT_SECRET}
+  upload-dir: ${APP_UPLOAD_DIR:/data/uploads}

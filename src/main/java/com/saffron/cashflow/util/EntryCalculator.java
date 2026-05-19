@@ -1,0 +1,130 @@
+package com.saffron.cashflow.util;
+
+import com.saffron.cashflow.domain.DailyEntry;
+import com.saffron.cashflow.domain.ExpenseItem;
+import com.saffron.cashflow.domain.PaymentSource;
+import com.saffron.cashflow.dto.EntryRequest;
+import org.hibernate.Hibernate;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.Collection;
+
+public final class EntryCalculator {
+
+    private EntryCalculator() {}
+
+    public static BigDecimal totalSales(EntryRequest r) {
+        return r.getCashSales().add(r.getCardSales()).add(r.getWoltSales()).add(r.getBoltSales())
+                .add(r.getUberEatsSales()).add(r.getGlovoSales()).add(r.getOtherPlatformSales());
+    }
+
+    public static BigDecimal totalSales(DailyEntry e) {
+        return e.getCashSales().add(e.getCardSales()).add(e.getWoltSales()).add(e.getBoltSales())
+                .add(e.getUberEatsSales()).add(e.getGlovoSales()).add(e.getOtherPlatformSales());
+    }
+
+    public static BigDecimal totalReturns(EntryRequest r) {
+        return r.getCashRefunds().add(r.getCardRefunds()).add(r.getPlatformRefunds());
+    }
+
+    public static BigDecimal totalReturns(DailyEntry e) {
+        return e.getCashRefunds().add(e.getCardRefunds()).add(e.getPlatformRefunds());
+    }
+
+    public static BigDecimal totalPayouts(EntryRequest r) {
+        return r.getBankDeposit().add(r.getCashWithdrawal()).add(r.getOwnerWithdrawal());
+    }
+
+    public static BigDecimal totalPayouts(DailyEntry e) {
+        return e.getBankDeposit().add(e.getCashWithdrawal()).add(e.getOwnerWithdrawal());
+    }
+
+    public static BigDecimal sumExpenseItems(Collection<ExpenseItem> items) {
+        return items.stream()
+                .map(ExpenseItem::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    public static BigDecimal sumExpenseItems(Collection<ExpenseItem> items, PaymentSource source) {
+        return items.stream()
+                .filter(i -> i.getPaymentSource() == source)
+                .map(ExpenseItem::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    public static BigDecimal legacyExpenseFields(DailyEntry e) {
+        return e.getSupplierPayments().add(e.getPettyCash()).add(e.getSupplies())
+                .add(e.getStaffMeals()).add(e.getDeliveryCosts()).add(e.getOtherExpenses());
+    }
+
+    public static BigDecimal totalExpenses(EntryRequest r) {
+        return totalPayouts(r);
+    }
+
+    public static BigDecimal totalExpenses(DailyEntry e) {
+        BigDecimal lines = hasExpenseItems(e)
+                ? sumExpenseItems(e.getExpenseItems())
+                : legacyExpenseFields(e);
+        return totalPayouts(e).add(lines);
+    }
+
+    private static boolean hasExpenseItems(DailyEntry e) {
+        return Hibernate.isInitialized(e.getExpenseItems())
+                && e.getExpenseItems() != null
+                && !e.getExpenseItems().isEmpty();
+    }
+
+  /** Expected cash in drawer (platform sales excluded — they settle separately). */
+    public static BigDecimal closingBalance(EntryRequest r) {
+        return round(r.getOpeningBalance()
+                .add(r.getCashSales())
+                .subtract(r.getCashRefunds())
+                .subtract(totalPayouts(r)));
+    }
+
+    public static BigDecimal closingBalance(DailyEntry e) {
+        BigDecimal cashExpenses = expenseTotalForCashClosing(e);
+        return round(e.getOpeningBalance()
+                .add(e.getCashSales())
+                .subtract(e.getCashRefunds())
+                .subtract(cashExpenses)
+                .subtract(totalPayouts(e)));
+    }
+
+    public static BigDecimal cardBalance(DailyEntry e) {
+        BigDecimal cardExpenses = hasExpenseItems(e)
+                ? sumExpenseItems(e.getExpenseItems(), PaymentSource.CARD)
+                : BigDecimal.ZERO;
+        return round(e.getCardSales().subtract(e.getCardRefunds()).subtract(cardExpenses));
+    }
+
+    private static BigDecimal expenseTotalForCashClosing(DailyEntry e) {
+        if (hasExpenseItems(e)) {
+            return sumExpenseItems(e.getExpenseItems(), PaymentSource.CASH);
+        }
+        return legacyExpenseFields(e);
+    }
+
+    public static BigDecimal difference(DailyEntry e) {
+        return round(e.getActualCashCounted().subtract(closingBalance(e)));
+    }
+
+    /** Closing-only shift: expected drawer = opening; difference = actual − opening. */
+    public static void recalculateClosingShift(DailyEntry e) {
+        BigDecimal expected = round(e.getOpeningBalance());
+        e.setClosingBalance(expected);
+        e.setDifference(round(e.getActualCashCounted().subtract(expected)));
+    }
+
+    public static BigDecimal difference(EntryRequest r, BigDecimal closing) {
+        return round(r.getActualCashCounted().subtract(closing));
+    }
+
+    public static BigDecimal round(BigDecimal v) {
+        return v.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    public static double toDouble(BigDecimal v) {
+        return v == null ? 0.0 : v.doubleValue();
+    }
+}
