@@ -26,7 +26,75 @@ public class DatabaseMigrationRunner {
             migrateUserCredentials(jdbc);
             migrateAuditLogActionConstraint(jdbc);
             migrateExpenseInvoices(jdbc);
+            migrateSalaryPayments(jdbc);
+            migratePayRateHistory(jdbc);
         };
+    }
+
+    private static void migratePayRateHistory(JdbcTemplate jdbc) {
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pay_rate_change (
+                  id VARCHAR(255) PRIMARY KEY,
+                  user_id VARCHAR(255) NOT NULL REFERENCES app_user(id),
+                  pay_type VARCHAR(16) NOT NULL,
+                  pay_amount NUMERIC(10,2) NOT NULL,
+                  effective_from DATE NOT NULL,
+                  notes TEXT,
+                  created_by VARCHAR(255) NOT NULL,
+                  created_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pay_rate_change_user_effective "
+                        + "ON pay_rate_change (user_id, effective_from DESC)");
+        int seeded = jdbc.update(
+                """
+                INSERT INTO pay_rate_change (
+                  id, user_id, pay_type, pay_amount, effective_from, notes, created_by, created_at
+                )
+                SELECT
+                  u.id || '-pay-migrated',
+                  u.id,
+                  COALESCE(u.pay_type, 'HOURLY'),
+                  u.hourly_rate,
+                  COALESCE(u.start_date, CURRENT_DATE),
+                  'Migrated from current pay',
+                  COALESCE(
+                    (SELECT id FROM app_user WHERE role = 'ADMIN' ORDER BY created_at LIMIT 1),
+                    u.id
+                  ),
+                  NOW()
+                FROM app_user u
+                WHERE u.hourly_rate IS NOT NULL
+                  AND u.hourly_rate > 0
+                  AND u.role = 'CASHIER'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM pay_rate_change p WHERE p.user_id = u.id
+                  )
+                """);
+        if (seeded > 0) {
+            System.out.println("Database: seeded " + seeded + " pay_rate_change row(s) from existing cashiers");
+        }
+    }
+
+    private static void migrateSalaryPayments(JdbcTemplate jdbc) {
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS salary_payment (
+                  id VARCHAR(255) PRIMARY KEY,
+                  user_id VARCHAR(255) NOT NULL REFERENCES app_user(id),
+                  amount NUMERIC(12,2) NOT NULL,
+                  paid_date DATE NOT NULL,
+                  payment_source VARCHAR(16) NOT NULL,
+                  period_from DATE,
+                  period_to DATE,
+                  notes TEXT,
+                  created_by VARCHAR(255) NOT NULL,
+                  created_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_salary_payment_paid_date ON salary_payment (paid_date)");
     }
 
     private static void migrateExpenseInvoices(JdbcTemplate jdbc) {
@@ -66,6 +134,7 @@ public class DatabaseMigrationRunner {
         try {
             jdbc.execute("ALTER TABLE app_user ADD COLUMN IF NOT EXISTS username VARCHAR(32)");
             jdbc.execute("ALTER TABLE app_user ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT true");
+            jdbc.execute("ALTER TABLE app_user ALTER COLUMN email DROP NOT NULL");
             jdbc.update(
                     """
                     UPDATE app_user

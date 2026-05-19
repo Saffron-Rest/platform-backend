@@ -20,5 +20,8 @@ public record UpdateUserRequest(
         PayType payType,
         BigDecimal payAmount,
         BigDecimal hourlyRate,
+        /** First day the new pay applies (required when pay type or amount changes). */
+        LocalDate payEffectiveFrom,
+        String payChangeNote,
         LocalDate startDate
 ) {}

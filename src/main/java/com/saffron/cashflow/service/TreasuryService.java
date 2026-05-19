@@ -1,0 +1,260 @@
+package com.saffron.cashflow.service;
+
+import com.saffron.cashflow.domain.AuditAction;
+import com.saffron.cashflow.domain.DailyEntry;
+import com.saffron.cashflow.domain.EntryStatus;
+import com.saffron.cashflow.domain.PaymentSource;
+import com.saffron.cashflow.domain.SalaryPayment;
+import com.saffron.cashflow.domain.SystemSetting;
+import com.saffron.cashflow.domain.User;
+import com.saffron.cashflow.dto.RecordSalaryPaymentRequest;
+import com.saffron.cashflow.dto.TreasurySettingsRequest;
+import com.saffron.cashflow.repository.DailyEntryRepository;
+import com.saffron.cashflow.repository.SalaryPaymentRepository;
+import com.saffron.cashflow.repository.SystemSettingRepository;
+import com.saffron.cashflow.repository.UserRepository;
+import com.saffron.cashflow.security.AuthHelper;
+import com.saffron.cashflow.util.EntryCalculator;
+import com.saffron.cashflow.util.TreasurySettings;
+import com.saffron.cashflow.web.BadRequestException;
+import com.saffron.cashflow.web.NotFoundException;
+import org.hibernate.Hibernate;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+@Service
+public class TreasuryService {
+
+    private final SystemSettingRepository settingRepository;
+    private final DailyEntryRepository entryRepository;
+    private final SalaryPaymentRepository salaryPaymentRepository;
+    private final UserRepository userRepository;
+    private final AuditService auditService;
+
+    public TreasuryService(
+            SystemSettingRepository settingRepository,
+            DailyEntryRepository entryRepository,
+            SalaryPaymentRepository salaryPaymentRepository,
+            UserRepository userRepository,
+            AuditService auditService) {
+        this.settingRepository = settingRepository;
+        this.entryRepository = entryRepository;
+        this.salaryPaymentRepository = salaryPaymentRepository;
+        this.userRepository = userRepository;
+        this.auditService = auditService;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> overview() {
+        AuthHelper.requireAdmin();
+        TreasurySettings settings = loadSettings();
+        LocalDate from = LocalDate.of(2000, 1, 1);
+        LocalDate to = LocalDate.now().plusYears(1);
+        List<DailyEntry> entries = entryRepository.findLockedBetweenWithExpenses(from, to, EntryStatus.LOCKED);
+
+        BigDecimal cashFromEntries = BigDecimal.ZERO;
+        BigDecimal cardFromEntries = BigDecimal.ZERO;
+        for (DailyEntry e : entries) {
+            cashFromEntries = cashFromEntries.add(cashNetFromEntry(e));
+            cardFromEntries = cardFromEntries.add(cardNetFromEntry(e, settings));
+        }
+
+        BigDecimal salaryCashOut = BigDecimal.ZERO;
+        BigDecimal salaryCardOut = BigDecimal.ZERO;
+        for (SalaryPayment p : salaryPaymentRepository.findAllByOrderByPaidDateDescCreatedAtDesc()) {
+            if (p.getPaymentSource() == PaymentSource.CASH) {
+                salaryCashOut = salaryCashOut.add(p.getAmount());
+            } else {
+                salaryCardOut = salaryCardOut.add(p.getAmount());
+            }
+        }
+
+        BigDecimal cashBalance = settings.getInitialCashBalance()
+                .add(cashFromEntries)
+                .subtract(salaryCashOut);
+        BigDecimal cardBalance = settings.getInitialCardBalance()
+                .add(cardFromEntries)
+                .subtract(salaryCardOut);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("settings", settings.toApiMap());
+        result.put("cashBalance", toDouble(cashBalance));
+        result.put("cardBalance", toDouble(cardBalance));
+        result.put("cashFromEntries", toDouble(cashFromEntries));
+        result.put("cardFromEntries", toDouble(cardFromEntries));
+        result.put("salaryPaidFromCash", toDouble(salaryCashOut));
+        result.put("salaryPaidFromCard", toDouble(salaryCardOut));
+        result.put("currency", "PLN");
+        return result;
+    }
+
+    @Transactional
+    public Map<String, Object> updateSettings(TreasurySettingsRequest req) {
+        AuthHelper.requireAdmin();
+        validateRates(req.cardSalesSettlementRate(), req.platformSettlementRates());
+
+        TreasurySettings settings = new TreasurySettings();
+        settings.setInitialCashBalance(req.initialCashBalance());
+        settings.setInitialCardBalance(req.initialCardBalance());
+        settings.setCardSalesSettlementRate(req.cardSalesSettlementRate());
+        settings.setPlatformSettlementRates(normalizePlatformRates(req.platformSettlementRates()));
+
+        SystemSetting row = settingRepository.findById(TreasurySettings.SETTINGS_KEY).orElse(new SystemSetting());
+        row.setKey(TreasurySettings.SETTINGS_KEY);
+        row.setValue(settings.toApiMap());
+        settingRepository.save(row);
+
+        auditService.log(AuthHelper.currentUser().id(), AuditAction.UPDATE, "TreasurySettings",
+                TreasurySettings.SETTINGS_KEY, settings.toApiMap(), "Treasury settings updated");
+
+        return overview();
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> listSalaryPayments(String fromParam, String toParam) {
+        AuthHelper.requireAdmin();
+        List<SalaryPayment> payments;
+        if (fromParam != null && toParam != null) {
+            payments = salaryPaymentRepository.findByPaidDateBetween(
+                    LocalDate.parse(fromParam), LocalDate.parse(toParam));
+        } else {
+            payments = salaryPaymentRepository.findAllByOrderByPaidDateDescCreatedAtDesc();
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (SalaryPayment p : payments) {
+            rows.add(paymentToMap(p));
+        }
+        return rows;
+    }
+
+    @Transactional
+    public Map<String, Object> recordSalaryPayment(RecordSalaryPaymentRequest req) {
+        AuthHelper.requireAdmin();
+        User employee = userRepository.findById(req.userId())
+                .orElseThrow(() -> new NotFoundException("Employee not found"));
+
+        Map<String, Object> balances = overview();
+        double available = req.source() == PaymentSource.CASH
+                ? (Double) balances.get("cashBalance")
+                : (Double) balances.get("cardBalance");
+        if (req.amount().doubleValue() > available + 0.005) {
+            throw new BadRequestException(
+                    "Insufficient " + req.source().name().toLowerCase() + " balance (available "
+                            + roundMoney(available) + " PLN)");
+        }
+
+        SalaryPayment payment = new SalaryPayment();
+        payment.setUserId(employee.getId());
+        payment.setAmount(req.amount().setScale(2, RoundingMode.HALF_UP));
+        payment.setPaidDate(req.paidDate());
+        payment.setPaymentSource(req.source());
+        payment.setPeriodFrom(req.periodFrom());
+        payment.setPeriodTo(req.periodTo());
+        payment.setNotes(req.notes());
+        payment.setCreatedBy(AuthHelper.currentUser().id());
+        payment = salaryPaymentRepository.save(payment);
+
+        auditService.log(AuthHelper.currentUser().id(), AuditAction.CREATE, "SalaryPayment", payment.getId(),
+                paymentToMap(payment), "Salary paid from " + req.source().name());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("payment", paymentToMap(payment));
+        result.put("treasury", overview());
+        return result;
+    }
+
+    private TreasurySettings loadSettings() {
+        return settingRepository.findById(TreasurySettings.SETTINGS_KEY)
+                .map(s -> TreasurySettings.fromMap(s.getValue()))
+                .orElse(new TreasurySettings());
+    }
+
+    /** Net cash movement from a locked shift (drawer, not opening float). */
+    private static BigDecimal cashNetFromEntry(DailyEntry e) {
+        BigDecimal in = e.getCashSales();
+        BigDecimal out = e.getCashRefunds()
+                .add(e.getBankDeposit())
+                .add(e.getCashWithdrawal())
+                .add(e.getOwnerWithdrawal());
+        if (hasExpenseItems(e)) {
+            out = out.add(EntryCalculator.sumExpenseItems(e.getExpenseItems(), PaymentSource.CASH));
+        } else {
+            out = out.add(EntryCalculator.legacyExpenseFields(e));
+        }
+        return in.subtract(out);
+    }
+
+    /** Net card/bank pool movement including partial delivery settlement. */
+    private static BigDecimal cardNetFromEntry(DailyEntry e, TreasurySettings settings) {
+        BigDecimal settledSales = e.getCardSales().multiply(settings.getCardSalesSettlementRate())
+                .add(e.getWoltSales().multiply(settings.platformRate("wolt")))
+                .add(e.getBoltSales().multiply(settings.platformRate("bolt")))
+                .add(e.getUberEatsSales().multiply(settings.platformRate("uberEats")))
+                .add(e.getGlovoSales().multiply(settings.platformRate("glovo")))
+                .add(e.getOtherPlatformSales().multiply(settings.platformRate("other")));
+
+        BigDecimal out = e.getCardRefunds().add(e.getPlatformRefunds());
+        if (hasExpenseItems(e)) {
+            out = out.add(EntryCalculator.sumExpenseItems(e.getExpenseItems(), PaymentSource.CARD));
+        }
+        return settledSales.subtract(out).add(e.getBankDeposit());
+    }
+
+    private static boolean hasExpenseItems(DailyEntry e) {
+        return Hibernate.isInitialized(e.getExpenseItems())
+                && e.getExpenseItems() != null
+                && !e.getExpenseItems().isEmpty();
+    }
+
+    private Map<String, Object> paymentToMap(SalaryPayment p) {
+        String name = userRepository.findById(p.getUserId()).map(User::getName).orElse("Unknown");
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", p.getId());
+        m.put("userId", p.getUserId());
+        m.put("employeeName", name);
+        m.put("amount", toDouble(p.getAmount()));
+        m.put("paidDate", p.getPaidDate().toString());
+        m.put("source", p.getPaymentSource().name());
+        if (p.getPeriodFrom() != null) m.put("periodFrom", p.getPeriodFrom().toString());
+        if (p.getPeriodTo() != null) m.put("periodTo", p.getPeriodTo().toString());
+        if (p.getNotes() != null && !p.getNotes().isBlank()) m.put("notes", p.getNotes());
+        m.put("createdAt", p.getCreatedAt().toString());
+        return m;
+    }
+
+    private static void validateRates(BigDecimal cardRate, Map<String, BigDecimal> platformRates) {
+        if (cardRate.compareTo(BigDecimal.ZERO) < 0 || cardRate.compareTo(BigDecimal.ONE) > 0) {
+            throw new BadRequestException("Card sales settlement rate must be between 0 and 1");
+        }
+        for (var e : normalizePlatformRates(platformRates).entrySet()) {
+            if (e.getValue().compareTo(BigDecimal.ZERO) < 0 || e.getValue().compareTo(BigDecimal.ONE) > 0) {
+                throw new BadRequestException("Platform rate for " + e.getKey() + " must be between 0 and 1");
+            }
+        }
+    }
+
+    private static Map<String, BigDecimal> normalizePlatformRates(Map<String, BigDecimal> input) {
+        Map<String, BigDecimal> base = TreasurySettings.defaultPlatformRates();
+        if (input != null) {
+            input.forEach((k, v) -> {
+                if (v != null) base.put(k, v);
+            });
+        }
+        return base;
+    }
+
+    private static double toDouble(BigDecimal v) {
+        return v.setScale(2, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    private static String roundMoney(double v) {
+        return BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP).toPlainString();
+    }
+}

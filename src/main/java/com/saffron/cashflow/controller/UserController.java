@@ -39,4 +39,9 @@ public class UserController {
     public Map<String, Object> delete(@PathVariable String id) {
         return userService.deactivate(id);
     }
+
+    @GetMapping("/{id}/pay-rates")
+    public List<Map<String, Object>> payRateHistory(@PathVariable String id) {
+        return userService.payRateHistory(id);
+    }
 }

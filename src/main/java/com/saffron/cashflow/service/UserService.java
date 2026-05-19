@@ -17,6 +17,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,11 +29,17 @@ public class UserService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
+    private final PayRateService payRateService;
 
-    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, AuditService auditService) {
+    public UserService(
+            UserRepository userRepository,
+            PasswordEncoder passwordEncoder,
+            AuditService auditService,
+            PayRateService payRateService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.auditService = auditService;
+        this.payRateService = payRateService;
     }
 
     @Transactional(readOnly = true)
@@ -70,6 +77,7 @@ public class UserService {
         if (req.payAmount() != null) user.setPayAmount(req.payAmount());
         user.setStartDate(req.startDate());
         user = userRepository.save(user);
+        payRateService.recordInitial(user, req.startDate());
         auditService.log(AuthHelper.currentUser().id(), AuditAction.CREATE, "User", user.getId(),
                 Map.of("username", user.getUsername()));
         return toMap(user);
@@ -110,13 +118,30 @@ public class UserService {
             user.setPasswordHash(passwordEncoder.encode(req.password()));
             user.setMustChangePassword(true);
         }
-        if (req.payType() != null) user.setPayType(req.payType());
+        PayType previousPayType = user.getPayType();
+        BigDecimal previousPayAmount = user.getPayAmount();
+        PayType newPayType = req.payType() != null ? req.payType() : previousPayType;
         BigDecimal amount = req.payAmount() != null ? req.payAmount() : req.hourlyRate();
+        boolean payChanged = req.payType() != null && req.payType() != previousPayType
+                || amount != null
+                        && (previousPayAmount == null || amount.compareTo(previousPayAmount) != 0);
         if (amount != null) {
             if (amount.compareTo(BigDecimal.ZERO) < 0) {
                 throw new BadRequestException("Pay amount cannot be negative");
             }
-            user.setPayAmount(amount);
+        }
+        if (payChanged) {
+            BigDecimal newAmount = amount != null ? amount : previousPayAmount;
+            if (newAmount == null) {
+                throw new BadRequestException("Pay amount is required when changing pay");
+            }
+            LocalDate effectiveFrom = req.payEffectiveFrom() != null ? req.payEffectiveFrom() : LocalDate.now();
+            payRateService.recordChange(user, newPayType, newAmount, effectiveFrom, req.payChangeNote());
+            user.setPayType(newPayType);
+            user.setPayAmount(newAmount);
+        } else {
+            if (req.payType() != null) user.setPayType(req.payType());
+            if (amount != null) user.setPayAmount(amount);
         }
         if (req.startDate() != null) user.setStartDate(req.startDate());
         user = userRepository.save(user);
@@ -142,6 +167,11 @@ public class UserService {
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE, "User", id, before,
                 Map.of("active", false), null);
         return Map.of("ok", true);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> payRateHistory(String userId) {
+        return payRateService.listHistory(userId);
     }
 
     private Map<String, Object> toMap(User u) {

@@ -39,6 +39,13 @@ public interface DailyEntryRepository extends JpaRepository<DailyEntry, String>,
     @Query("SELECT e FROM DailyEntry e LEFT JOIN FETCH e.cashier WHERE e.date BETWEEN :from AND :to AND e.deletedAt IS NULL AND e.status = :status ORDER BY e.date ASC")
     List<DailyEntry> findLockedBetween(LocalDate from, LocalDate to, EntryStatus status);
 
+    @Query("""
+            SELECT DISTINCT e FROM DailyEntry e
+            LEFT JOIN FETCH e.expenseItems
+            WHERE e.date BETWEEN :from AND :to AND e.deletedAt IS NULL AND e.status = :status
+            """)
+    List<DailyEntry> findLockedBetweenWithExpenses(LocalDate from, LocalDate to, EntryStatus status);
+
     @Query("SELECT e FROM DailyEntry e LEFT JOIN FETCH e.cashier WHERE e.date BETWEEN :from AND :to AND e.deletedAt IS NULL AND e.status = :status AND e.cashier.id = :cashierId ORDER BY e.date ASC")
     List<DailyEntry> findLockedBetweenForCashier(LocalDate from, LocalDate to, EntryStatus status, String cashierId);
 

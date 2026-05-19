@@ -19,6 +19,7 @@ import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,14 +31,17 @@ public class SalaryService {
     private final UserRepository userRepository;
     private final WorkShiftRepository workShiftRepository;
     private final SettingsService settingsService;
+    private final PayRateService payRateService;
 
     public SalaryService(
             UserRepository userRepository,
             WorkShiftRepository workShiftRepository,
-            SettingsService settingsService) {
+            SettingsService settingsService,
+            PayRateService payRateService) {
         this.userRepository = userRepository;
         this.workShiftRepository = workShiftRepository;
         this.settingsService = settingsService;
+        this.payRateService = payRateService;
     }
 
     @Transactional(readOnly = true)
@@ -65,8 +69,8 @@ public class SalaryService {
         BigDecimal grandHours = BigDecimal.ZERO;
 
         for (User cashier : cashiers) {
-            PayType payType = cashier.getPayType() != null ? cashier.getPayType() : PayType.HOURLY;
-            BigDecimal payAmount = rateOrZero(cashier.getPayAmount());
+            PayType currentPayType = cashier.getPayType() != null ? cashier.getPayType() : PayType.HOURLY;
+            BigDecimal currentPayAmount = rateOrZero(cashier.getPayAmount());
             List<WorkShift> userShifts = byUser.getOrDefault(cashier.getId(), List.of()).stream()
                     .sorted(Comparator.comparing(WorkShift::getDate))
                     .toList();
@@ -74,51 +78,102 @@ public class SalaryService {
             BigDecimal totalHours = BigDecimal.ZERO;
             List<Map<String, Object>> shiftRows = new ArrayList<>();
             BigDecimal shiftPaySum = BigDecimal.ZERO;
+            Map<String, Integer> monthlyDaysByRate = new LinkedHashMap<>();
+            Map<String, BigDecimal> monthlyBandTotals = new HashMap<>();
 
             for (WorkShift shift : userShifts) {
+                PayRateService.ResolvedPay rate =
+                        payRateService.resolve(cashier.getId(), shift.getDate(), cashier);
+                PayType payType = rate.payType() != null ? rate.payType() : PayType.HOURLY;
+                BigDecimal payAmount = rateOrZero(rate.payAmount());
+
                 BigDecimal hours = SalaryCalculator.hoursWorked(shift, restaurantHours);
                 totalHours = totalHours.add(hours);
                 BigDecimal dayPay = SalaryCalculator.payForShift(shift, payType, payAmount, restaurantHours);
-                if (payType != PayType.MONTHLY) {
+
+                if (payType == PayType.MONTHLY) {
+                    String key = rateKey(payType, payAmount);
+                    monthlyDaysByRate.merge(key, 1, Integer::sum);
+                } else {
                     shiftPaySum = shiftPaySum.add(dayPay);
                 }
+
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("date", shift.getDate().toString());
                 row.put("hours", toDouble(hours));
                 row.put("hoursLabel", WorkShiftService.hoursLabel(shift));
-                row.put("pay", toDouble(dayPay));
+                row.put("pay", toDouble(payType == PayType.MONTHLY ? BigDecimal.ZERO : dayPay));
                 row.put("payNote", shiftPayNote(payType, hours, payAmount, shift, restaurantHours));
+                row.put("payType", payType.name());
+                row.put("payAmount", toDouble(payAmount));
+                if (rate.effectiveFrom() != null) {
+                    row.put("rateEffectiveFrom", rate.effectiveFrom().toString());
+                }
                 shiftRows.add(row);
             }
 
-            BigDecimal totalPay;
-            if (payType == PayType.MONTHLY) {
-                totalPay = SalaryCalculator.monthlyPayForPeriod(userShifts.size(), from, to, payAmount);
-                if (!shiftRows.isEmpty()) {
-                    BigDecimal perDay = totalPay.divide(
-                            BigDecimal.valueOf(userShifts.size()), 2, RoundingMode.HALF_UP);
-                    for (Map<String, Object> row : shiftRows) {
-                        row.put("pay", toDouble(perDay));
-                        row.put("payNote", "Monthly ÷ " + calendarDays + " days × 1 worked day");
-                    }
+            for (Map.Entry<String, Integer> band : monthlyDaysByRate.entrySet()) {
+                BigDecimal amount = parseRateKeyAmount(band.getKey());
+                BigDecimal bandTotal =
+                        SalaryCalculator.monthlyPayForPeriod(band.getValue(), from, to, amount);
+                monthlyBandTotals.put(band.getKey(), bandTotal);
+            }
+
+            BigDecimal totalPay = shiftPaySum;
+            for (BigDecimal bandTotal : monthlyBandTotals.values()) {
+                totalPay = totalPay.add(bandTotal);
+            }
+            totalPay = totalPay.setScale(2, RoundingMode.HALF_UP);
+
+            for (int i = 0; i < userShifts.size(); i++) {
+                WorkShift shift = userShifts.get(i);
+                PayRateService.ResolvedPay rate =
+                        payRateService.resolve(cashier.getId(), shift.getDate(), cashier);
+                if (rate.payType() != PayType.MONTHLY) {
+                    continue;
                 }
-            } else {
-                totalPay = shiftPaySum.setScale(2, RoundingMode.HALF_UP);
+                String key = rateKey(rate.payType(), rate.payAmount());
+                int daysInBand = monthlyDaysByRate.getOrDefault(key, 1);
+                BigDecimal bandTotal = monthlyBandTotals.getOrDefault(key, BigDecimal.ZERO);
+                BigDecimal perDay = bandTotal.divide(
+                        BigDecimal.valueOf(daysInBand), 2, RoundingMode.HALF_UP);
+                Map<String, Object> row = shiftRows.get(i);
+                row.put("pay", toDouble(perDay));
+                row.put(
+                        "payNote",
+                        "Monthly "
+                                + rate.payAmount()
+                                + " PLN × ("
+                                + daysInBand
+                                + " ÷ "
+                                + calendarDays
+                                + " days) ÷ "
+                                + daysInBand
+                                + " worked day(s) at this rate");
             }
 
             grandTotal = grandTotal.add(totalPay);
             grandHours = grandHours.add(totalHours);
+
+            boolean multipleRates = payRateService.hasMultipleRates(cashier.getId())
+                    || monthlyDaysByRate.size() > 1;
 
             Map<String, Object> emp = new LinkedHashMap<>();
             emp.put("userId", cashier.getId());
             emp.put("name", cashier.getName());
             emp.put("email", cashier.getEmail());
             emp.put("active", cashier.isActive());
-            emp.put("payType", payType.name());
-            emp.put("payTypeLabel", SalaryCalculator.payTypeLabel(payType));
-            emp.put("payAmount", toDouble(payAmount));
-            emp.put("payAmountLabel", SalaryCalculator.amountLabel(payType));
-            emp.put("calculationSummary", calculationSummary(payType, payAmount, userShifts.size(), calendarDays));
+            emp.put("payType", currentPayType.name());
+            emp.put("payTypeLabel", SalaryCalculator.payTypeLabel(currentPayType));
+            emp.put("payAmount", toDouble(currentPayAmount));
+            emp.put("payAmountLabel", SalaryCalculator.amountLabel(currentPayType));
+            emp.put(
+                    "calculationSummary",
+                    multipleRates
+                            ? "Uses pay rate in effect on each shift date (see history in Team)"
+                            : calculationSummary(
+                                    currentPayType, currentPayAmount, userShifts.size(), calendarDays));
+            emp.put("usesPayHistory", multipleRates);
             emp.put("shiftCount", userShifts.size());
             emp.put("totalHours", toDouble(totalHours));
             emp.put("totalPay", toDouble(totalPay));
@@ -141,11 +196,31 @@ public class SalaryService {
         return result;
     }
 
+    private static String rateKey(PayType payType, BigDecimal payAmount) {
+        return payType.name()
+                + "|"
+                + payAmount.setScale(2, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    private static BigDecimal parseRateKeyAmount(String key) {
+        int sep = key.indexOf('|');
+        return new BigDecimal(key.substring(sep + 1));
+    }
+
     private static List<Map<String, String>> payrollRules() {
         List<Map<String, String>> rules = new ArrayList<>();
-        rules.add(rule("HOURLY", "Each day: hours worked × hourly rate. Different hours = different pay that day."));
-        rules.add(rule("DAILY", "Each day: daily rate × (shift hours ÷ restaurant open hours that day). 4h on a 12h open day = 33%."));
-        rules.add(rule("MONTHLY", "Period total: monthly salary × (days worked ÷ days in period). Hours only affect attendance count, not the formula."));
+        rules.add(rule(
+                "HOURLY",
+                "Each day: hours worked × hourly rate in effect on that date. Past periods keep the old rate."));
+        rules.add(rule(
+                "DAILY",
+                "Each day: daily rate × (shift hours ÷ open hours). Rate in effect on that date applies."));
+        rules.add(rule(
+                "MONTHLY",
+                "Period total: monthly salary × (days worked ÷ days in period), per rate band if pay changed mid-period."));
+        rules.add(rule(
+                "CHANGES",
+                "Raise or lower pay in Team with an effective date. Shifts before that date use the previous rate."));
         return rules;
     }
 
