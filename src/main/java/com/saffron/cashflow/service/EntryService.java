@@ -239,12 +239,13 @@ public class EntryService {
         if (AuthHelper.isCashier() && !entry.getCashierId().equals(user.id())) {
             throw new ForbiddenException("Forbidden");
         }
-        if (entry.getStatus() == EntryStatus.LOCKED) {
+        if (entry.getStatus() == EntryStatus.LOCKED && !AuthHelper.isOperationsRole()) {
             throw new BadRequestException("Already submitted");
         }
         entry.setStatus(EntryStatus.LOCKED);
         entry.setSubmittedAt(Instant.now());
         entryRepository.save(entry);
+        recalculateEntry(entry.getId());
         alertService.checkEntryAlerts(entry);
         DailyEntry saved = load(entry.getId());
         auditService.logChange(user.id(), AuditAction.SUBMIT, "DailyEntry", entry.getId(), before,
@@ -302,7 +303,7 @@ public class EntryService {
     private void applyEntryRequest(DailyEntry entry, EntryRequest req, String cashierId, LocalDate date) {
         boolean closing = workShiftService.isClosingShift(cashierId, date);
         boolean hasSavedSales = EntryCalculator.totalSales(entry).compareTo(BigDecimal.ZERO) > 0;
-        if (closing && !hasSavedSales) {
+        if (closing && !hasSavedSales && !AuthHelper.isOperationsRole()) {
             EntryMapper.applyClosingOnly(entry, req);
         } else {
             EntryMapper.applyRequest(entry, req, BigDecimal.ZERO, BigDecimal.ZERO);
