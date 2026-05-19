@@ -40,6 +40,7 @@ public class AdminBootstrap {
         jdbc.execute(
                 """
                 TRUNCATE TABLE
+                  admin_telegram_dispatch,
                   notification_dispatch,
                   push_token,
                   manual_delivery_income,

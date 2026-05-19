@@ -16,6 +16,7 @@ com/saffron/cashflow/controller/ReportController.class
 com/saffron/cashflow/domain/ExpenseCategory.class
 com/saffron/cashflow/domain/User.class
 com/saffron/cashflow/domain/SystemSetting.class
+com/saffron/cashflow/domain/AdminTelegramDispatch.class
 com/saffron/cashflow/dto/UpsertScheduleRequest.class
 com/saffron/cashflow/security/JwtService.class
 com/saffron/cashflow/service/ProfitLossService$PayoutTotals.class
@@ -65,10 +66,12 @@ com/saffron/cashflow/config/AdminBootstrap.class
 com/saffron/cashflow/controller/ManualDeliveryController.class
 com/saffron/cashflow/controller/TreasuryController.class
 com/saffron/cashflow/domain/AlertType.class
+com/saffron/cashflow/repository/AdminTelegramDispatchRepository.class
 com/saffron/cashflow/repository/ExpenseItemRepository.class
 com/saffron/cashflow/dto/ExpenseItemRequest.class
 com/saffron/cashflow/util/EntryCalculator.class
 com/saffron/cashflow/repository/NotificationDispatchRepository.class
+com/saffron/cashflow/service/TelegramNotificationService.class
 com/saffron/cashflow/dto/EntryRequest.class
 com/saffron/cashflow/util/WeeklyOperatingHours$1.class
 com/saffron/cashflow/controller/EntryController.class
@@ -90,6 +93,7 @@ com/saffron/cashflow/service/ManualDeliveryService.class
 com/saffron/cashflow/controller/ExpenseController.class
 com/saffron/cashflow/report/PdfReportBuilder.class
 com/saffron/cashflow/service/ProfitLossService$Labels.class
+com/saffron/cashflow/service/AlertService$1.class
 com/saffron/cashflow/service/WorkShiftService$ReconcileResult.class
 com/saffron/cashflow/service/PushNotificationService.class
 com/saffron/cashflow/repository/SystemSettingRepository.class

@@ -21,11 +21,21 @@ public class AlertController {
         return alertService.list();
     }
 
-    @PostMapping("/check-missing")
-    public Map<String, Boolean> checkMissing() {
+    @GetMapping("/telegram-status")
+    public Map<String, Object> telegramStatus() {
+        return alertService.telegramStatus();
+    }
+
+    @PostMapping("/telegram-test")
+    public Map<String, Object> telegramTest() {
         AuthHelper.requireAdmin();
-        alertService.checkMissingSubmissions();
-        return Map.of("ok", true);
+        return alertService.sendTelegramTest();
+    }
+
+    @PostMapping("/check-missing")
+    public Map<String, Object> checkMissing() {
+        AuthHelper.requireAdmin();
+        return alertService.checkMissingSubmissions();
     }
 
     @PatchMapping("/{id}/read")

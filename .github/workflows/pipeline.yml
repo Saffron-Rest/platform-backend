@@ -1,4 +1,9 @@
 # platform-backend — test → build (amd64) → deploy API to VPS
+#
+# Optional repository secrets (Admin Telegram alerts):
+#   TELEGRAM_ENABLED=true
+#   TELEGRAM_BOT_TOKEN  — from @BotFather
+#   TELEGRAM_CHAT_ID    — your user or group chat id
 name: pipeline
 
 on:
@@ -109,6 +114,9 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           APP_BOOTSTRAP_EMPTY_DATABASE: ${{ secrets.APP_BOOTSTRAP_EMPTY_DATABASE }}
           APP_SEED_ADMIN_PASSWORD: ${{ secrets.APP_SEED_ADMIN_PASSWORD }}
+          TELEGRAM_ENABLED: ${{ secrets.TELEGRAM_ENABLED }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           REGISTRY_USER: ${{ secrets.GHCR_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.GHCR_TOKEN }}
         with:
@@ -116,7 +124,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY || secrets.VPS_SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
-          envs: BACKEND_IMAGE,POSTGRES_USER,POSTGRES_DB,POSTGRES_PASSWORD,JWT_SECRET,APP_BOOTSTRAP_EMPTY_DATABASE,APP_SEED_ADMIN_PASSWORD,REGISTRY_USER,REGISTRY_PASSWORD
+          envs: BACKEND_IMAGE,POSTGRES_USER,POSTGRES_DB,POSTGRES_PASSWORD,JWT_SECRET,APP_BOOTSTRAP_EMPTY_DATABASE,APP_SEED_ADMIN_PASSWORD,TELEGRAM_ENABLED,TELEGRAM_BOT_TOKEN,TELEGRAM_CHAT_ID,REGISTRY_USER,REGISTRY_PASSWORD
           script: |
             docker volume inspect saffron_saffron_uploads >/dev/null 2>&1 \
               || docker volume create saffron_saffron_uploads

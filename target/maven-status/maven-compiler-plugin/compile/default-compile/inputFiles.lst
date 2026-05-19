@@ -18,6 +18,7 @@
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/controller/TreasuryController.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/controller/UserController.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/controller/WorkShiftController.java
+/Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/domain/AdminTelegramDispatch.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/domain/Alert.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/domain/AlertType.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/domain/AuditAction.java
@@ -58,6 +59,7 @@
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/dto/UpsertScheduleRequest.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/report/PdfReportBuilder.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/report/ProfitLossTemplate.java
+/Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/repository/AdminTelegramDispatchRepository.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/repository/AlertRepository.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/repository/AuditLogRepository.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/repository/DailyEntryRepository.java
@@ -96,6 +98,7 @@
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/ReportService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/SalaryService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/SettingsService.java
+/Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/TelegramNotificationService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/TreasuryService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/UserService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/WorkShiftService.java

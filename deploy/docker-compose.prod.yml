@@ -16,6 +16,9 @@ services:
       # One-time: set APP_BOOTSTRAP_EMPTY_DATABASE=true then redeploy; remove after first start
       APP_BOOTSTRAP_EMPTY_DATABASE: ${APP_BOOTSTRAP_EMPTY_DATABASE:-false}
       APP_SEED_ADMIN_PASSWORD: ${APP_SEED_ADMIN_PASSWORD:-}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     volumes:
       - saffron_uploads:/data/uploads
     networks:

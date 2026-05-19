@@ -15,6 +15,9 @@ Repo: [Saffron-Rest/platform-backend](https://github.com/Saffron-Rest/platform-b
 | `POSTGRES_PASSWORD` | Same as Postgres on VPS |
 | `JWT_SECRET` | Min 32 characters |
 | `GHCR_TOKEN` | GitHub PAT with `read:packages` (for VPS to pull image) |
+| `TELEGRAM_ENABLED` | `true` (optional — admin alerts) |
+| `TELEGRAM_BOT_TOKEN` | Bot token from [@BotFather](https://t.me/BotFather) |
+| `TELEGRAM_CHAT_ID` | Your user or group chat id |
 
 `GITHUB_TOKEN` is used automatically to **push** images. The VPS needs `GHCR_TOKEN` to **pull** private images.
 

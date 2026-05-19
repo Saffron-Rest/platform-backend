@@ -31,7 +31,20 @@ public class DatabaseMigrationRunner {
             migrateDeliverySettledToCard(jdbc);
             migrateManualDeliveryIncome(jdbc);
             migrateStandaloneExpenses(jdbc);
+            migrateAdminTelegramDispatch(jdbc);
         };
+    }
+
+    private static void migrateAdminTelegramDispatch(JdbcTemplate jdbc) {
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admin_telegram_dispatch (
+                  id VARCHAR(255) PRIMARY KEY,
+                  dedupe_key VARCHAR(200) NOT NULL UNIQUE,
+                  preview VARCHAR(500) NOT NULL,
+                  sent_at TIMESTAMPTZ NOT NULL
+                )
+                """);
     }
 
     private static void migrateManualDeliveryIncome(JdbcTemplate jdbc) {
