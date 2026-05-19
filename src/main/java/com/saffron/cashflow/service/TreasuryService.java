@@ -53,7 +53,7 @@ public class TreasuryService {
 
     @Transactional(readOnly = true)
     public Map<String, Object> overview() {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireOperations();
         TreasurySettings settings = loadSettings();
         LocalDate from = LocalDate.of(2000, 1, 1);
         LocalDate to = LocalDate.now().plusYears(1);
