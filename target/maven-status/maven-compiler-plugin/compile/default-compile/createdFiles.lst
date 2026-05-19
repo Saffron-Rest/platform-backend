@@ -83,6 +83,7 @@ com/saffron/cashflow/service/ProfitLossService.class
 com/saffron/cashflow/web/ConflictException.class
 com/saffron/cashflow/service/WorkShiftService.class
 com/saffron/cashflow/service/EntrySpecification.class
+com/saffron/cashflow/config/DatabaseMigrationRunner.class
 com/saffron/cashflow/controller/SettingsController.class
 com/saffron/cashflow/domain/PushToken.class
 com/saffron/cashflow/report/PdfReportBuilder$RegisterSums.class
