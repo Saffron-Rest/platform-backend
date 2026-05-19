@@ -21,7 +21,7 @@ public class ExpenseItem {
     private DailyEntry entry;
 
     /** Business date for reporting (shift date or post-close purchase date). */
-    @Column(name = "effective_date", nullable = false)
+    @Column(name = "effective_date")
     private LocalDate effectiveDate;
 
     @Enumerated(EnumType.STRING)

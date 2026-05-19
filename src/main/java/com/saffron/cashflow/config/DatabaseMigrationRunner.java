@@ -58,12 +58,17 @@ public class DatabaseMigrationRunner {
         jdbc.update(
                 """
                 UPDATE expense_item ei
-                SET effective_date = de.date
+                SET effective_date = de.entry_date
                 FROM daily_entry de
                 WHERE ei.entry_id = de.id
                   AND ei.effective_date IS NULL
                 """);
         jdbc.update("UPDATE expense_item SET effective_date = CURRENT_DATE WHERE effective_date IS NULL");
+        try {
+            jdbc.execute("ALTER TABLE expense_item ALTER COLUMN effective_date SET NOT NULL");
+        } catch (Exception ex) {
+            System.err.println("Warning: expense_item effective_date NOT NULL: " + ex.getMessage());
+        }
         try {
             jdbc.execute("ALTER TABLE expense_item ALTER COLUMN entry_id DROP NOT NULL");
         } catch (Exception ex) {
@@ -153,18 +158,32 @@ public class DatabaseMigrationRunner {
     private static void migrateExpenseInvoices(JdbcTemplate jdbc) {
         try {
             jdbc.execute("ALTER TABLE receipt_file ADD COLUMN IF NOT EXISTS expense_item_id VARCHAR(255)");
-            jdbc.update(
-                    """
-                    UPDATE receipt_file rf
-                    SET expense_item_id = ei.id
-                    FROM expense_item ei
-                    WHERE ei.receipt_file_id = rf.id
-                      AND (rf.expense_item_id IS NULL OR rf.expense_item_id = '')
-                    """);
-            jdbc.execute("ALTER TABLE expense_item DROP COLUMN IF EXISTS receipt_file_id");
+            if (columnExists(jdbc, "expense_item", "receipt_file_id")) {
+                jdbc.update(
+                        """
+                        UPDATE receipt_file rf
+                        SET expense_item_id = ei.id
+                        FROM expense_item ei
+                        WHERE ei.receipt_file_id = rf.id
+                          AND (rf.expense_item_id IS NULL OR rf.expense_item_id = '')
+                        """);
+                jdbc.execute("ALTER TABLE expense_item DROP COLUMN IF EXISTS receipt_file_id");
+            }
         } catch (Exception ex) {
             System.err.println("Warning: expense invoice migration: " + ex.getMessage());
         }
+    }
+
+    private static boolean columnExists(JdbcTemplate jdbc, String table, String column) {
+        Integer n = jdbc.queryForObject(
+                """
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = ? AND column_name = ?
+                """,
+                Integer.class,
+                table,
+                column);
+        return n != null && n > 0;
     }
 
     private static void migrateAuditLogActionConstraint(JdbcTemplate jdbc) {
