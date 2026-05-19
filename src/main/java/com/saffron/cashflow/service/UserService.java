@@ -49,11 +49,15 @@ public class UserService {
         if (userRepository.findByEmail(req.email()).isPresent()) {
             throw new ConflictException("Email already exists");
         }
+        Role role = req.role() != null ? req.role() : Role.CASHIER;
+        if (role == Role.ADMIN) {
+            throw new BadRequestException("Cannot create admin users via API");
+        }
         User user = new User();
         user.setEmail(req.email());
         user.setName(req.name());
         user.setPasswordHash(passwordEncoder.encode(req.password()));
-        user.setRole(req.role() != null ? req.role() : Role.CASHIER);
+        user.setRole(role);
         if (req.payType() != null) user.setPayType(req.payType());
         if (req.payAmount() != null) user.setPayAmount(req.payAmount());
         user.setStartDate(req.startDate());
@@ -77,6 +81,15 @@ public class UserService {
             user.setEmail(req.email().trim().toLowerCase());
         }
         if (req.active() != null) user.setActive(req.active());
+        if (req.role() != null) {
+            if (req.role() == Role.ADMIN) {
+                throw new BadRequestException("Cannot assign admin role via API");
+            }
+            if (user.getRole() == Role.ADMIN) {
+                throw new BadRequestException("Cannot change admin role");
+            }
+            user.setRole(req.role());
+        }
         if (req.password() != null && !req.password().isBlank()) {
             user.setPasswordHash(passwordEncoder.encode(req.password()));
         }
