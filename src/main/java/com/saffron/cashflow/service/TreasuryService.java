@@ -18,6 +18,7 @@ import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.EntryCalculator;
 import com.saffron.cashflow.util.ManualDeliverySettlement;
+import com.saffron.cashflow.util.PlatformSettlement;
 import com.saffron.cashflow.util.SalaryPaymentPeriod;
 import com.saffron.cashflow.util.TreasurySettings;
 import com.saffron.cashflow.web.BadRequestException;
@@ -239,24 +240,10 @@ public class TreasuryService {
             PaymentSource source, LocalDate from, LocalDate to, TreasurySettings settings) {
         List<Map<String, Object>> rows = new ArrayList<>();
 
-        // 1) Locked shift reports — one row per report capturing the net movement to this source
+        // 1) Locked shift reports — split into separate income / expense / transfer rows
         List<DailyEntry> entries = entryRepository.findLockedBetweenWithExpenses(from, to, EntryStatus.LOCKED);
         for (DailyEntry e : entries) {
-            BigDecimal net = source == PaymentSource.CASH
-                    ? cashNetFromEntry(e)
-                    : EntryCalculator.cardNetForTreasury(e, settings);
-            if (net.signum() == 0) continue;
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("date", e.getDate().toString());
-            row.put("kind", "SHIFT_REPORT");
-            row.put("label", "Shift report"
-                    + (e.getCashier() != null ? " · " + e.getCashier().getName() : ""));
-            row.put("amount", round2(net.abs()).doubleValue());
-            row.put("sign", net.signum() < 0 ? "-" : "+");
-            row.put("refRoute", "/entry/" + e.getId());
-            row.put("refLabel", "Open shift report");
-            row.put("refId", e.getId());
-            rows.add(row);
+            addShiftRows(rows, e, source, settings);
         }
 
         // 2) Manual delivery income — only affects the CARD ledger
@@ -264,15 +251,16 @@ public class TreasuryService {
             for (ManualDeliveryIncome d : manualDeliveryService.findBetween(from, to)) {
                 BigDecimal credit = ManualDeliverySettlement.settledToCard(d, settings);
                 if (credit.signum() == 0) continue;
-                Map<String, Object> row = new LinkedHashMap<>();
-                row.put("date", d.getEffectiveDate().toString());
-                row.put("kind", "MANUAL_DELIVERY");
-                row.put("label", "Manual delivery · " + d.getPlatform().name());
-                row.put("amount", round2(credit).doubleValue());
-                row.put("sign", "+");
-                row.put("refRoute", "/finance");
-                row.put("refLabel", "Open in Finance");
-                row.put("refId", d.getId());
+                Map<String, Object> row = baseRow(
+                        d.getEffectiveDate().toString(),
+                        "MANUAL_DELIVERY",
+                        "INCOME",
+                        "Delivery income · " + d.getPlatform().name(),
+                        credit,
+                        "+",
+                        "/finance",
+                        "Open in Finance",
+                        d.getId());
                 if (d.getNotes() != null && !d.getNotes().isBlank()) {
                     row.put("notes", d.getNotes());
                 }
@@ -285,18 +273,20 @@ public class TreasuryService {
             if (ex.getPaymentSource() != source) continue;
             BigDecimal amt = ex.getAmount();
             if (amt == null || amt.signum() <= 0) continue;
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("date", ex.getEffectiveDate().toString());
-            row.put("kind", "STANDALONE_EXPENSE");
             String desc = ex.getDescription();
             String cat = ex.getCategory() != null ? ex.getCategory().name() : "EXPENSE";
-            row.put("label", (desc != null && !desc.isBlank() ? desc : cat));
-            row.put("category", cat);
-            row.put("amount", round2(amt).doubleValue());
-            row.put("sign", "-");
-            row.put("refRoute", "/finance");
-            row.put("refLabel", "Open in Finance");
-            row.put("refId", ex.getId());
+            String label = (desc != null && !desc.isBlank() ? desc : cat);
+            Map<String, Object> row = baseRow(
+                    ex.getEffectiveDate().toString(),
+                    "STANDALONE_EXPENSE",
+                    "STANDALONE_EXPENSE",
+                    label,
+                    amt,
+                    "-",
+                    "/finance",
+                    "Open in Finance",
+                    ex.getId());
+            row.put("expenseCategory", cat);
             rows.add(row);
         }
 
@@ -306,15 +296,16 @@ public class TreasuryService {
             BigDecimal amt = p.getAmount();
             if (amt == null || amt.signum() <= 0) continue;
             String name = userRepository.findById(p.getUserId()).map(User::getName).orElse("Employee");
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("date", p.getPaidDate().toString());
-            row.put("kind", "SALARY_PAYOUT");
-            row.put("label", "Salary · " + name);
-            row.put("amount", round2(amt).doubleValue());
-            row.put("sign", "-");
-            row.put("refRoute", "/admin/payouts");
-            row.put("refLabel", "Open payouts");
-            row.put("refId", p.getId());
+            Map<String, Object> row = baseRow(
+                    p.getPaidDate().toString(),
+                    "SALARY_PAYOUT",
+                    "SALARY",
+                    "Salary · " + name,
+                    amt,
+                    "-",
+                    "/admin/payouts",
+                    "Open payouts",
+                    p.getId());
             if (p.getNotes() != null && !p.getNotes().isBlank()) {
                 row.put("notes", p.getNotes());
             }
@@ -322,6 +313,116 @@ public class TreasuryService {
         }
 
         return rows;
+    }
+
+    /** Split a locked shift report into per-line treasury movements for the given source. */
+    private void addShiftRows(
+            List<Map<String, Object>> rows, DailyEntry e, PaymentSource source, TreasurySettings settings) {
+        String date = e.getDate().toString();
+        String entryRef = "/entry/" + e.getId();
+        String cashierSuffix = e.getCashier() != null ? " · " + e.getCashier().getName() : "";
+
+        if (source == PaymentSource.CASH) {
+            addIfPositive(rows, date, "SHIFT_CASH_SALES", "INCOME",
+                    "Cash sales" + cashierSuffix, e.getCashSales(), "+", entryRef, e.getId());
+            addIfPositive(rows, date, "SHIFT_CASH_REFUND", "INCOME",
+                    "Cash refunds" + cashierSuffix, e.getCashRefunds(), "-", entryRef, e.getId());
+            addIfPositive(rows, date, "SHIFT_BANK_DEPOSIT", "TRANSFER",
+                    "Bank deposit (cash → bank)" + cashierSuffix, e.getBankDeposit(), "-", entryRef, e.getId());
+            addIfPositive(rows, date, "SHIFT_CASH_WITHDRAWAL", "TRANSFER",
+                    "Cash withdrawal" + cashierSuffix, e.getCashWithdrawal(), "-", entryRef, e.getId());
+            addIfPositive(rows, date, "SHIFT_OWNER_WITHDRAWAL", "TRANSFER",
+                    "Owner withdrawal" + cashierSuffix, e.getOwnerWithdrawal(), "-", entryRef, e.getId());
+            addShiftExpenseRows(rows, e, PaymentSource.CASH, entryRef, cashierSuffix);
+        } else {
+            BigDecimal cardSales = e.getCardSales();
+            BigDecimal settledRate = settings.getCardSalesSettlementRate();
+            BigDecimal settledCardSales = cardSales.multiply(settledRate)
+                    .setScale(2, RoundingMode.HALF_UP);
+            addIfPositive(rows, date, "SHIFT_CARD_SALES_SETTLED", "INCOME",
+                    "Card sales settled" + cashierSuffix, settledCardSales, "+", entryRef, e.getId());
+            addIfPositive(rows, date, "SHIFT_CARD_REFUND", "INCOME",
+                    "Card refunds" + cashierSuffix, e.getCardRefunds(), "-", entryRef, e.getId());
+            addIfPositive(rows, date, "SHIFT_PLATFORM_REFUND", "INCOME",
+                    "Platform refunds" + cashierSuffix, e.getPlatformRefunds(), "-", entryRef, e.getId());
+            addDeliveryRow(rows, e, "wolt", "Wolt", e.getWoltSales(), settings, date, entryRef, cashierSuffix);
+            addDeliveryRow(rows, e, "bolt", "Bolt", e.getBoltSales(), settings, date, entryRef, cashierSuffix);
+            addDeliveryRow(rows, e, "uberEats", "Uber Eats", e.getUberEatsSales(), settings, date, entryRef, cashierSuffix);
+            addDeliveryRow(rows, e, "glovo", "Glovo", e.getGlovoSales(), settings, date, entryRef, cashierSuffix);
+            addDeliveryRow(rows, e, "other", "Other delivery", e.getOtherPlatformSales(), settings, date, entryRef, cashierSuffix);
+            addIfPositive(rows, date, "SHIFT_BANK_DEPOSIT", "TRANSFER",
+                    "Bank deposit (cash → bank)" + cashierSuffix, e.getBankDeposit(), "+", entryRef, e.getId());
+            addShiftExpenseRows(rows, e, PaymentSource.CARD, entryRef, cashierSuffix);
+        }
+    }
+
+    private void addShiftExpenseRows(
+            List<Map<String, Object>> rows, DailyEntry e, PaymentSource source,
+            String entryRef, String cashierSuffix) {
+        if (e.getExpenseItems() == null) return;
+        for (ExpenseItem item : e.getExpenseItems()) {
+            if (item.getPaymentSource() != source) continue;
+            BigDecimal amt = item.getAmount();
+            if (amt == null || amt.signum() <= 0) continue;
+            String desc = item.getDescription();
+            String cat = item.getCategory() != null ? item.getCategory().name() : "EXPENSE";
+            String label = "Shift expense · " + (desc != null && !desc.isBlank() ? desc : cat) + cashierSuffix;
+            Map<String, Object> row = baseRow(
+                    e.getDate().toString(),
+                    "SHIFT_EXPENSE",
+                    "SHIFT_EXPENSE",
+                    label,
+                    amt,
+                    "-",
+                    entryRef,
+                    "Open shift report",
+                    item.getId());
+            row.put("expenseCategory", cat);
+            rows.add(row);
+        }
+    }
+
+    private void addDeliveryRow(
+            List<Map<String, Object>> rows, DailyEntry e, String platformKey, String platformLabel,
+            BigDecimal sales, TreasurySettings settings, String date, String entryRef, String cashierSuffix) {
+        if (sales == null || sales.signum() == 0) return;
+        BigDecimal settled = PlatformSettlement.settledToCard(e, platformKey, sales, settings);
+        if (settled.signum() == 0) return;
+        Map<String, Object> row = baseRow(
+                date,
+                "SHIFT_DELIVERY_SETTLED",
+                "INCOME",
+                "Delivery · " + platformLabel + " settled" + cashierSuffix,
+                settled,
+                "+",
+                entryRef,
+                "Open shift report",
+                e.getId());
+        row.put("platform", platformKey);
+        rows.add(row);
+    }
+
+    private static void addIfPositive(
+            List<Map<String, Object>> rows, String date, String kind, String category,
+            String label, BigDecimal amount, String sign, String refRoute, String refId) {
+        if (amount == null || amount.signum() <= 0) return;
+        rows.add(baseRow(date, kind, category, label, amount, sign, refRoute, "Open shift report", refId));
+    }
+
+    private static Map<String, Object> baseRow(
+            String date, String kind, String category, String label, BigDecimal amount,
+            String sign, String refRoute, String refLabel, String refId) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("date", date);
+        row.put("kind", kind);
+        row.put("category", category);
+        row.put("label", label);
+        row.put("amount", round2(amount).doubleValue());
+        row.put("sign", sign);
+        if (refRoute != null) row.put("refRoute", refRoute);
+        if (refLabel != null) row.put("refLabel", refLabel);
+        if (refId != null) row.put("refId", refId);
+        return row;
     }
 
     private static double signedAmount(Map<String, Object> row) {
