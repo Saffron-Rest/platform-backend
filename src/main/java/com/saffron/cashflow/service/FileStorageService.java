@@ -90,7 +90,14 @@ public class FileStorageService {
 
     public ReceiptFile resolveReceiptFile(String fileId) {
         ReceiptFile file = fileRepository.findById(fileId).orElseThrow(() -> new NotFoundException("Not found"));
-        DailyEntry entry = entryRepository.findActiveById(file.getEntryId())
+        String entryId = file.getEntryId();
+        if (entryId == null) {
+            // Standalone (post-close) expense invoice — not tied to any shift.
+            // Only operations roles can create them, so the same restriction applies on read.
+            AuthHelper.requireOperations();
+            return file;
+        }
+        DailyEntry entry = entryRepository.findActiveById(entryId)
                 .orElseThrow(() -> new NotFoundException("Not found"));
         AuthUser user = AuthHelper.currentUser();
         if (AuthHelper.isCashier() && !entry.getCashierId().equals(user.id())) {
