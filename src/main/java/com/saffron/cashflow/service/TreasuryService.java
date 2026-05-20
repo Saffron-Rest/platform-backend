@@ -3,6 +3,8 @@ package com.saffron.cashflow.service;
 import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.EntryStatus;
+import com.saffron.cashflow.domain.ExpenseItem;
+import com.saffron.cashflow.domain.ManualDeliveryIncome;
 import com.saffron.cashflow.domain.PaymentSource;
 import com.saffron.cashflow.domain.SalaryPayment;
 import com.saffron.cashflow.domain.SystemSetting;
@@ -15,6 +17,7 @@ import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.EntryCalculator;
+import com.saffron.cashflow.util.ManualDeliverySettlement;
 import com.saffron.cashflow.util.SalaryPaymentPeriod;
 import com.saffron.cashflow.util.TreasurySettings;
 import com.saffron.cashflow.web.BadRequestException;
@@ -158,6 +161,177 @@ public class TreasuryService {
         result.put("salaryPaidFromCard", toDouble(salaryCardOut));
         result.put("currency", "PLN");
         return result;
+    }
+
+    /** Chronological ledger of cash or card movements over the given window.
+     *  Each row is a signed contribution to the running balance of that source.
+     *  Includes an opening balance computed from everything before {@code from}. */
+    @Transactional(readOnly = true)
+    public Map<String, Object> ledger(String sourceParam, String fromParam, String toParam) {
+        AuthHelper.requireOperations();
+        PaymentSource source = parseSource(sourceParam);
+        LocalDate from = LocalDate.parse(fromParam);
+        LocalDate to = LocalDate.parse(toParam);
+        if (from.isAfter(to)) {
+            throw new BadRequestException("'from' must be on or before 'to'");
+        }
+        TreasurySettings settings = loadSettings();
+
+        BigDecimal initial = source == PaymentSource.CASH
+                ? settings.getInitialCashBalance()
+                : settings.getInitialCardBalance();
+
+        // Sum movements strictly before `from` to get the opening balance for the window
+        BigDecimal opening = initial.add(sumMovementsBefore(source, from, settings));
+
+        List<Map<String, Object>> rows = collectMovements(source, from, to, settings);
+        // Oldest first for running balance walk, then we return that order; UI can reverse.
+        rows.sort((a, b) -> {
+            String da = (String) a.get("date");
+            String db = (String) b.get("date");
+            int byDate = da.compareTo(db);
+            if (byDate != 0) return byDate;
+            // Tiebreak: inflows before outflows (so end-of-day balance reflects net activity)
+            double sa = signedAmount(a);
+            double sb = signedAmount(b);
+            return Double.compare(sb, sa);
+        });
+
+        BigDecimal running = opening;
+        for (Map<String, Object> r : rows) {
+            running = running.add(BigDecimal.valueOf(signedAmount(r)));
+            r.put("runningBalance", round2(running).doubleValue());
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("source", source.name());
+        result.put("from", from.toString());
+        result.put("to", to.toString());
+        result.put("openingBalance", round2(opening).doubleValue());
+        result.put("closingBalance", round2(running).doubleValue());
+        result.put("currency", "PLN");
+        result.put("rows", rows);
+        return result;
+    }
+
+    private PaymentSource parseSource(String s) {
+        if (s == null) throw new BadRequestException("source is required (CASH or CARD)");
+        try {
+            return PaymentSource.valueOf(s.trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            throw new BadRequestException("source must be CASH or CARD");
+        }
+    }
+
+    private BigDecimal sumMovementsBefore(PaymentSource source, LocalDate from, TreasurySettings settings) {
+        if (from.isEqual(LocalDate.MIN)) return BigDecimal.ZERO;
+        LocalDate earliest = LocalDate.of(2000, 1, 1);
+        LocalDate end = from.minusDays(1);
+        if (end.isBefore(earliest)) return BigDecimal.ZERO;
+        BigDecimal total = BigDecimal.ZERO;
+        for (Map<String, Object> r : collectMovements(source, earliest, end, settings)) {
+            total = total.add(BigDecimal.valueOf(signedAmount(r)));
+        }
+        return total;
+    }
+
+    private List<Map<String, Object>> collectMovements(
+            PaymentSource source, LocalDate from, LocalDate to, TreasurySettings settings) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+
+        // 1) Locked shift reports — one row per report capturing the net movement to this source
+        List<DailyEntry> entries = entryRepository.findLockedBetweenWithExpenses(from, to, EntryStatus.LOCKED);
+        for (DailyEntry e : entries) {
+            BigDecimal net = source == PaymentSource.CASH
+                    ? cashNetFromEntry(e)
+                    : EntryCalculator.cardNetForTreasury(e, settings);
+            if (net.signum() == 0) continue;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", e.getDate().toString());
+            row.put("kind", "SHIFT_REPORT");
+            row.put("label", "Shift report"
+                    + (e.getCashier() != null ? " · " + e.getCashier().getName() : ""));
+            row.put("amount", round2(net.abs()).doubleValue());
+            row.put("sign", net.signum() < 0 ? "-" : "+");
+            row.put("refRoute", "/entry/" + e.getId());
+            row.put("refLabel", "Open shift report");
+            row.put("refId", e.getId());
+            rows.add(row);
+        }
+
+        // 2) Manual delivery income — only affects the CARD ledger
+        if (source == PaymentSource.CARD) {
+            for (ManualDeliveryIncome d : manualDeliveryService.findBetween(from, to)) {
+                BigDecimal credit = ManualDeliverySettlement.settledToCard(d, settings);
+                if (credit.signum() == 0) continue;
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("date", d.getEffectiveDate().toString());
+                row.put("kind", "MANUAL_DELIVERY");
+                row.put("label", "Manual delivery · " + d.getPlatform().name());
+                row.put("amount", round2(credit).doubleValue());
+                row.put("sign", "+");
+                row.put("refRoute", "/finance");
+                row.put("refLabel", "Open in Finance");
+                row.put("refId", d.getId());
+                if (d.getNotes() != null && !d.getNotes().isBlank()) {
+                    row.put("notes", d.getNotes());
+                }
+                rows.add(row);
+            }
+        }
+
+        // 3) Standalone (post-close) expenses paid from this source
+        for (ExpenseItem ex : expenseService.findStandaloneBetween(from, to)) {
+            if (ex.getPaymentSource() != source) continue;
+            BigDecimal amt = ex.getAmount();
+            if (amt == null || amt.signum() <= 0) continue;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", ex.getEffectiveDate().toString());
+            row.put("kind", "STANDALONE_EXPENSE");
+            String desc = ex.getDescription();
+            String cat = ex.getCategory() != null ? ex.getCategory().name() : "EXPENSE";
+            row.put("label", (desc != null && !desc.isBlank() ? desc : cat));
+            row.put("category", cat);
+            row.put("amount", round2(amt).doubleValue());
+            row.put("sign", "-");
+            row.put("refRoute", "/finance");
+            row.put("refLabel", "Open in Finance");
+            row.put("refId", ex.getId());
+            rows.add(row);
+        }
+
+        // 4) Salary payouts from this source
+        for (SalaryPayment p : salaryPaymentRepository.findByPaidDateBetween(from, to)) {
+            if (p.getPaymentSource() != source) continue;
+            BigDecimal amt = p.getAmount();
+            if (amt == null || amt.signum() <= 0) continue;
+            String name = userRepository.findById(p.getUserId()).map(User::getName).orElse("Employee");
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", p.getPaidDate().toString());
+            row.put("kind", "SALARY_PAYOUT");
+            row.put("label", "Salary · " + name);
+            row.put("amount", round2(amt).doubleValue());
+            row.put("sign", "-");
+            row.put("refRoute", "/admin/payouts");
+            row.put("refLabel", "Open payouts");
+            row.put("refId", p.getId());
+            if (p.getNotes() != null && !p.getNotes().isBlank()) {
+                row.put("notes", p.getNotes());
+            }
+            rows.add(row);
+        }
+
+        return rows;
+    }
+
+    private static double signedAmount(Map<String, Object> row) {
+        Object amt = row.get("amount");
+        if (!(amt instanceof Number n)) return 0.0;
+        return "-".equals(row.get("sign")) ? -n.doubleValue() : n.doubleValue();
+    }
+
+    private static BigDecimal round2(BigDecimal v) {
+        return v.setScale(2, RoundingMode.HALF_UP);
     }
 
     /** Latest locked report (any cashier) with an actual cash count > 0. */

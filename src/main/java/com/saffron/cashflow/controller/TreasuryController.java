@@ -33,6 +33,14 @@ public class TreasuryController {
         return treasuryService.updateSettings(request);
     }
 
+    @GetMapping("/ledger")
+    public Map<String, Object> ledger(
+            @RequestParam String source,
+            @RequestParam String from,
+            @RequestParam String to) {
+        return treasuryService.ledger(source, from, to);
+    }
+
     @GetMapping("/salary-payments")
     public List<Map<String, Object>> salaryPayments(
             @RequestParam(required = false) String from,
