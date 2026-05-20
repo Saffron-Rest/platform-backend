@@ -20,6 +20,7 @@ import com.saffron.cashflow.util.TreasurySettings;
 import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.NotFoundException;
 import org.hibernate.Hibernate;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
@@ -29,6 +30,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 public class TreasuryService {
@@ -79,20 +81,27 @@ public class TreasuryService {
         LocalDate to = LocalDate.now().plusYears(1);
         List<DailyEntry> entries = entryRepository.findLockedBetweenWithExpenses(from, to, EntryStatus.LOCKED);
 
-        BigDecimal cashFromEntries = BigDecimal.ZERO;
+        // Raw movements from locked shift reports (positive = inflow into treasury)
+        BigDecimal cashFromShiftReports = BigDecimal.ZERO;
         BigDecimal cardFromShiftReports = BigDecimal.ZERO;
         for (DailyEntry e : entries) {
-            cashFromEntries = cashFromEntries.add(cashNetFromEntry(e));
+            cashFromShiftReports = cashFromShiftReports.add(cashNetFromEntry(e));
             cardFromShiftReports = cardFromShiftReports.add(EntryCalculator.cardNetForTreasury(e, settings));
         }
 
+        // Manual finance-page entries (standalone expenses + manual delivery income)
         BigDecimal cardFromManualDelivery =
                 manualDeliveryService.totalCardCreditBetween(from, to, settings);
-        BigDecimal cardFromEntries = cardFromShiftReports.add(cardFromManualDelivery);
-        cashFromEntries = cashFromEntries.subtract(
-                expenseService.sumStandaloneBetween(from, to, PaymentSource.CASH));
-        cardFromEntries = cardFromEntries.subtract(
-                expenseService.sumStandaloneBetween(from, to, PaymentSource.CARD));
+        BigDecimal standaloneCashExpenses =
+                expenseService.sumStandaloneBetween(from, to, PaymentSource.CASH);
+        BigDecimal standaloneCardExpenses =
+                expenseService.sumStandaloneBetween(from, to, PaymentSource.CARD);
+
+        // Net contributions (what's actually added to the balance from each source)
+        BigDecimal cashFromEntries = cashFromShiftReports.subtract(standaloneCashExpenses);
+        BigDecimal cardFromEntries = cardFromShiftReports
+                .add(cardFromManualDelivery)
+                .subtract(standaloneCardExpenses);
 
         BigDecimal salaryCashOut = BigDecimal.ZERO;
         BigDecimal salaryCardOut = BigDecimal.ZERO;
@@ -104,25 +113,61 @@ public class TreasuryService {
             }
         }
 
-        BigDecimal cashBalance = settings.getInitialCashBalance()
-                .add(cashFromEntries)
-                .subtract(salaryCashOut);
+        // Cash on hand = the most recent locked actual cash count (real drawer).
+        // Falls back to initial cash balance if no locked report exists yet.
+        Optional<DailyEntry> latestCount = findLatestLockedCount();
+        BigDecimal cashBalance = latestCount
+                .map(DailyEntry::getActualCashCounted)
+                .orElse(settings.getInitialCashBalance());
+        // Card balance stays cumulative (no physical count).
         BigDecimal cardBalance = settings.getInitialCardBalance()
                 .add(cardFromEntries)
                 .subtract(salaryCardOut);
+        // Cumulative cash balance kept for reference / cross-checks.
+        BigDecimal cashComputedBalance = settings.getInitialCashBalance()
+                .add(cashFromEntries)
+                .subtract(salaryCashOut);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("settings", settings.toApiMap());
         result.put("cashBalance", toDouble(cashBalance));
         result.put("cardBalance", toDouble(cardBalance));
+        // Latest-count context for the cash card
+        result.put("cashSource", latestCount.isPresent() ? "LATEST_COUNT" : "INITIAL");
+        latestCount.ifPresent(e -> {
+            result.put("cashLatestCountDate", e.getDate().toString());
+            if (e.getCashier() != null) {
+                result.put("cashLatestCountCashierName", e.getCashier().getName());
+            }
+            if (e.getSubmittedAt() != null) {
+                result.put("cashLatestCountSubmittedAt", e.getSubmittedAt().toString());
+            }
+        });
+        // Cumulative (computed) cash balance for transparency / audit
+        result.put("cashComputedBalance", toDouble(cashComputedBalance));
+        // Net values (what UI consumed previously — keep for backward compat)
         result.put("cashFromEntries", toDouble(cashFromEntries));
         result.put("cardFromEntries", toDouble(cardFromEntries));
+        // Raw breakdown so the UI can display each component and the math adds up
+        result.put("cashFromShiftReports", toDouble(cashFromShiftReports));
         result.put("cardFromShiftReports", toDouble(cardFromShiftReports));
         result.put("cardFromManualDelivery", toDouble(cardFromManualDelivery));
+        result.put("standaloneCashExpenses", toDouble(standaloneCashExpenses));
+        result.put("standaloneCardExpenses", toDouble(standaloneCardExpenses));
         result.put("salaryPaidFromCash", toDouble(salaryCashOut));
         result.put("salaryPaidFromCard", toDouble(salaryCardOut));
         result.put("currency", "PLN");
         return result;
+    }
+
+    /** Latest locked report (any cashier) with an actual cash count > 0. */
+    private Optional<DailyEntry> findLatestLockedCount() {
+        LocalDate tomorrow = LocalDate.now().plusDays(1);
+        Optional<LocalDate> day = entryRepository.findLatestRestaurantCloseDateBefore(tomorrow, EntryStatus.LOCKED);
+        if (day.isEmpty()) return Optional.empty();
+        List<DailyEntry> rows = entryRepository.findLatestRestaurantCloseOnDate(
+                day.get(), EntryStatus.LOCKED, PageRequest.of(0, 1));
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
     }
 
     @Transactional
