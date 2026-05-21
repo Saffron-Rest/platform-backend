@@ -64,6 +64,14 @@ public class CardSettlementService {
 
         // Upsert if a settlement already exists for the linked row
         if (linkedKind != null && linkedRefId != null) {
+            // Manually-added rows (Finance > Add Delivery, standalone settlements) are
+            // entered with the actual settled amount, so they don't need another
+            // reconciliation pass.
+            if (TreasuryRowKinds.isAlreadySettled(linkedKind)) {
+                throw new BadRequestException(
+                        "This row was entered manually with its actual settled amount — "
+                                + "no further reconciliation needed.");
+            }
             // Mutual exclusion: a row claimed by a bank deposit can't also have an inline override
             bankDepositLinkRepository
                     .findByLinkedKindAndLinkedRefId(linkedKind, linkedRefId)

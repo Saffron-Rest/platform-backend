@@ -23,8 +23,21 @@ public final class TreasuryRowKinds {
     public static final Set<String> PENDING_KINDS = Set.of(
             "SHIFT_DELIVERY_SETTLED");
 
+    /**
+     * Row kinds that the user already enters with the actual settled amount — they don't
+     * need (and shouldn't accept) a second reconciliation step.
+     */
+    public static final Set<String> ALREADY_SETTLED_KINDS = Set.of(
+            "MANUAL_DELIVERY",
+            "CARD_SETTLEMENT");
+
     /** True if a row of this kind should be treated as "pending bank settlement". */
     public static boolean isPending(String kind) {
         return kind != null && PENDING_KINDS.contains(kind);
+    }
+
+    /** True if a row of this kind is already settled at entry time (no reconciliation). */
+    public static boolean isAlreadySettled(String kind) {
+        return kind != null && ALREADY_SETTLED_KINDS.contains(kind);
     }
 }

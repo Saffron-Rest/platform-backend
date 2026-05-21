@@ -83,6 +83,13 @@ public class BankDepositService {
             if (!linkKeys.add(key)) {
                 throw new BadRequestException("Duplicate row in selection: " + key);
             }
+            // Manually-added rows (Finance > Add Delivery, standalone settlements) are
+            // already settled at entry time and can't be batched into a bank deposit.
+            if (TreasuryRowKinds.isAlreadySettled(l.getLinkedKind())) {
+                throw new BadRequestException(
+                        "This row was entered manually with its actual settled amount — "
+                                + "no further reconciliation needed.");
+            }
             linkRepository.findByLinkedKindAndLinkedRefId(l.getLinkedKind(), l.getLinkedRefId())
                     .ifPresent(existing -> {
                         throw new BadRequestException(
