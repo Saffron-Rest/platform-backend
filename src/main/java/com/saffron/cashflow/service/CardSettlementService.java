@@ -3,6 +3,7 @@ package com.saffron.cashflow.service;
 import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.CardSettlement;
 import com.saffron.cashflow.dto.CardSettlementRequest;
+import com.saffron.cashflow.repository.BankDepositLinkRepository;
 import com.saffron.cashflow.repository.CardSettlementRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.web.BadRequestException;
@@ -26,10 +27,15 @@ import java.util.Map;
 public class CardSettlementService {
 
     private final CardSettlementRepository repository;
+    private final BankDepositLinkRepository bankDepositLinkRepository;
     private final AuditService auditService;
 
-    public CardSettlementService(CardSettlementRepository repository, AuditService auditService) {
+    public CardSettlementService(
+            CardSettlementRepository repository,
+            BankDepositLinkRepository bankDepositLinkRepository,
+            AuditService auditService) {
         this.repository = repository;
+        this.bankDepositLinkRepository = bankDepositLinkRepository;
         this.auditService = auditService;
     }
 
@@ -57,6 +63,16 @@ public class CardSettlementService {
 
         // Upsert if a settlement already exists for the linked row
         if (linkedKind != null && linkedRefId != null) {
+            // Mutual exclusion: a row claimed by a bank deposit can't also have an inline override
+            bankDepositLinkRepository
+                    .findByLinkedKindAndLinkedRefId(linkedKind, linkedRefId)
+                    .ifPresent(existing -> {
+                        throw new BadRequestException(
+                                "Row already settled by a bank deposit on "
+                                        + existing.getBankDeposit().getBankDate()
+                                        + "; remove that deposit first.");
+                    });
+
             CardSettlement existing = repository
                     .findByLinkedKindAndLinkedRefId(linkedKind, linkedRefId)
                     .orElse(null);

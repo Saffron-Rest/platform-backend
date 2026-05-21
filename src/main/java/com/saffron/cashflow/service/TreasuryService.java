@@ -1,6 +1,8 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.AuditAction;
+import com.saffron.cashflow.domain.BankDeposit;
+import com.saffron.cashflow.domain.BankDepositLink;
 import com.saffron.cashflow.domain.CardSettlement;
 import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.EntryStatus;
@@ -49,6 +51,7 @@ public class TreasuryService {
     private final ManualDeliveryService manualDeliveryService;
     private final ExpenseService expenseService;
     private final CardSettlementService cardSettlementService;
+    private final BankDepositService bankDepositService;
 
     public TreasuryService(
             SystemSettingRepository settingRepository,
@@ -58,7 +61,8 @@ public class TreasuryService {
             AuditService auditService,
             ManualDeliveryService manualDeliveryService,
             ExpenseService expenseService,
-            CardSettlementService cardSettlementService) {
+            CardSettlementService cardSettlementService,
+            BankDepositService bankDepositService) {
         this.settingRepository = settingRepository;
         this.entryRepository = entryRepository;
         this.salaryPaymentRepository = salaryPaymentRepository;
@@ -67,6 +71,7 @@ public class TreasuryService {
         this.manualDeliveryService = manualDeliveryService;
         this.expenseService = expenseService;
         this.cardSettlementService = cardSettlementService;
+        this.bankDepositService = bankDepositService;
     }
 
     /** Default settlement % — any logged-in user (for shift report form). */
@@ -108,12 +113,17 @@ public class TreasuryService {
         // Manual card-settlement reconciliations (sum of variances). Can be negative.
         BigDecimal cardFromManualSettlement =
                 cardSettlementService.totalDeltaBetween(from, to);
+        // Bank-deposit reconciliations: each deposit contributes (totalSettled − totalGross)
+        // to the card balance. Multi-day deposits roll several source rows into one variance.
+        BigDecimal cardFromBankDeposits =
+                bankDepositService.totalVarianceBetween(from, to);
 
         // Net contributions (what's actually added to the balance from each source)
         BigDecimal cashFromEntries = cashFromShiftReports.subtract(standaloneCashExpenses);
         BigDecimal cardFromEntries = cardFromShiftReports
                 .add(cardFromManualDelivery)
                 .add(cardFromManualSettlement)
+                .add(cardFromBankDeposits)
                 .subtract(standaloneCardExpenses);
 
         BigDecimal salaryCashOut = BigDecimal.ZERO;
@@ -166,6 +176,7 @@ public class TreasuryService {
         result.put("cardFromShiftReports", toDouble(cardFromShiftReports));
         result.put("cardFromManualDelivery", toDouble(cardFromManualDelivery));
         result.put("cardFromManualSettlement", toDouble(cardFromManualSettlement));
+        result.put("cardFromBankDeposits", toDouble(cardFromBankDeposits));
         result.put("standaloneCashExpenses", toDouble(standaloneCashExpenses));
         result.put("standaloneCardExpenses", toDouble(standaloneCardExpenses));
         result.put("salaryPaidFromCash", toDouble(salaryCashOut));
@@ -253,12 +264,20 @@ public class TreasuryService {
         // Card-side: pre-load settlements so we can apply linked overrides as rows are built
         Map<String, CardSettlement> linkedSettlements = new HashMap<>();
         List<CardSettlement> standaloneSettlements = new ArrayList<>();
+        Map<String, DepositLinkRef> depositLinks = new HashMap<>();
         if (source == PaymentSource.CARD) {
             for (CardSettlement s : cardSettlementService.findBetween(from, to)) {
                 if (s.getLinkedKind() != null && s.getLinkedRefId() != null) {
                     linkedSettlements.put(linkKey(s.getLinkedKind(), s.getLinkedRefId()), s);
                 } else {
                     standaloneSettlements.add(s);
+                }
+            }
+            for (BankDeposit d : bankDepositService.findIntersecting(from, to)) {
+                for (BankDepositLink l : d.getLinks()) {
+                    depositLinks.put(
+                            linkKey(l.getLinkedKind(), l.getLinkedRefId()),
+                            new DepositLinkRef(d, l));
                 }
             }
         }
@@ -373,11 +392,54 @@ public class TreasuryService {
             }
         }
 
+        // Apply bank-deposit overrides. Each linked row's amount is replaced with its
+        // pro-rata share of the deposit's totalSettled, and gets deposit-summary metadata.
+        if (source == PaymentSource.CARD && !depositLinks.isEmpty()) {
+            for (Map<String, Object> row : rows) {
+                applyBankDepositOverride(row, depositLinks);
+            }
+        }
+
         return rows;
     }
 
+    /** Helper holding a deposit + one of its links for fast lookup by (kind, refId). */
+    private record DepositLinkRef(BankDeposit deposit, BankDepositLink link) {}
+
     private static String linkKey(String kind, String refId) {
         return kind + "::" + refId;
+    }
+
+    private static void applyBankDepositOverride(
+            Map<String, Object> row, Map<String, DepositLinkRef> linked) {
+        Object kindObj = row.get("kind");
+        Object refIdObj = row.get("refId");
+        if (kindObj == null || refIdObj == null) return;
+        if ("CARD_SETTLEMENT".equals(kindObj)) return;
+        DepositLinkRef ref = linked.get(linkKey(kindObj.toString(), refIdObj.toString()));
+        if (ref == null) return;
+
+        // Don't double-override if a per-row CardSettlement already applied (shouldn't
+        // happen due to mutex on create, but guard anyway).
+        if (Boolean.TRUE.equals(row.get("settledOverride"))) return;
+
+        Object originalAmountObj = row.get("amount");
+        if (!(originalAmountObj instanceof Number)) return;
+        double originalAmount = ((Number) originalAmountObj).doubleValue();
+        BigDecimal share = ref.deposit().shareFor(ref.link());
+
+        row.put("amount", share.doubleValue());
+        row.put("bankDepositId", ref.deposit().getId());
+        row.put("bankDepositDate", ref.deposit().getBankDate().toString());
+        row.put("bankDepositSettled",
+                ref.deposit().getTotalSettled().setScale(2, RoundingMode.HALF_UP).doubleValue());
+        row.put("bankDepositGross", ref.deposit().totalGross().doubleValue());
+        row.put("bankDepositVariance", ref.deposit().variance().doubleValue());
+        row.put("bankDepositLinkCount", ref.deposit().getLinks().size());
+        row.put("originalAmount", originalAmount);
+        if (ref.deposit().getNotes() != null && !ref.deposit().getNotes().isBlank()) {
+            row.put("bankDepositNotes", ref.deposit().getNotes());
+        }
     }
 
     private static void applyLinkedSettlementOverride(
