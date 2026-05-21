@@ -88,6 +88,32 @@ public class FileStorageService {
                 .collect(Collectors.toList());
     }
 
+    /** Remove a file attached to a shift entry (e.g. POS report). Same auth rules as upload. */
+    @Transactional
+    public void deleteEntryFile(String fileId) throws IOException {
+        ReceiptFile file = fileRepository.findById(fileId)
+                .orElseThrow(() -> new NotFoundException("Not found"));
+        String entryId = file.getEntryId();
+        if (entryId == null) {
+            throw new ForbiddenException("This endpoint only deletes shift-entry files");
+        }
+        DailyEntry entry = entryRepository.findActiveById(entryId)
+                .orElseThrow(() -> new NotFoundException("Entry not found"));
+        AuthUser user = AuthHelper.currentUser();
+        if (entry.getStatus() == EntryStatus.LOCKED && !AuthHelper.isOperationsRole()) {
+            throw new ForbiddenException("Entry is locked");
+        }
+        if (AuthHelper.isCashier() && !entry.getCashierId().equals(user.id())) {
+            throw new ForbiddenException("Forbidden");
+        }
+        try {
+            Files.deleteIfExists(uploadDir.resolve(file.getPath()));
+        } catch (IOException ignored) {
+            // file might already be gone; keep DB cleanup going either way
+        }
+        fileRepository.delete(file);
+    }
+
     public ReceiptFile resolveReceiptFile(String fileId) {
         ReceiptFile file = fileRepository.findById(fileId).orElseThrow(() -> new NotFoundException("Not found"));
         String entryId = file.getEntryId();

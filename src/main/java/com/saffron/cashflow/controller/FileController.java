@@ -38,6 +38,12 @@ public class FileController {
         return fileStorageService.listForEntry(entryId);
     }
 
+    @DeleteMapping("/{fileId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable String fileId) throws Exception {
+        fileStorageService.deleteEntryFile(fileId);
+    }
+
     @GetMapping("/download/{fileId}")
     public ResponseEntity<Resource> download(@PathVariable String fileId) throws Exception {
         ReceiptFile meta = fileStorageService.resolveReceiptFile(fileId);

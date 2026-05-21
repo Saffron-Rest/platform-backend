@@ -8,8 +8,10 @@ import com.saffron.cashflow.domain.ShiftType;
 import com.saffron.cashflow.dto.EntryRequest;
 import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.domain.ExpenseItem;
+import com.saffron.cashflow.domain.ReceiptFile;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.ExpenseItemRepository;
+import com.saffron.cashflow.repository.ReceiptFileRepository;
 import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.util.TreasurySettings;
@@ -41,6 +43,7 @@ public class EntryService {
 
     private final DailyEntryRepository entryRepository;
     private final ExpenseItemRepository expenseRepository;
+    private final ReceiptFileRepository receiptFileRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
     private final AlertService alertService;
@@ -48,9 +51,13 @@ public class EntryService {
     private final SystemSettingRepository settingRepository;
     private final ManualDeliveryService manualDeliveryService;
 
+    /** File category for POS card sales report uploads attached to a shift entry. */
+    public static final String POS_REPORT_CATEGORY = "pos-report";
+
     public EntryService(
             DailyEntryRepository entryRepository,
             ExpenseItemRepository expenseRepository,
+            ReceiptFileRepository receiptFileRepository,
             UserRepository userRepository,
             AuditService auditService,
             AlertService alertService,
@@ -59,6 +66,7 @@ public class EntryService {
             ManualDeliveryService manualDeliveryService) {
         this.entryRepository = entryRepository;
         this.expenseRepository = expenseRepository;
+        this.receiptFileRepository = receiptFileRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
         this.alertService = alertService;
@@ -242,6 +250,17 @@ public class EntryService {
         if (entry.getStatus() == EntryStatus.LOCKED && !AuthHelper.isOperationsRole()) {
             throw new BadRequestException("Already submitted");
         }
+        // POS card sales report required whenever any card sales were entered.
+        if (entry.getCardSales() != null && entry.getCardSales().compareTo(BigDecimal.ZERO) > 0) {
+            boolean hasPosReport = receiptFileRepository
+                    .findByEntry_IdOrderByCreatedAtAsc(entry.getId())
+                    .stream()
+                    .anyMatch(f -> POS_REPORT_CATEGORY.equalsIgnoreCase(f.getCategory()));
+            if (!hasPosReport) {
+                throw new BadRequestException(
+                        "Upload the POS card sales report before submitting (a card sales total was recorded but no POS receipt is attached).");
+            }
+        }
         entry.setStatus(EntryStatus.LOCKED);
         entry.setSubmittedAt(Instant.now());
         entryRepository.save(entry);
@@ -313,8 +332,11 @@ public class EntryService {
     private Map<String, Object> mapEntry(DailyEntry entry) {
         TreasurySettings treasury = loadTreasurySettings();
         List<ExpenseItem> expenseLines = expenseRepository.findByEntryIdWithInvoice(entry.getId());
+        // Files loaded with a dedicated query (avoids MultipleBagFetchException when joining
+        // both expenses and files in the same fetch); passed explicitly to the mapper.
+        List<ReceiptFile> files = receiptFileRepository.findByEntry_IdOrderByCreatedAtAsc(entry.getId());
         return enrichWithShift(
-                EntryMapper.toMap(entry, treasury, expenseLines),
+                EntryMapper.toMap(entry, treasury, expenseLines, files),
                 entry.getCashierId(),
                 entry.getDate(),
                 treasury);

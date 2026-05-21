@@ -93,8 +93,16 @@ public final class EntryMapper {
         return toMap(e, treasury, null);
     }
 
-    /** Pass {@code expenseLines} when invoices were loaded via {@code findByEntryIdWithInvoice}. */
-    public static Map<String, Object> toMap(DailyEntry e, TreasurySettings treasury, List<ExpenseItem> expenseLines) {
+    public static Map<String, Object> toMap(
+            DailyEntry e, TreasurySettings treasury, List<ExpenseItem> expenseLines) {
+        return toMap(e, treasury, expenseLines, null);
+    }
+
+    /** Pass {@code expenseLines} when invoices were loaded via {@code findByEntryIdWithInvoice}.
+     *  Pass {@code entryFiles} when files were loaded with a dedicated query (preferred). */
+    public static Map<String, Object> toMap(
+            DailyEntry e, TreasurySettings treasury, List<ExpenseItem> expenseLines,
+            List<ReceiptFile> entryFiles) {
         Map<String, Object> m = new HashMap<>();
         m.put("id", e.getId());
         m.put("date", e.getDate().toString());
@@ -131,7 +139,9 @@ public final class EntryMapper {
         if (e.getNotes() != null) m.put("notes", e.getNotes());
         if (e.getSubmittedAt() != null) m.put("submittedAt", e.getSubmittedAt().toString());
         if (e.getCashier() != null) m.put("cashier", cashierMap(e.getCashier()));
-        if (Hibernate.isInitialized(e.getFiles()) && e.getFiles() != null && !e.getFiles().isEmpty()) {
+        if (entryFiles != null && !entryFiles.isEmpty()) {
+            m.put("files", entryFiles.stream().map(EntryMapper::fileMap).collect(Collectors.toList()));
+        } else if (Hibernate.isInitialized(e.getFiles()) && e.getFiles() != null && !e.getFiles().isEmpty()) {
             m.put("files", e.getFiles().stream().map(EntryMapper::fileMap).collect(Collectors.toList()));
         }
         List<ExpenseItem> items = expenseLines != null ? expenseLines : expenseItems(e);
@@ -211,6 +221,9 @@ public final class EntryMapper {
         }
         m.put("filename", f.getFilename());
         m.put("path", f.getPath());
+        if (f.getCategory() != null && !f.getCategory().isBlank()) {
+            m.put("category", f.getCategory());
+        }
         m.put("createdAt", f.getCreatedAt().toString());
         return m;
     }
