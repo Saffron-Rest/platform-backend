@@ -1,0 +1,171 @@
+package com.saffron.cashflow.service;
+
+import com.saffron.cashflow.domain.AuditAction;
+import com.saffron.cashflow.domain.CardSettlement;
+import com.saffron.cashflow.dto.CardSettlementRequest;
+import com.saffron.cashflow.repository.CardSettlementRepository;
+import com.saffron.cashflow.security.AuthHelper;
+import com.saffron.cashflow.web.BadRequestException;
+import com.saffron.cashflow.web.NotFoundException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Manual card-sales settlement reconciliations. Each entry records what was rung up on
+ * card vs what the bank actually credited; the difference adjusts the card / bank treasury
+ * balance after the fact.
+ */
+@Service
+public class CardSettlementService {
+
+    private final CardSettlementRepository repository;
+    private final AuditService auditService;
+
+    public CardSettlementService(CardSettlementRepository repository, AuditService auditService) {
+        this.repository = repository;
+        this.auditService = auditService;
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> list(String fromParam, String toParam) {
+        AuthHelper.requireOperations();
+        LocalDate from = LocalDate.parse(fromParam);
+        LocalDate to = LocalDate.parse(toParam);
+        if (from.isAfter(to)) {
+            throw new BadRequestException("'from' must be on or before 'to'");
+        }
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (CardSettlement s :
+                repository.findByEffectiveDateBetweenOrderByEffectiveDateDescCreatedAtDesc(from, to)) {
+            rows.add(toMap(s));
+        }
+        return rows;
+    }
+
+    @Transactional
+    public Map<String, Object> create(CardSettlementRequest req) {
+        AuthHelper.requireOperations();
+        String linkedKind = normalize(req.getLinkedKind());
+        String linkedRefId = normalize(req.getLinkedRefId());
+
+        // Upsert if a settlement already exists for the linked row
+        if (linkedKind != null && linkedRefId != null) {
+            CardSettlement existing = repository
+                    .findByLinkedKindAndLinkedRefId(linkedKind, linkedRefId)
+                    .orElse(null);
+            if (existing != null) {
+                Map<String, Object> before = toMap(existing);
+                applyRequest(existing, req);
+                existing.setLinkedKind(linkedKind);
+                existing.setLinkedRefId(linkedRefId);
+                existing = repository.save(existing);
+                auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE,
+                        "CardSettlement", existing.getId(), before, toMap(existing), null);
+                return toMap(existing);
+            }
+        }
+
+        CardSettlement row = new CardSettlement();
+        applyRequest(row, req);
+        row.setLinkedKind(linkedKind);
+        row.setLinkedRefId(linkedRefId);
+        row.setCreatedBy(AuthHelper.currentUser().id());
+        row = repository.save(row);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.CREATE,
+                "CardSettlement", row.getId(), Map.of(), toMap(row), null);
+        return toMap(row);
+    }
+
+    @Transactional
+    public Map<String, Object> update(String id, CardSettlementRequest req) {
+        AuthHelper.requireOperations();
+        CardSettlement row = repository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Settlement not found"));
+        Map<String, Object> before = toMap(row);
+        applyRequest(row, req);
+        row = repository.save(row);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE,
+                "CardSettlement", id, before, toMap(row), null);
+        return toMap(row);
+    }
+
+    @Transactional
+    public void delete(String id) {
+        AuthHelper.requireOperations();
+        CardSettlement row = repository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Settlement not found"));
+        Map<String, Object> before = toMap(row);
+        repository.delete(row);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE,
+                "CardSettlement", id, before, Map.of(), null);
+    }
+
+    /** Net contribution from settlements over the window (sum of variances). */
+    @Transactional(readOnly = true)
+    public BigDecimal totalDeltaBetween(LocalDate from, LocalDate to) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (CardSettlement s :
+                repository.findByEffectiveDateBetweenOrderByEffectiveDateDescCreatedAtDesc(from, to)) {
+            total = total.add(s.delta());
+        }
+        return total.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /** Raw settlement rows for a window (used by treasury ledger to render rows). */
+    @Transactional(readOnly = true)
+    public List<CardSettlement> findBetween(LocalDate from, LocalDate to) {
+        return repository.findByEffectiveDateBetweenOrderByEffectiveDateDescCreatedAtDesc(from, to);
+    }
+
+    private void applyRequest(CardSettlement row, CardSettlementRequest req) {
+        if (req.getSettledAmount() == null) {
+            throw new BadRequestException("Settled amount is required");
+        }
+        if (req.getSettledAmount().signum() < 0) {
+            throw new BadRequestException("Settled amount must be zero or positive");
+        }
+        BigDecimal gross = req.getGrossAmount() != null ? req.getGrossAmount() : BigDecimal.ZERO;
+        if (gross.signum() < 0) {
+            throw new BadRequestException("Gross amount must be zero or positive");
+        }
+        row.setEffectiveDate(LocalDate.parse(req.getEffectiveDate()));
+        row.setGrossAmount(gross);
+        row.setSettledAmount(req.getSettledAmount());
+        row.setNotes(req.getNotes() != null && !req.getNotes().isBlank() ? req.getNotes().trim() : null);
+    }
+
+    public static Map<String, Object> toMap(CardSettlement s) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", s.getId());
+        m.put("effectiveDate", s.getEffectiveDate().toString());
+        m.put("grossAmount", s.getGrossAmount().setScale(2, RoundingMode.HALF_UP).doubleValue());
+        m.put("settledAmount", s.getSettledAmount().setScale(2, RoundingMode.HALF_UP).doubleValue());
+        m.put("delta", s.delta().doubleValue());
+        if (s.getLinkedKind() != null) {
+            m.put("linkedKind", s.getLinkedKind());
+        }
+        if (s.getLinkedRefId() != null) {
+            m.put("linkedRefId", s.getLinkedRefId());
+        }
+        if (s.getNotes() != null && !s.getNotes().isBlank()) {
+            m.put("notes", s.getNotes());
+        }
+        if (s.getCreatedAt() != null) {
+            m.put("createdAt", s.getCreatedAt().toString());
+        }
+        return m;
+    }
+
+    private static String normalize(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
+    }
+}

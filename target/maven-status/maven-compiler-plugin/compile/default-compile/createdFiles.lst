@@ -10,6 +10,7 @@ com/saffron/cashflow/dto/ManualDeliveryIncomeRequest.class
 com/saffron/cashflow/service/AnalyticsService.class
 com/saffron/cashflow/controller/FileController.class
 com/saffron/cashflow/service/TreasuryService.class
+com/saffron/cashflow/domain/CardSettlement.class
 com/saffron/cashflow/repository/UserRepository.class
 com/saffron/cashflow/domain/WorkShift.class
 com/saffron/cashflow/controller/ReportController.class
@@ -26,6 +27,7 @@ com/saffron/cashflow/service/EntryService$HandoverPendingInfo.class
 com/saffron/cashflow/service/AuditSpecification.class
 com/saffron/cashflow/dto/StandaloneExpenseRequest.class
 com/saffron/cashflow/service/AnalyticsService$DayTotals.class
+com/saffron/cashflow/repository/CardSettlementRepository.class
 com/saffron/cashflow/controller/AnalyticsController.class
 com/saffron/cashflow/repository/AlertRepository.class
 com/saffron/cashflow/domain/ReceiptFile.class
@@ -44,6 +46,7 @@ com/saffron/cashflow/repository/ReceiptFileRepository.class
 com/saffron/cashflow/util/EntryMapper.class
 com/saffron/cashflow/dto/UpdateUserRequest.class
 com/saffron/cashflow/dto/LoginRequest.class
+com/saffron/cashflow/service/CardSettlementService.class
 com/saffron/cashflow/service/DashboardService.class
 com/saffron/cashflow/domain/AuditAction.class
 com/saffron/cashflow/domain/NotificationDispatch.class
@@ -54,6 +57,7 @@ com/saffron/cashflow/service/PayRateService.class
 com/saffron/cashflow/domain/PaymentSource.class
 com/saffron/cashflow/util/AuditDiff.class
 com/saffron/cashflow/domain/CashierNotificationType.class
+com/saffron/cashflow/dto/CardSettlementRequest.class
 com/saffron/cashflow/service/ReportService.class
 com/saffron/cashflow/service/ProfitLossService$RevenueTotals.class
 com/saffron/cashflow/report/ProfitLossTemplate.class
@@ -68,6 +72,7 @@ com/saffron/cashflow/controller/TreasuryController.class
 com/saffron/cashflow/domain/AlertType.class
 com/saffron/cashflow/repository/AdminTelegramDispatchRepository.class
 com/saffron/cashflow/repository/ExpenseItemRepository.class
+com/saffron/cashflow/controller/CardSettlementController.class
 com/saffron/cashflow/dto/ExpenseItemRequest.class
 com/saffron/cashflow/util/EntryCalculator.class
 com/saffron/cashflow/repository/NotificationDispatchRepository.class

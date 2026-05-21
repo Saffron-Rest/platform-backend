@@ -1,6 +1,7 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.AuditAction;
+import com.saffron.cashflow.domain.CardSettlement;
 import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.EntryStatus;
 import com.saffron.cashflow.domain.ExpenseItem;
@@ -31,6 +32,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +48,7 @@ public class TreasuryService {
     private final AuditService auditService;
     private final ManualDeliveryService manualDeliveryService;
     private final ExpenseService expenseService;
+    private final CardSettlementService cardSettlementService;
 
     public TreasuryService(
             SystemSettingRepository settingRepository,
@@ -54,7 +57,8 @@ public class TreasuryService {
             UserRepository userRepository,
             AuditService auditService,
             ManualDeliveryService manualDeliveryService,
-            ExpenseService expenseService) {
+            ExpenseService expenseService,
+            CardSettlementService cardSettlementService) {
         this.settingRepository = settingRepository;
         this.entryRepository = entryRepository;
         this.salaryPaymentRepository = salaryPaymentRepository;
@@ -62,6 +66,7 @@ public class TreasuryService {
         this.auditService = auditService;
         this.manualDeliveryService = manualDeliveryService;
         this.expenseService = expenseService;
+        this.cardSettlementService = cardSettlementService;
     }
 
     /** Default settlement % — any logged-in user (for shift report form). */
@@ -100,11 +105,15 @@ public class TreasuryService {
                 expenseService.sumStandaloneBetween(from, to, PaymentSource.CASH);
         BigDecimal standaloneCardExpenses =
                 expenseService.sumStandaloneBetween(from, to, PaymentSource.CARD);
+        // Manual card-settlement reconciliations (sum of variances). Can be negative.
+        BigDecimal cardFromManualSettlement =
+                cardSettlementService.totalDeltaBetween(from, to);
 
         // Net contributions (what's actually added to the balance from each source)
         BigDecimal cashFromEntries = cashFromShiftReports.subtract(standaloneCashExpenses);
         BigDecimal cardFromEntries = cardFromShiftReports
                 .add(cardFromManualDelivery)
+                .add(cardFromManualSettlement)
                 .subtract(standaloneCardExpenses);
 
         BigDecimal salaryCashOut = BigDecimal.ZERO;
@@ -156,6 +165,7 @@ public class TreasuryService {
         result.put("cashFromShiftReports", toDouble(cashFromShiftReports));
         result.put("cardFromShiftReports", toDouble(cardFromShiftReports));
         result.put("cardFromManualDelivery", toDouble(cardFromManualDelivery));
+        result.put("cardFromManualSettlement", toDouble(cardFromManualSettlement));
         result.put("standaloneCashExpenses", toDouble(standaloneCashExpenses));
         result.put("standaloneCardExpenses", toDouble(standaloneCardExpenses));
         result.put("salaryPaidFromCash", toDouble(salaryCashOut));
@@ -240,6 +250,19 @@ public class TreasuryService {
             PaymentSource source, LocalDate from, LocalDate to, TreasurySettings settings) {
         List<Map<String, Object>> rows = new ArrayList<>();
 
+        // Card-side: pre-load settlements so we can apply linked overrides as rows are built
+        Map<String, CardSettlement> linkedSettlements = new HashMap<>();
+        List<CardSettlement> standaloneSettlements = new ArrayList<>();
+        if (source == PaymentSource.CARD) {
+            for (CardSettlement s : cardSettlementService.findBetween(from, to)) {
+                if (s.getLinkedKind() != null && s.getLinkedRefId() != null) {
+                    linkedSettlements.put(linkKey(s.getLinkedKind(), s.getLinkedRefId()), s);
+                } else {
+                    standaloneSettlements.add(s);
+                }
+            }
+        }
+
         // 1) Locked shift reports — split into separate income / expense / transfer rows
         List<DailyEntry> entries = entryRepository.findLockedBetweenWithExpenses(from, to, EntryStatus.LOCKED);
         for (DailyEntry e : entries) {
@@ -263,6 +286,35 @@ public class TreasuryService {
                         d.getId());
                 if (d.getNotes() != null && !d.getNotes().isBlank()) {
                     row.put("notes", d.getNotes());
+                }
+                rows.add(row);
+            }
+
+            // 2b) Standalone manual card settlements (no linked row) — surfaced as their own
+            //     ledger entries. Linked settlements are applied as inline overrides further below.
+            for (CardSettlement s : standaloneSettlements) {
+                BigDecimal delta = s.delta();
+                if (delta.signum() == 0) continue;
+                String sign = delta.signum() < 0 ? "-" : "+";
+                String label = s.getGrossAmount().signum() > 0
+                        ? "Card settlement · sold "
+                                + round2(s.getGrossAmount()).toPlainString() + " → got "
+                                + round2(s.getSettledAmount()).toPlainString()
+                        : "Card settlement · " + round2(s.getSettledAmount()).toPlainString() + " credited";
+                Map<String, Object> row = baseRow(
+                        s.getEffectiveDate().toString(),
+                        "CARD_SETTLEMENT",
+                        "INCOME",
+                        label,
+                        delta.abs(),
+                        sign,
+                        "/treasury/history?source=card",
+                        "Open settlement",
+                        s.getId());
+                row.put("grossAmount", round2(s.getGrossAmount()).doubleValue());
+                row.put("settledAmount", round2(s.getSettledAmount()).doubleValue());
+                if (s.getNotes() != null && !s.getNotes().isBlank()) {
+                    row.put("notes", s.getNotes());
                 }
                 rows.add(row);
             }
@@ -312,7 +364,48 @@ public class TreasuryService {
             rows.add(row);
         }
 
+        // Apply linked card-settlement overrides to existing card rows (in place).
+        // Each override replaces the row's amount with the actual bank-credited value,
+        // and attaches the original snapshot + delta as metadata.
+        if (source == PaymentSource.CARD && !linkedSettlements.isEmpty()) {
+            for (Map<String, Object> row : rows) {
+                applyLinkedSettlementOverride(row, linkedSettlements);
+            }
+        }
+
         return rows;
+    }
+
+    private static String linkKey(String kind, String refId) {
+        return kind + "::" + refId;
+    }
+
+    private static void applyLinkedSettlementOverride(
+            Map<String, Object> row, Map<String, CardSettlement> linked) {
+        Object kindObj = row.get("kind");
+        Object refIdObj = row.get("refId");
+        if (kindObj == null || refIdObj == null) return;
+        // Don't allow CARD_SETTLEMENT rows to be re-overridden.
+        if ("CARD_SETTLEMENT".equals(kindObj)) return;
+        CardSettlement s = linked.get(linkKey(kindObj.toString(), refIdObj.toString()));
+        if (s == null) return;
+
+        Object originalAmountObj = row.get("amount");
+        if (!(originalAmountObj instanceof Number)) return;
+        double originalAmount = ((Number) originalAmountObj).doubleValue();
+        double settledValue = s.getSettledAmount().setScale(2, RoundingMode.HALF_UP).doubleValue();
+
+        row.put("amount", settledValue);
+        row.put("settledOverride", true);
+        row.put("originalAmount", originalAmount);
+        row.put("settlementId", s.getId());
+        if (s.getGrossAmount() != null && s.getGrossAmount().signum() > 0) {
+            row.put("settledGross",
+                    s.getGrossAmount().setScale(2, RoundingMode.HALF_UP).doubleValue());
+        }
+        if (s.getNotes() != null && !s.getNotes().isBlank()) {
+            row.put("settledNotes", s.getNotes());
+        }
     }
 
     /** Split a locked shift report into per-line treasury movements for the given source. */
