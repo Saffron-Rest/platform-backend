@@ -98,17 +98,21 @@ public final class EntryCalculator {
     }
 
     /**
-     * Net card/bank movement for treasury: settled card sales + delivery to card − refunds − card expenses
-     * + bank deposits.
+     * Net card/bank movement for treasury: settled card sales − card refunds − card expenses + bank deposits.
+     *
+     * <p>Delivery → card is <b>not</b> included here: delivery income sits as "pending bank
+     * settlement" until the bank actually credits it. The credit is recognised once a
+     * {@code BankDeposit} or {@code CardSettlement} reconciliation is attached to the delivery
+     * row in /treasury/history. This keeps the card balance honest — only money already in
+     * the bank is reflected.
      */
     public static BigDecimal cardNetForTreasury(DailyEntry e, TreasurySettings settings) {
         BigDecimal settledCardSales = e.getCardSales().multiply(settings.getCardSalesSettlementRate());
-        BigDecimal deliveryToCard = PlatformSettlement.totalDeliverySettledToCard(e, settings);
         BigDecimal out = e.getCardRefunds().add(e.getPlatformRefunds());
         if (hasExpenseItems(e)) {
             out = out.add(sumExpenseItems(e.getExpenseItems(), PaymentSource.CARD));
         }
-        return round(settledCardSales.add(deliveryToCard).subtract(out).add(e.getBankDeposit()));
+        return round(settledCardSales.subtract(out).add(e.getBankDeposit()));
     }
 
     private static BigDecimal expenseTotalForCashClosing(DailyEntry e) {

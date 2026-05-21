@@ -8,6 +8,7 @@ import com.saffron.cashflow.repository.BankDepositLinkRepository;
 import com.saffron.cashflow.repository.BankDepositRepository;
 import com.saffron.cashflow.repository.CardSettlementRepository;
 import com.saffron.cashflow.security.AuthHelper;
+import com.saffron.cashflow.util.TreasuryRowKinds;
 import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.NotFoundException;
 import org.springframework.stereotype.Service;
@@ -129,19 +130,38 @@ public class BankDepositService {
                 "BankDeposit", id, before, Map.of(), null);
     }
 
-    /** Sum of variances (totalSettled − totalGross) across deposits in the window.
-     *  This is what gets added to the base card balance to reflect actual deposits. */
+    /** Total balance contribution of deposits in the window — kind-aware per link.
+     *
+     *  <p>For links of "pending" kinds (delivery), the contribution is the full pro-rata
+     *  share (since the underlying delivery row is not in the base card balance until
+     *  reconciled). For counted kinds (card sales settled, refunds, etc.), only the
+     *  variance (settled share − gross snapshot) is added because the base already
+     *  includes the gross amount.
+     */
     @Transactional(readOnly = true)
-    public BigDecimal totalVarianceBetween(LocalDate from, LocalDate to) {
+    public BigDecimal totalBalanceContributionBetween(LocalDate from, LocalDate to) {
         BigDecimal total = BigDecimal.ZERO;
         Set<String> seen = new HashSet<>();
         for (BankDeposit d : depositRepository.findByBankDateBetween(from, to)) {
-            if (seen.add(d.getId())) total = total.add(d.variance());
+            if (seen.add(d.getId())) total = total.add(contributionOf(d));
         }
         for (BankDeposit d : depositRepository.findByLinkedDateBetween(from, to)) {
-            if (seen.add(d.getId())) total = total.add(d.variance());
+            if (seen.add(d.getId())) total = total.add(contributionOf(d));
         }
         return total.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private static BigDecimal contributionOf(BankDeposit d) {
+        BigDecimal contribution = BigDecimal.ZERO;
+        for (BankDepositLink l : d.getLinks()) {
+            BigDecimal share = d.shareFor(l);
+            if (TreasuryRowKinds.isPending(l.getLinkedKind())) {
+                contribution = contribution.add(share);
+            } else {
+                contribution = contribution.add(share.subtract(l.getGrossAmount()));
+            }
+        }
+        return contribution;
     }
 
     /** All deposits intersecting the window (by bankDate OR any linkedDate). */

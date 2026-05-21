@@ -38,6 +38,12 @@ public class AlertController {
         return alertService.checkMissingSubmissions();
     }
 
+    @PostMapping("/check-unsettled-delivery")
+    public Map<String, Object> checkUnsettledDelivery() {
+        AuthHelper.requireAdmin();
+        return alertService.checkUnsettledDelivery();
+    }
+
     @PatchMapping("/{id}/read")
     public Map<String, Object> markRead(@PathVariable String id) {
         return alertService.markRead(id);

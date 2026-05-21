@@ -6,6 +6,7 @@ import com.saffron.cashflow.dto.CardSettlementRequest;
 import com.saffron.cashflow.repository.BankDepositLinkRepository;
 import com.saffron.cashflow.repository.CardSettlementRepository;
 import com.saffron.cashflow.security.AuthHelper;
+import com.saffron.cashflow.util.TreasuryRowKinds;
 import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.NotFoundException;
 import org.springframework.stereotype.Service;
@@ -123,13 +124,23 @@ public class CardSettlementService {
                 "CardSettlement", id, before, Map.of(), null);
     }
 
-    /** Net contribution from settlements over the window (sum of variances). */
+    /** Net balance contribution from settlements over the window, kind-aware.
+     *
+     *  <p>For settlements linked to a "pending" kind (e.g. delivery), the contribution is
+     *  the full {@code settledAmount} (the base balance carries no projected value for
+     *  pending rows). For counted kinds, only the delta (settled − gross) applies because
+     *  the gross is already in the base sum.
+     */
     @Transactional(readOnly = true)
-    public BigDecimal totalDeltaBetween(LocalDate from, LocalDate to) {
+    public BigDecimal totalBalanceContributionBetween(LocalDate from, LocalDate to) {
         BigDecimal total = BigDecimal.ZERO;
         for (CardSettlement s :
                 repository.findByEffectiveDateBetweenOrderByEffectiveDateDescCreatedAtDesc(from, to)) {
-            total = total.add(s.delta());
+            if (TreasuryRowKinds.isPending(s.getLinkedKind())) {
+                total = total.add(s.getSettledAmount());
+            } else {
+                total = total.add(s.delta());
+            }
         }
         return total.setScale(2, RoundingMode.HALF_UP);
     }

@@ -2,11 +2,14 @@ package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.*;
 import com.saffron.cashflow.repository.AlertRepository;
+import com.saffron.cashflow.repository.BankDepositLinkRepository;
+import com.saffron.cashflow.repository.CardSettlementRepository;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.security.AuthUser;
 import com.saffron.cashflow.util.EntryCalculator;
+import com.saffron.cashflow.util.TreasurySettings;
 import com.saffron.cashflow.util.WeeklyOperatingHours;
 import com.saffron.cashflow.web.NotFoundException;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,6 +17,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -23,6 +27,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 @Service
 public class AlertService {
@@ -35,30 +40,42 @@ public class AlertService {
 
     private final ZoneId zoneId;
     private final int missingReportHour;
+    private final int unsettledDeliveryDays;
     private final AlertRepository alertRepository;
     private final DailyEntryRepository entryRepository;
     private final UserRepository userRepository;
     private final WorkShiftService workShiftService;
     private final SettingsService settingsService;
     private final TelegramNotificationService telegram;
+    private final BankDepositLinkRepository bankDepositLinkRepository;
+    private final CardSettlementRepository cardSettlementRepository;
+    private final TreasuryService treasuryService;
 
     public AlertService(
             @Value("${app.timezone:Europe/Warsaw}") String timezone,
             @Value("${app.notifications.missing-report-hour:12}") int missingReportHour,
+            @Value("${app.notifications.unsettled-delivery-days:3}") int unsettledDeliveryDays,
             AlertRepository alertRepository,
             DailyEntryRepository entryRepository,
             UserRepository userRepository,
             WorkShiftService workShiftService,
             SettingsService settingsService,
-            TelegramNotificationService telegram) {
+            TelegramNotificationService telegram,
+            BankDepositLinkRepository bankDepositLinkRepository,
+            CardSettlementRepository cardSettlementRepository,
+            TreasuryService treasuryService) {
         this.zoneId = ZoneId.of(timezone);
         this.missingReportHour = missingReportHour;
+        this.unsettledDeliveryDays = unsettledDeliveryDays;
         this.alertRepository = alertRepository;
         this.entryRepository = entryRepository;
         this.userRepository = userRepository;
         this.workShiftService = workShiftService;
         this.settingsService = settingsService;
         this.telegram = telegram;
+        this.bankDepositLinkRepository = bankDepositLinkRepository;
+        this.cardSettlementRepository = cardSettlementRepository;
+        this.treasuryService = treasuryService;
     }
 
     @Transactional(readOnly = true)
@@ -151,6 +168,159 @@ public class AlertService {
     @Transactional
     public void scheduledEveningDigest() {
         sendEveningDigest();
+    }
+
+    /** Morning scan for delivery sales that haven't been reconciled to a bank deposit. */
+    @Scheduled(cron = "0 30 9 * * *", zone = "${app.timezone:Europe/Warsaw}")
+    @Transactional
+    public void scheduledUnsettledDeliveryCheck() {
+        runUnsettledDeliveryCheck(true);
+    }
+
+    /** Manual trigger from Admin → Settings. */
+    @Transactional
+    public Map<String, Object> checkUnsettledDelivery() {
+        AuthHelper.requireAdmin();
+        return runUnsettledDeliveryCheck(true);
+    }
+
+    /**
+     * Scans locked shift reports older than the configured threshold for unreconciled
+     * delivery sales (no BankDepositLink and no CardSettlement attached). Sends a single
+     * Telegram digest grouped by platform and creates an in-app alert.
+     */
+    @Transactional
+    public Map<String, Object> runUnsettledDeliveryCheck(boolean notifyTelegram) {
+        LocalDate today = LocalDate.now(zoneId);
+        LocalDate cutoff = today.minusDays(unsettledDeliveryDays);
+        LocalDate earliest = LocalDate.of(2000, 1, 1);
+
+        // Aggregate by platform → { totalProjected, oldestDate, dayCount }
+        Map<String, PlatformPending> byPlatform = new TreeMap<>();
+        int rowCount = 0;
+
+        List<DailyEntry> entries =
+                entryRepository.findLockedBetweenWithExpenses(earliest, cutoff, EntryStatus.LOCKED);
+        for (DailyEntry e : entries) {
+            rowCount += addPendingDelivery(byPlatform, e, "wolt", "Wolt", e.getWoltSales(), e.getWoltSettledToCard());
+            rowCount += addPendingDelivery(byPlatform, e, "bolt", "Bolt", e.getBoltSales(), e.getBoltSettledToCard());
+            rowCount += addPendingDelivery(byPlatform, e, "uberEats", "Uber Eats", e.getUberEatsSales(), e.getUberEatsSettledToCard());
+            rowCount += addPendingDelivery(byPlatform, e, "glovo", "Glovo", e.getGlovoSales(), e.getGlovoSettledToCard());
+            rowCount += addPendingDelivery(byPlatform, e, "other", "Other delivery", e.getOtherPlatformSales(), e.getOtherSettledToCard());
+        }
+
+        if (byPlatform.isEmpty()) {
+            if (notifyTelegram) {
+                telegram.sendHtmlOnce(
+                        "unsettled-delivery-clear:" + today,
+                        "<b>✅ Delivery fully reconciled</b>\n" + DATE_FMT.format(today)
+                                + " — no unsettled delivery older than " + unsettledDeliveryDays + " day(s).");
+            }
+            return Map.of(
+                    "ok", true,
+                    "created", 0,
+                    "thresholdDays", unsettledDeliveryDays,
+                    "platforms", List.of(),
+                    "date", today.toString());
+        }
+
+        BigDecimal grandTotal = BigDecimal.ZERO;
+        for (PlatformPending p : byPlatform.values()) grandTotal = grandTotal.add(p.totalProjected);
+
+        // In-app alert (one per check)
+        String summary = byPlatform.values().stream()
+                .map(p -> p.label + " " + p.totalProjected.setScale(2, RoundingMode.HALF_UP)
+                        + " PLN (" + p.dayCount + "d)")
+                .reduce((a, b) -> a + " · " + b)
+                .orElse("");
+        create(
+                AlertType.UNSETTLED_DELIVERY,
+                "Unsettled delivery > " + unsettledDeliveryDays + "d: " + summary,
+                null,
+                null);
+
+        if (notifyTelegram) {
+            String dedupe = "unsettled-delivery:" + today + ":" + unsettledDeliveryDays;
+            StringBuilder body = new StringBuilder();
+            body.append("<b>🛵 Delivery awaiting bank settlement</b>\n");
+            body.append(DATE_FMT.format(today)).append(" · older than ")
+                    .append(unsettledDeliveryDays).append(" day(s)\n\n");
+            for (PlatformPending p : byPlatform.values()) {
+                body.append("• <b>").append(escapeHtml(p.label)).append("</b>: ")
+                        .append(p.totalProjected.setScale(2, RoundingMode.HALF_UP))
+                        .append(" PLN across ").append(p.dayCount).append(" day(s)")
+                        .append(" — oldest ").append(DATE_FMT.format(p.oldestDate)).append("\n");
+            }
+            body.append("\n<b>Total projected:</b> ")
+                    .append(grandTotal.setScale(2, RoundingMode.HALF_UP)).append(" PLN");
+            body.append("\n\n<i>Open <code>/treasury/history?source=card</code> → filter ");
+            body.append("\"Pending\" → reconcile as bank deposit.</i>");
+            telegram.sendHtmlOnce(dedupe, body.toString());
+        }
+
+        // Build response payload
+        List<Map<String, Object>> platforms = new ArrayList<>();
+        for (PlatformPending p : byPlatform.values()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("platform", p.key);
+            m.put("label", p.label);
+            m.put("projected", p.totalProjected.setScale(2, RoundingMode.HALF_UP).doubleValue());
+            m.put("dayCount", p.dayCount);
+            m.put("oldestDate", p.oldestDate.toString());
+            platforms.add(m);
+        }
+        return Map.of(
+                "ok", true,
+                "created", 1,
+                "rowCount", rowCount,
+                "thresholdDays", unsettledDeliveryDays,
+                "totalProjected", grandTotal.setScale(2, RoundingMode.HALF_UP).doubleValue(),
+                "platforms", platforms,
+                "date", today.toString());
+    }
+
+    private int addPendingDelivery(
+            Map<String, PlatformPending> byPlatform,
+            DailyEntry e,
+            String key,
+            String label,
+            BigDecimal sales,
+            BigDecimal manualOverride) {
+        if (sales == null || sales.signum() <= 0) return 0;
+        // If a BankDeposit or CardSettlement covers this entry's delivery row, skip it.
+        if (bankDepositLinkRepository
+                .findByLinkedKindAndLinkedRefId("SHIFT_DELIVERY_SETTLED", e.getId())
+                .isPresent()) return 0;
+        if (cardSettlementRepository
+                .findByLinkedKindAndLinkedRefId("SHIFT_DELIVERY_SETTLED", e.getId())
+                .isPresent()) return 0;
+        // Projected card amount: manual override on the entry wins, otherwise the configured
+        // platform settlement rate. We surface this number so the admin knows the magnitude.
+        TreasurySettings settings = treasuryService.loadSettings();
+        BigDecimal projected = manualOverride != null
+                ? manualOverride.max(BigDecimal.ZERO)
+                : sales.multiply(settings.platformRate(key));
+        if (projected.signum() <= 0) return 0;
+        PlatformPending pp = byPlatform.computeIfAbsent(key, k -> new PlatformPending(k, label));
+        pp.totalProjected = pp.totalProjected.add(projected);
+        pp.dayCount++;
+        if (pp.oldestDate == null || e.getDate().isBefore(pp.oldestDate)) {
+            pp.oldestDate = e.getDate();
+        }
+        return 1;
+    }
+
+    private static class PlatformPending {
+        final String key;
+        final String label;
+        BigDecimal totalProjected = BigDecimal.ZERO;
+        int dayCount = 0;
+        LocalDate oldestDate;
+
+        PlatformPending(String key, String label) {
+            this.key = key;
+            this.label = label;
+        }
     }
 
     @Transactional
@@ -259,6 +429,7 @@ public class AlertService {
             case CASH_SHORTAGE -> "💰";
             case LARGE_REFUND -> "↩️";
             case UNUSUAL_EXPENSE -> "📦";
+            case UNSETTLED_DELIVERY -> "🛵";
         };
     }
 
@@ -268,6 +439,7 @@ public class AlertService {
             case CASH_SHORTAGE -> "Cash shortage";
             case LARGE_REFUND -> "Large refund";
             case UNUSUAL_EXPENSE -> "High expenses";
+            case UNSETTLED_DELIVERY -> "Unsettled delivery";
         };
     }
 

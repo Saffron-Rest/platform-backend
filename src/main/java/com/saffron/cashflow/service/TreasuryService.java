@@ -23,6 +23,7 @@ import com.saffron.cashflow.util.EntryCalculator;
 import com.saffron.cashflow.util.ManualDeliverySettlement;
 import com.saffron.cashflow.util.PlatformSettlement;
 import com.saffron.cashflow.util.SalaryPaymentPeriod;
+import com.saffron.cashflow.util.TreasuryRowKinds;
 import com.saffron.cashflow.util.TreasurySettings;
 import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.NotFoundException;
@@ -110,13 +111,15 @@ public class TreasuryService {
                 expenseService.sumStandaloneBetween(from, to, PaymentSource.CASH);
         BigDecimal standaloneCardExpenses =
                 expenseService.sumStandaloneBetween(from, to, PaymentSource.CARD);
-        // Manual card-settlement reconciliations (sum of variances). Can be negative.
+        // Manual card-settlement reconciliations — kind-aware (delivery contributes full
+        // settled amount; non-pending kinds contribute only the variance).
         BigDecimal cardFromManualSettlement =
-                cardSettlementService.totalDeltaBetween(from, to);
-        // Bank-deposit reconciliations: each deposit contributes (totalSettled − totalGross)
-        // to the card balance. Multi-day deposits roll several source rows into one variance.
+                cardSettlementService.totalBalanceContributionBetween(from, to);
+        // Bank-deposit reconciliations — same kind-aware rule. Delivery shares are added
+        // in full (since the base excludes pending delivery); card-sales shares contribute
+        // only the variance against their snapshot.
         BigDecimal cardFromBankDeposits =
-                bankDepositService.totalVarianceBetween(from, to);
+                bankDepositService.totalBalanceContributionBetween(from, to);
 
         // Net contributions (what's actually added to the balance from each source)
         BigDecimal cashFromEntries = cashFromShiftReports.subtract(standaloneCashExpenses);
@@ -221,7 +224,10 @@ public class TreasuryService {
 
         BigDecimal running = opening;
         for (Map<String, Object> r : rows) {
-            running = running.add(BigDecimal.valueOf(signedAmount(r)));
+            // Pending rows are visible but don't move the balance until reconciled.
+            if (!Boolean.TRUE.equals(r.get("pending"))) {
+                running = running.add(BigDecimal.valueOf(signedAmount(r)));
+            }
             r.put("runningBalance", round2(running).doubleValue());
         }
 
@@ -252,6 +258,7 @@ public class TreasuryService {
         if (end.isBefore(earliest)) return BigDecimal.ZERO;
         BigDecimal total = BigDecimal.ZERO;
         for (Map<String, Object> r : collectMovements(source, earliest, end, settings)) {
+            if (Boolean.TRUE.equals(r.get("pending"))) continue;
             total = total.add(BigDecimal.valueOf(signedAmount(r)));
         }
         return total;
@@ -397,6 +404,20 @@ public class TreasuryService {
         if (source == PaymentSource.CARD && !depositLinks.isEmpty()) {
             for (Map<String, Object> row : rows) {
                 applyBankDepositOverride(row, depositLinks);
+            }
+        }
+
+        // Mark unreconciled rows of pending kinds (e.g. delivery) as "pending bank
+        // settlement". These rows are visible in the ledger but don't move the running
+        // balance until they're reconciled via a BankDeposit or CardSettlement.
+        if (source == PaymentSource.CARD) {
+            for (Map<String, Object> row : rows) {
+                Object kind = row.get("kind");
+                if (kind == null) continue;
+                if (!TreasuryRowKinds.isPending(kind.toString())) continue;
+                if (Boolean.TRUE.equals(row.get("settledOverride"))) continue;
+                if (row.get("bankDepositId") != null) continue;
+                row.put("pending", true);
             }
         }
 
@@ -690,7 +711,7 @@ public class TreasuryService {
         return result;
     }
 
-    private TreasurySettings loadSettings() {
+    TreasurySettings loadSettings() {
         return settingRepository.findById(TreasurySettings.SETTINGS_KEY)
                 .map(s -> TreasurySettings.fromMap(s.getValue()))
                 .orElse(new TreasurySettings());

@@ -1,4 +1,5 @@
 com/saffron/cashflow/util/AuditDiff$1.class
+com/saffron/cashflow/util/TreasuryRowKinds.class
 com/saffron/cashflow/repository/ManualDeliveryIncomeRepository.class
 com/saffron/cashflow/repository/DailyEntryRepository.class
 com/saffron/cashflow/util/SalaryPaymentPeriod.class
@@ -132,6 +133,7 @@ com/saffron/cashflow/repository/PayRateChangeRepository.class
 com/saffron/cashflow/repository/BankDepositLinkRepository.class
 com/saffron/cashflow/controller/AuthController.class
 com/saffron/cashflow/domain/PayRateChange.class
+com/saffron/cashflow/service/AlertService$PlatformPending.class
 com/saffron/cashflow/domain/ExpenseItem.class
 com/saffron/cashflow/controller/WorkShiftController.class
 com/saffron/cashflow/service/ExpenseService.class
