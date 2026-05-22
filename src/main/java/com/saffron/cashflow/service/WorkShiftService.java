@@ -53,8 +53,14 @@ public class WorkShiftService {
                 .orElse(ShiftType.FULL);
     }
 
+    /**
+     * True when this cashier is on the dedicated closing shift AND there is at least one
+     * other working cashier that day (otherwise they're the sole reporter and need the
+     * full form, not the closing-only short form).
+     */
     public boolean isClosingShift(String userId, LocalDate date) {
-        return resolveShiftType(userId, date) == ShiftType.CLOSING;
+        if (resolveShiftType(userId, date) != ShiftType.CLOSING) return false;
+        return countWorkingOnDate(date) > 1;
     }
 
     public boolean isScheduledToWork(String userId, LocalDate date) {
@@ -104,8 +110,9 @@ public class WorkShiftService {
     }
 
     public Map<String, Object> scheduleFor(String userId, LocalDate date) {
+        long workingCount = countWorkingOnDate(date);
         return findShift(userId, date)
-                .map(w -> toMap(w, date))
+                .map(w -> toMap(w, date, workingCount))
                 .orElse(offDayMap(userId, date));
     }
 
@@ -119,8 +126,9 @@ public class WorkShiftService {
         if (user.role() == Role.CASHIER && !userId.equals(user.id())) {
             throw new ForbiddenException("Forbidden");
         }
+        long workingCount = countWorkingOnDate(date);
         return findShift(userId, date)
-                .map(w -> toMap(w, date))
+                .map(w -> toMap(w, date, workingCount))
                 .orElse(offDayMap(userId, date));
     }
 
@@ -128,10 +136,11 @@ public class WorkShiftService {
     public List<Map<String, Object>> listForDate(String dateParam) {
         AuthHelper.currentUser();
         LocalDate date = parseDate(dateParam);
-        return workShiftRepository.findByDateWithUser(date).stream()
+        List<WorkShift> working = workShiftRepository.findByDateWithUser(date).stream()
                 .filter(WorkShift::isWorking)
-                .map(w -> toMap(w, date))
                 .toList();
+        long workingCount = working.size();
+        return working.stream().map(w -> toMap(w, date, workingCount)).toList();
     }
 
     /** Calendar month view: date → list of assignments (read-only for cashiers). */
@@ -142,12 +151,26 @@ public class WorkShiftService {
         if (to.isBefore(from)) {
             throw new BadRequestException("'to' must be on or after 'from'");
         }
+        // Pre-compute working counts per date so the per-shift `closingOnly` flag stays
+        // consistent with the rule: a sole working cashier always gets the full report.
+        Map<LocalDate, Long> workingByDate = new java.util.HashMap<>();
+        for (WorkShift w : workShiftRepository.findWorkingBetween(from, to)) {
+            workingByDate.merge(w.getDate(), 1L, Long::sum);
+        }
         Map<String, List<Map<String, Object>>> byDate = new TreeMap<>();
         for (WorkShift w : workShiftRepository.findWorkingBetween(from, to)) {
             String key = w.getDate().toString();
-            byDate.computeIfAbsent(key, k -> new ArrayList<>()).add(toMap(w, w.getDate()));
+            long count = workingByDate.getOrDefault(w.getDate(), 1L);
+            byDate.computeIfAbsent(key, k -> new ArrayList<>()).add(toMap(w, w.getDate(), count));
         }
         return byDate;
+    }
+
+    /** Number of cashiers actually working a given date. */
+    private long countWorkingOnDate(LocalDate date) {
+        return workShiftRepository.findByDateWithUser(date).stream()
+                .filter(WorkShift::isWorking)
+                .count();
     }
 
     @Transactional
@@ -177,7 +200,7 @@ public class WorkShiftService {
         workShiftRepository.save(shift);
         ReconcileResult reconciled = reconcileClosingShifts(date);
         shift = workShiftRepository.findByUser_IdAndDateWithUser(req.userId(), date).orElse(shift);
-        Map<String, Object> map = toMap(shift, date);
+        Map<String, Object> map = toMap(shift, date, countWorkingOnDate(date));
         if (reconciled.adjusted()) {
             map.put("autoAdjustedClosing", true);
             map.put("designatedCloserName", reconciled.closerName());
@@ -304,7 +327,7 @@ public class WorkShiftService {
         }
     }
 
-    private static Map<String, Object> toMap(WorkShift w, LocalDate date) {
+    private static Map<String, Object> toMap(WorkShift w, LocalDate date, long workingCount) {
         Map<String, Object> m = new LinkedHashMap<>();
         User u = w.getUser();
         m.put("id", w.getId());
@@ -313,14 +336,20 @@ public class WorkShiftService {
             m.put("name", u.getName());
             m.put("email", u.getEmail());
         }
+        // A sole working cashier handles the whole day's reporting (nobody else can
+        // record sales for them), so they always get the full report — even if their
+        // schedule is marked "till close".
+        boolean isCloser = w.isWorking() && w.getShiftType() == ShiftType.CLOSING;
+        boolean closingOnly = isCloser && workingCount > 1;
+
         m.put("date", date.toString());
         m.put("working", w.isWorking());
         m.put("startTime", formatTime(w.getStartTime()));
         m.put("endTime", formatTime(w.getEndTime()));
         m.put("tillClose", w.isWorking() && w.getEndTime() == null);
-        m.put("shiftType", w.getShiftType().name());
-        m.put("closingOnly", w.isWorking() && w.getShiftType() == ShiftType.CLOSING);
-        m.put("designatedCloser", w.isWorking() && w.getShiftType() == ShiftType.CLOSING && w.getEndTime() == null);
+        m.put("shiftType", closingOnly ? ShiftType.CLOSING.name() : ShiftType.FULL.name());
+        m.put("closingOnly", closingOnly);
+        m.put("designatedCloser", isCloser && w.getEndTime() == null);
         m.put("hoursLabel", hoursLabel(w));
         return m;
     }
