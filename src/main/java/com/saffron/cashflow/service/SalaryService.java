@@ -118,6 +118,11 @@ public class SalaryService {
                 row.put("payNote", shiftPayNote(payType, hours, payAmount, shift, restaurantHours));
                 row.put("payType", payType.name());
                 row.put("payAmount", toDouble(payAmount));
+                // Surface "this hours figure is estimated, not measured" to
+                // the frontend. True whenever the shift was scheduled as
+                // till-close (endTime is null) so hoursWorked() filled in
+                // restaurantHours.closeFor(date) instead of a real end time.
+                row.put("tillCloseAssumed", shift.getEndTime() == null);
                 if (rate.effectiveFrom() != null) {
                     row.put("rateEffectiveFrom", rate.effectiveFrom().toString());
                 }

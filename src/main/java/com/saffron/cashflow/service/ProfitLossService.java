@@ -50,6 +50,10 @@ public class ProfitLossService {
     private final SalaryPaymentRepository salaryPaymentRepository;
     private final ManualDeliveryService manualDeliveryService;
     private final ExpenseService expenseService;
+    // Resolves the historical pay rate for a given (user, date) so the
+    // accrued-labour total matches the Salaries panel after mid-period
+    // pay changes.
+    private final PayRateService payRateService;
 
     public ProfitLossService(
             DailyEntryRepository entryRepository,
@@ -58,7 +62,8 @@ public class ProfitLossService {
             SettingsService settingsService,
             SalaryPaymentRepository salaryPaymentRepository,
             ManualDeliveryService manualDeliveryService,
-            ExpenseService expenseService) {
+            ExpenseService expenseService,
+            PayRateService payRateService) {
         this.entryRepository = entryRepository;
         this.userRepository = userRepository;
         this.workShiftRepository = workShiftRepository;
@@ -66,6 +71,7 @@ public class ProfitLossService {
         this.salaryPaymentRepository = salaryPaymentRepository;
         this.manualDeliveryService = manualDeliveryService;
         this.expenseService = expenseService;
+        this.payRateService = payRateService;
     }
 
     @Transactional(readOnly = true)
@@ -362,9 +368,27 @@ public class ProfitLossService {
         return SalaryPaymentPeriod.totalPaidInRange(paid, from, to).setScale(2, RoundingMode.HALF_UP);
     }
 
+    /**
+     * Accrued labour for the period.
+     *
+     * IMPORTANT: this method MUST agree shift-for-shift with
+     * {@link SalaryService#calculate(String, String)} or the P&L "Labor
+     * accrued" line will silently disagree with the Salaries panel for
+     * the same period — a bug we used to ship every time a manager
+     * changed a cashier's rate mid-month.
+     *
+     * The previous implementation read {@code cashier.getPayType()} /
+     * {@code getPayAmount()} directly, which is the CURRENT rate (not
+     * the rate that was in effect on each historical shift date). It
+     * also bucketed all MONTHLY shifts under one rate, even if the rate
+     * changed during the period.
+     *
+     * We now resolve the per-shift rate through {@link PayRateService}
+     * exactly like SalaryService does, and we aggregate MONTHLY days by
+     * resolved-rate bucket so the period-prorating maths match.
+     */
     private BigDecimal computeLaborAccrued(LocalDate from, LocalDate to) {
         WeeklyOperatingHours hours = settingsService.loadWeeklyHours();
-        long calendarDays = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
         List<WorkShift> shifts = workShiftRepository.findWorkingBetween(from, to);
         Map<String, List<WorkShift>> byUser = shifts.stream()
                 .collect(java.util.stream.Collectors.groupingBy(WorkShift::getUserId));
@@ -375,23 +399,40 @@ public class ProfitLossService {
                 .toList();
 
         for (User cashier : cashiers) {
-            PayType payType = cashier.getPayType() != null ? cashier.getPayType() : PayType.HOURLY;
-            BigDecimal payAmount = cashier.getPayAmount() != null ? cashier.getPayAmount() : BigDecimal.ZERO;
             List<WorkShift> userShifts = byUser.getOrDefault(cashier.getId(), List.of());
             if (userShifts.isEmpty()) {
                 continue;
             }
-            if (payType == PayType.MONTHLY) {
-                grandTotal = grandTotal.add(
-                        SalaryCalculator.monthlyPayForPeriod(userShifts.size(), from, to, payAmount));
-            } else {
-                BigDecimal shiftPay = BigDecimal.ZERO;
-                for (WorkShift shift : userShifts) {
-                    shiftPay = shiftPay.add(
+
+            // Bucket MONTHLY shifts by the rate that was actually in effect on
+            // each date — same approach as SalaryService.java:127-132.
+            Map<String, Integer> monthlyDaysByRate = new java.util.LinkedHashMap<>();
+            Map<String, BigDecimal> monthlyAmountByRate = new java.util.HashMap<>();
+            BigDecimal shiftPaySum = BigDecimal.ZERO;
+
+            for (WorkShift shift : userShifts) {
+                PayRateService.ResolvedPay rate =
+                        payRateService.resolve(cashier.getId(), shift.getDate(), cashier);
+                PayType payType = rate.payType() != null ? rate.payType() : PayType.HOURLY;
+                BigDecimal payAmount = rate.payAmount() != null ? rate.payAmount() : BigDecimal.ZERO;
+
+                if (payType == PayType.MONTHLY) {
+                    String key = payType.name() + "|" + payAmount.setScale(2, RoundingMode.HALF_UP).toPlainString();
+                    monthlyDaysByRate.merge(key, 1, Integer::sum);
+                    monthlyAmountByRate.putIfAbsent(key, payAmount);
+                } else {
+                    shiftPaySum = shiftPaySum.add(
                             SalaryCalculator.payForShift(shift, payType, payAmount, hours));
                 }
-                grandTotal = grandTotal.add(shiftPay);
             }
+
+            BigDecimal cashierTotal = shiftPaySum;
+            for (Map.Entry<String, Integer> band : monthlyDaysByRate.entrySet()) {
+                BigDecimal amount = monthlyAmountByRate.get(band.getKey());
+                cashierTotal = cashierTotal.add(
+                        SalaryCalculator.monthlyPayForPeriod(band.getValue(), from, to, amount));
+            }
+            grandTotal = grandTotal.add(cashierTotal);
         }
         return grandTotal.setScale(2, RoundingMode.HALF_UP);
     }
