@@ -14,6 +14,7 @@ import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.dto.RecordSalaryPaymentRequest;
 import com.saffron.cashflow.dto.TreasurySettingsRequest;
+import com.saffron.cashflow.dto.UpdateSalaryPaymentRequest;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.SalaryPaymentRepository;
 import com.saffron.cashflow.repository.SystemSettingRepository;
@@ -720,6 +721,88 @@ public class TreasuryService {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("payment", paymentToMap(payment));
+        result.put("treasury", overview());
+        return result;
+    }
+
+    @Transactional
+    public Map<String, Object> updateSalaryPayment(String id, UpdateSalaryPaymentRequest req) {
+        AuthHelper.requireAdmin();
+        SalaryPayment payment = salaryPaymentRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Salary payment not found"));
+        Map<String, Object> before = paymentToMap(payment);
+
+        PaymentSource targetSource = req.source() != null ? req.source() : payment.getPaymentSource();
+        BigDecimal targetAmount = req.amount() != null
+                ? req.amount().setScale(2, RoundingMode.HALF_UP)
+                : payment.getAmount();
+
+        // Re-validate against treasury: simulate "if I removed this payment and
+        // re-added the new version, do I still have enough in the source?"
+        Map<String, Object> balances = overview();
+        double available = targetSource == PaymentSource.CASH
+                ? (Double) balances.get("cashBalance")
+                : (Double) balances.get("cardBalance");
+        // Restore this payment's current contribution to the available balance,
+        // since it was already subtracted in `overview()`.
+        if (payment.getPaymentSource() == targetSource) {
+            available += payment.getAmount().doubleValue();
+        } else {
+            // Source is changing — add back current source, but check target source separately.
+            double targetAvailable = targetSource == PaymentSource.CASH
+                    ? (Double) balances.get("cashBalance")
+                    : (Double) balances.get("cardBalance");
+            if (targetAmount.doubleValue() > targetAvailable + 0.005) {
+                throw new BadRequestException(
+                        "Insufficient " + targetSource.name().toLowerCase() + " balance (available "
+                                + roundMoney(targetAvailable) + " PLN)");
+            }
+            available = Double.POSITIVE_INFINITY; // already validated target above
+        }
+        if (targetAmount.doubleValue() > available + 0.005) {
+            throw new BadRequestException(
+                    "Insufficient " + targetSource.name().toLowerCase() + " balance (available "
+                            + roundMoney(available) + " PLN)");
+        }
+
+        if (req.amount() != null) payment.setAmount(targetAmount);
+        if (req.paidDate() != null) payment.setPaidDate(req.paidDate());
+        if (req.source() != null) payment.setPaymentSource(req.source());
+        if (Boolean.TRUE.equals(req.clearPeriod())) {
+            payment.setPeriodFrom(null);
+            payment.setPeriodTo(null);
+        } else {
+            if (req.periodFrom() != null) payment.setPeriodFrom(req.periodFrom());
+            if (req.periodTo() != null) payment.setPeriodTo(req.periodTo());
+        }
+        if (Boolean.TRUE.equals(req.clearNotes())) {
+            payment.setNotes(null);
+        } else if (req.notes() != null) {
+            payment.setNotes(req.notes());
+        }
+        salaryPaymentRepository.save(payment);
+
+        Map<String, Object> after = paymentToMap(payment);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "SalaryPayment",
+                payment.getId(), before, after, null);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("payment", after);
+        result.put("treasury", overview());
+        return result;
+    }
+
+    @Transactional
+    public Map<String, Object> deleteSalaryPayment(String id) {
+        AuthHelper.requireAdmin();
+        SalaryPayment payment = salaryPaymentRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Salary payment not found"));
+        Map<String, Object> before = paymentToMap(payment);
+        salaryPaymentRepository.delete(payment);
+        auditService.log(AuthHelper.currentUser().id(), AuditAction.DELETE, "SalaryPayment", id,
+                before, "Salary payment removed");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("ok", true);
         result.put("treasury", overview());
         return result;
     }

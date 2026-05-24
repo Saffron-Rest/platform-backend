@@ -16,6 +16,7 @@ com/saffron/cashflow/domain/CardSettlement.class
 com/saffron/cashflow/repository/UserRepository.class
 com/saffron/cashflow/domain/WorkShift.class
 com/saffron/cashflow/controller/ReportController.class
+com/saffron/cashflow/dto/UpdateSalaryPaymentRequest.class
 com/saffron/cashflow/domain/ExpenseCategory.class
 com/saffron/cashflow/domain/User.class
 com/saffron/cashflow/domain/SystemSetting.class

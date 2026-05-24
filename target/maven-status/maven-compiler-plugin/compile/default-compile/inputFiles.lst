@@ -63,6 +63,7 @@
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/dto/RegisterPushTokenRequest.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/dto/StandaloneExpenseRequest.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/dto/TreasurySettingsRequest.java
+/Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/dto/UpdateSalaryPaymentRequest.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/dto/UpdateUserRequest.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/dto/UpsertScheduleRequest.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/report/PdfReportBuilder.java

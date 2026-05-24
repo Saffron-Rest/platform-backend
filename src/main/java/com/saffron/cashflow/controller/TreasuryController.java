@@ -2,6 +2,7 @@ package com.saffron.cashflow.controller;
 
 import com.saffron.cashflow.dto.RecordSalaryPaymentRequest;
 import com.saffron.cashflow.dto.TreasurySettingsRequest;
+import com.saffron.cashflow.dto.UpdateSalaryPaymentRequest;
 import com.saffron.cashflow.service.TreasuryService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
@@ -54,5 +55,16 @@ public class TreasuryController {
     @PostMapping("/salary-payments")
     public Map<String, Object> recordSalaryPayment(@Valid @RequestBody RecordSalaryPaymentRequest request) {
         return treasuryService.recordSalaryPayment(request);
+    }
+
+    @PatchMapping("/salary-payments/{id}")
+    public Map<String, Object> updateSalaryPayment(
+            @PathVariable String id, @Valid @RequestBody UpdateSalaryPaymentRequest request) {
+        return treasuryService.updateSalaryPayment(id, request);
+    }
+
+    @DeleteMapping("/salary-payments/{id}")
+    public Map<String, Object> deleteSalaryPayment(@PathVariable String id) {
+        return treasuryService.deleteSalaryPayment(id);
     }
 }
