@@ -129,26 +129,35 @@ public class TreasuryService {
                 .add(cardFromBankDeposits)
                 .subtract(standaloneCardExpenses);
 
+        // Cash on hand = the most recent locked actual cash count (real drawer).
+        // Falls back to initial cash balance if no locked report exists yet.
+        Optional<DailyEntry> latestCount = findLatestLockedCount();
+        LocalDate cutoff = latestCount.map(DailyEntry::getDate).orElse(null);
+
+        // Split salary payouts: any payout dated after the latest physical cash count
+        // hasn't been reflected in the drawer yet and must be subtracted from the
+        // displayed "cash on hand". Card-side always subtracts all payouts.
         BigDecimal salaryCashOut = BigDecimal.ZERO;
+        BigDecimal salaryCashOutPostCount = BigDecimal.ZERO;
         BigDecimal salaryCardOut = BigDecimal.ZERO;
         for (SalaryPayment p : salaryPaymentRepository.findAllByOrderByPaidDateDescCreatedAtDesc()) {
             if (p.getPaymentSource() == PaymentSource.CASH) {
                 salaryCashOut = salaryCashOut.add(p.getAmount());
+                if (cutoff == null || p.getPaidDate().isAfter(cutoff)) {
+                    salaryCashOutPostCount = salaryCashOutPostCount.add(p.getAmount());
+                }
             } else {
                 salaryCardOut = salaryCardOut.add(p.getAmount());
             }
         }
 
-        // Cash on hand = the most recent locked actual cash count (real drawer).
-        // Falls back to initial cash balance if no locked report exists yet.
-        Optional<DailyEntry> latestCount = findLatestLockedCount();
-        BigDecimal cashBalance = latestCount
+        BigDecimal cashRaw = latestCount
                 .map(DailyEntry::getActualCashCounted)
                 .orElse(settings.getInitialCashBalance());
+        BigDecimal cashBalance = cashRaw.subtract(salaryCashOutPostCount);
         // Card balance stays cumulative (no physical count).
-        BigDecimal cardBalance = settings.getInitialCardBalance()
-                .add(cardFromEntries)
-                .subtract(salaryCardOut);
+        BigDecimal cardBalanceBeforeSalary = settings.getInitialCardBalance().add(cardFromEntries);
+        BigDecimal cardBalance = cardBalanceBeforeSalary.subtract(salaryCardOut);
         // Cumulative cash balance kept for reference / cross-checks.
         BigDecimal cashComputedBalance = settings.getInitialCashBalance()
                 .add(cashFromEntries)
@@ -158,6 +167,9 @@ public class TreasuryService {
         result.put("settings", settings.toApiMap());
         result.put("cashBalance", toDouble(cashBalance));
         result.put("cardBalance", toDouble(cardBalance));
+        // Pre-salary variants so the UI can toggle salary inclusion without re-fetching.
+        result.put("cashBalanceBeforeSalary", toDouble(cashRaw));
+        result.put("cardBalanceBeforeSalary", toDouble(cardBalanceBeforeSalary));
         // Latest-count context for the cash card
         result.put("cashSource", latestCount.isPresent() ? "LATEST_COUNT" : "INITIAL");
         latestCount.ifPresent(e -> {
@@ -183,6 +195,7 @@ public class TreasuryService {
         result.put("standaloneCashExpenses", toDouble(standaloneCashExpenses));
         result.put("standaloneCardExpenses", toDouble(standaloneCardExpenses));
         result.put("salaryPaidFromCash", toDouble(salaryCashOut));
+        result.put("salaryPaidFromCashPostCount", toDouble(salaryCashOutPostCount));
         result.put("salaryPaidFromCard", toDouble(salaryCardOut));
         result.put("currency", "PLN");
         return result;
