@@ -60,6 +60,7 @@ com/saffron/cashflow/controller/BankDepositController.class
 com/saffron/cashflow/domain/ManualDeliveryIncome.class
 com/saffron/cashflow/service/PayRateService.class
 com/saffron/cashflow/domain/PaymentSource.class
+com/saffron/cashflow/dto/PayRateEntryRequest.class
 com/saffron/cashflow/util/AuditDiff.class
 com/saffron/cashflow/domain/CashierNotificationType.class
 com/saffron/cashflow/dto/CardSettlementRequest.class

@@ -1,7 +1,9 @@
 package com.saffron.cashflow.controller;
 
 import com.saffron.cashflow.dto.CreateUserRequest;
+import com.saffron.cashflow.dto.PayRateEntryRequest;
 import com.saffron.cashflow.dto.UpdateUserRequest;
+import com.saffron.cashflow.service.PayRateService;
 import com.saffron.cashflow.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -14,9 +16,11 @@ import java.util.Map;
 public class UserController {
 
     private final UserService userService;
+    private final PayRateService payRateService;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, PayRateService payRateService) {
         this.userService = userService;
+        this.payRateService = payRateService;
     }
 
     @GetMapping
@@ -43,5 +47,19 @@ public class UserController {
     @GetMapping("/{id}/pay-rates")
     public List<Map<String, Object>> payRateHistory(@PathVariable String id) {
         return userService.payRateHistory(id);
+    }
+
+    @PostMapping("/{id}/pay-rates")
+    @ResponseStatus(HttpStatus.CREATED)
+    public List<Map<String, Object>> addPayRate(
+            @PathVariable String id, @Valid @RequestBody PayRateEntryRequest request) {
+        return payRateService.addEntry(
+                id, request.payType(), request.payAmount(), request.effectiveFrom(), request.notes());
+    }
+
+    @DeleteMapping("/{id}/pay-rates/{entryId}")
+    public List<Map<String, Object>> deletePayRate(
+            @PathVariable String id, @PathVariable String entryId) {
+        return payRateService.deleteEntry(id, entryId);
     }
 }
