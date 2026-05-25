@@ -129,6 +129,7 @@ com/saffron/cashflow/util/AuditSnapshots.class
 com/saffron/cashflow/web/BadRequestException.class
 com/saffron/cashflow/web/ApiExceptionHandler.class
 com/saffron/cashflow/service/ProfitLossService$1.class
+com/saffron/cashflow/dto/UpdatePayRateRequest.class
 com/saffron/cashflow/service/AlertService.class
 com/saffron/cashflow/service/PayRateService$ResolvedPay.class
 com/saffron/cashflow/repository/PayRateChangeRepository.class

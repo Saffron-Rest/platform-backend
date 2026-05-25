@@ -107,6 +107,59 @@ public class PayRateService {
         return listHistory(userId);
     }
 
+    /** Admin-driven: edit a single pay history entry in place and re-sync the user's current pay. */
+    @Transactional
+    public List<Map<String, Object>> updateEntry(
+            String userId,
+            String entryId,
+            PayType payType,
+            BigDecimal payAmount,
+            LocalDate effectiveFrom,
+            String notes) {
+        AuthHelper.requireAdmin();
+        User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("User not found"));
+        PayRateChange row = payRateChangeRepository.findById(entryId)
+                .orElseThrow(() -> new NotFoundException("Pay rate entry not found"));
+        if (!row.getUserId().equals(userId)) {
+            throw new BadRequestException("Pay rate entry does not belong to this user");
+        }
+        if (payAmount != null && payAmount.compareTo(BigDecimal.ZERO) < 0) {
+            throw new BadRequestException("Pay amount cannot be negative");
+        }
+        if (payType != null) row.setPayType(payType);
+        if (payAmount != null) row.setPayAmount(payAmount);
+        if (effectiveFrom != null) row.setEffectiveFrom(effectiveFrom);
+        if (notes != null) row.setNotes(notes.isBlank() ? null : notes);
+        payRateChangeRepository.save(row);
+        syncCurrentPay(user);
+        auditService.log(AuthHelper.currentUser().id(), AuditAction.UPDATE, "PayRateChange", row.getId(),
+                Map.of("userId", userId, "payType", row.getPayType().name(),
+                        "payAmount", row.getPayAmount().doubleValue(),
+                        "effectiveFrom", row.getEffectiveFrom().toString()));
+        return listHistory(userId);
+    }
+
+    /** Flat list of all pay-rate entries across every cashier (for the unified payroll page). */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> listAllHistory() {
+        AuthHelper.requireAdmin();
+        Map<String, String> nameByUser = new LinkedHashMap<>();
+        userRepository.findAll().forEach(u -> nameByUser.put(u.getId(), u.getName()));
+        return payRateChangeRepository.findAll().stream()
+                .sorted((a, b) -> {
+                    int byDate = b.getEffectiveFrom().compareTo(a.getEffectiveFrom());
+                    if (byDate != 0) return byDate;
+                    return b.getCreatedAt().compareTo(a.getCreatedAt());
+                })
+                .map(p -> {
+                    Map<String, Object> m = toMap(p);
+                    m.put("userId", p.getUserId());
+                    m.put("employeeName", nameByUser.getOrDefault(p.getUserId(), "Unknown"));
+                    return m;
+                })
+                .toList();
+    }
+
     /** Admin-driven: remove a single pay history entry and re-sync the user's current pay. */
     @Transactional
     public List<Map<String, Object>> deleteEntry(String userId, String entryId) {

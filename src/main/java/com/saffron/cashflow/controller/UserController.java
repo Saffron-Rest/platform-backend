@@ -2,6 +2,7 @@ package com.saffron.cashflow.controller;
 
 import com.saffron.cashflow.dto.CreateUserRequest;
 import com.saffron.cashflow.dto.PayRateEntryRequest;
+import com.saffron.cashflow.dto.UpdatePayRateRequest;
 import com.saffron.cashflow.dto.UpdateUserRequest;
 import com.saffron.cashflow.service.PayRateService;
 import com.saffron.cashflow.service.UserService;
@@ -44,6 +45,11 @@ public class UserController {
         return userService.deactivate(id);
     }
 
+    @GetMapping("/pay-rates")
+    public List<Map<String, Object>> allPayRates() {
+        return payRateService.listAllHistory();
+    }
+
     @GetMapping("/{id}/pay-rates")
     public List<Map<String, Object>> payRateHistory(@PathVariable String id) {
         return userService.payRateHistory(id);
@@ -55,6 +61,15 @@ public class UserController {
             @PathVariable String id, @Valid @RequestBody PayRateEntryRequest request) {
         return payRateService.addEntry(
                 id, request.payType(), request.payAmount(), request.effectiveFrom(), request.notes());
+    }
+
+    @PatchMapping("/{id}/pay-rates/{entryId}")
+    public List<Map<String, Object>> updatePayRate(
+            @PathVariable String id,
+            @PathVariable String entryId,
+            @RequestBody UpdatePayRateRequest request) {
+        return payRateService.updateEntry(
+                id, entryId, request.payType(), request.payAmount(), request.effectiveFrom(), request.notes());
     }
 
     @DeleteMapping("/{id}/pay-rates/{entryId}")
