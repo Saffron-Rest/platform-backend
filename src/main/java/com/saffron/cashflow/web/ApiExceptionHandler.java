@@ -8,6 +8,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -57,6 +58,25 @@ public class ApiExceptionHandler {
     public ResponseEntity<Map<String, String>> notFoundResource(NoResourceFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(Map.of("error", "API endpoint not found. Restart the backend if you recently updated the app."));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, String>> illegalArg(IllegalArgumentException ex) {
+        // Service layer uses IllegalArgumentException for "user-facing" 4xx
+        // problems (e.g. unsupported file type). Without an explicit handler
+        // Spring maps these to 500, which the FE shows as a generic failure.
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Map.of("error", ex.getMessage() != null ? ex.getMessage() : "Bad request"));
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, String>> uploadTooLarge(MaxUploadSizeExceededException ex) {
+        // Friendly 413 — without this the upload silently fails with a generic
+        // 500. The actual limit comes from spring.servlet.multipart.* so we
+        // surface a guidance message instead of hard-coding a number.
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(Map.of("error",
+                        "File is too large. Pick a smaller photo (under 25 MB) or share at a reduced size."));
     }
 
     @ExceptionHandler(Exception.class)

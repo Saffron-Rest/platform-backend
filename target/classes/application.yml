@@ -18,7 +18,11 @@ spring:
           time_zone: UTC
   servlet:
     multipart:
-      max-file-size: 5MB
+      # Phone photos routinely exceed 5MB (especially iPhone HEIC/JPG at
+      # 12+ Mpx). Bump both per-file and per-request caps so menu photo
+      # uploads stop silently failing with 413/MaxUploadSizeExceeded.
+      max-file-size: 25MB
+      max-request-size: 30MB
 
 app:
   timezone: Europe/Warsaw

@@ -151,8 +151,21 @@ public class FileStorageService {
      */
     public String storeMenuImage(MultipartFile file) throws IOException {
         AuthHelper.requireOperations();
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("Image file is empty — pick a photo and try again");
+        }
         String original = file.getOriginalFilename();
-        if (original == null || !original.matches("(?i).+\\.(jpg|jpeg|png|webp)$")) {
+        if (original == null || original.isBlank()) original = "photo.jpg";
+        // Accept the formats we know OpenPDF can render. HEIC arrives from
+        // iPhones — we reject it explicitly with a clear hint so the user
+        // knows to share as JPG instead of getting a silent 4xx.
+        String lower = original.toLowerCase();
+        if (lower.endsWith(".heic") || lower.endsWith(".heif")) {
+            throw new IllegalArgumentException(
+                    "HEIC photos are not supported. On iPhone, set Camera → Formats → Most Compatible, "
+                            + "or share the photo as JPG before uploading.");
+        }
+        if (!lower.matches(".+\\.(jpg|jpeg|png|webp)$")) {
             throw new IllegalArgumentException("Only JPG, PNG or WEBP images are allowed");
         }
         Path menuDir = uploadDir.resolve("menu");

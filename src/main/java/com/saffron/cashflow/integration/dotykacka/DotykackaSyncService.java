@@ -19,6 +19,8 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -109,11 +111,17 @@ public class DotykackaSyncService {
         // Fall back to 7 days ago on first run so we don't pull all-time history.
         Instant cursor = integration.getDotykackaSyncCursor();
         if (cursor == null) cursor = Instant.now().minusSeconds(7 * 24 * 3600L);
-        // Dotykačka's filter syntax uses literal "|" and ";" which Java's URI
-        // parser rejects, so we percent-encode the whole filter value as one
-        // unit rather than only the timestamp inside it.
+        // Dotykačka filter syntax (docs.api.dotypos.com):
+        //   `field|operator|value` joined by ";". The "greater-or-equal" op
+        //   is **gteq**, NOT "gte" (that's why the API returns 400). The whole
+        //   filter is then URL-encoded as a single value so Java's strict
+        //   URI parser accepts the "|" and ";" characters.
+        // We also truncate to seconds — Instant.toString() emits nanoseconds
+        // which Dotykačka has been observed to reject.
+        String cursorIso = DateTimeFormatter.ISO_INSTANT.format(
+                cursor.truncatedTo(ChronoUnit.SECONDS));
         String filter = DotykackaClient.enc(
-                "documentType|eq|RECEIPT;versionDate|gte|" + cursor.toString());
+                "versionDate|gteq|" + cursorIso);
 
         int inserted = 0, skipped = 0, unmatched = 0, pagesFetched = 0;
         Instant maxSeen = cursor;

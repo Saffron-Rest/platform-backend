@@ -213,6 +213,7 @@ com/saffron/cashflow/domain/SalaryPayment.class
 com/saffron/cashflow/controller/MenuController.class
 com/saffron/cashflow/dto/PayrollSettingsRequest.class
 com/saffron/cashflow/web/ApiExceptionHandler.class
+com/saffron/cashflow/service/MenuPrintService$Options.class
 com/saffron/cashflow/controller/SavedViewController$UpdateSavedViewRequest.class
 com/saffron/cashflow/service/TagService.class
 com/saffron/cashflow/service/PayRateService$ResolvedPay.class

@@ -124,8 +124,15 @@ public class MenuController {
             @RequestParam(value = "title", required = false) String title,
             @RequestParam(value = "subtitle", required = false) String subtitle,
             @RequestParam(value = "showPrices", defaultValue = "true") boolean showPrices,
-            @RequestParam(value = "language", defaultValue = "en") String language) {
-        byte[] pdf = menuPrintService.buildMenu(layout, title, subtitle, showPrices, language);
+            @RequestParam(value = "language", defaultValue = "en") String language,
+            // Optional editorial copy — the "Our story" page and footer contact
+            // block. All blank by default, in which case the renderer falls back
+            // to a curated Azerbaijani-heritage narrative.
+            @RequestParam(value = "storyTitle", required = false) String storyTitle,
+            @RequestParam(value = "storyBody", required = false) String storyBody,
+            @RequestParam(value = "contactBlock", required = false) String contactBlock) {
+        byte[] pdf = menuPrintService.buildMenu(
+                layout, title, subtitle, showPrices, language, storyTitle, storyBody, contactBlock);
         String filename = "saffron-menu-" + java.time.LocalDate.now() + ".pdf";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_PDF);

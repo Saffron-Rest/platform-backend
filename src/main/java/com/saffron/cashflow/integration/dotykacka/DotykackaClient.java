@@ -116,10 +116,17 @@ public class DotykackaClient {
         try {
             HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
             if (res.statusCode() / 100 != 2) {
-                LOG.warn("Dotykačka GET {} failed: status={} body={}", path, res.statusCode(),
-                        res.body() != null && res.body().length() > 400
-                                ? res.body().substring(0, 400) : res.body());
-                throw new BadRequestException("Dotykačka error " + res.statusCode());
+                String body = res.body() == null ? "" : res.body();
+                LOG.warn("Dotykačka GET {} failed: status={} url={} body={}", path, res.statusCode(), url,
+                        body.length() > 400 ? body.substring(0, 400) : body);
+                // Surface the Dotykačka error message back to the admin UI so
+                // they don't see a generic "Dotykačka error 400" — most 4xx
+                // responses carry a {"message":"..."} or {"errors":[...]} body
+                // that explains exactly which filter / operator was rejected.
+                String detail = extractErrorMessage(body);
+                throw new BadRequestException(
+                        "Dotykačka error " + res.statusCode()
+                                + (detail.isEmpty() ? "" : " — " + detail));
             }
             return MAPPER.readTree(res.body());
         } catch (BadRequestException e) {
@@ -127,6 +134,27 @@ public class DotykackaClient {
         } catch (Exception e) {
             throw new BadRequestException("Dotykačka request failed: " + e.getMessage());
         }
+    }
+
+    /** Best-effort extraction of the human-readable error from a Dotykačka
+     *  failure body. Handles {@code {"message":"..."}}, {@code {"errors":[...]}}
+     *  and falls back to a snippet of the raw body. */
+    private static String extractErrorMessage(String body) {
+        if (body == null || body.isBlank()) return "";
+        try {
+            JsonNode json = MAPPER.readTree(body);
+            if (json.hasNonNull("message")) return json.get("message").asText();
+            if (json.hasNonNull("error")) return json.get("error").asText();
+            if (json.has("errors") && json.get("errors").isArray() && json.get("errors").size() > 0) {
+                JsonNode first = json.get("errors").get(0);
+                if (first.isTextual()) return first.asText();
+                if (first.hasNonNull("message")) return first.get("message").asText();
+            }
+        } catch (Exception ignored) {
+            // Not JSON or unexpected shape — fall through to raw snippet.
+        }
+        String snippet = body.replaceAll("\\s+", " ").trim();
+        return snippet.length() > 200 ? snippet.substring(0, 200) + "…" : snippet;
     }
 
     /**
