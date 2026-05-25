@@ -37,6 +37,9 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health", "/api/auth/login").permitAll()
+                        // Public menu image endpoint — used by the printable PDF preview and
+                        // any guest-facing menu page. Images are non-sensitive.
+                        .requestMatchers(HttpMethod.GET, "/api/files/menu/**").permitAll()
                         // POS webhooks authenticate via HMAC signature in the
                         // handler, not JWT — open the path here.
                         .requestMatchers(HttpMethod.POST, "/api/pos/webhook/**").permitAll()

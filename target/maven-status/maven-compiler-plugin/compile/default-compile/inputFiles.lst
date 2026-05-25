@@ -150,6 +150,7 @@
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/ManualDeliveryService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/MenuAnalyticsService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/MenuEngineService.java
+/Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/MenuPrintService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/MenuService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/NotificationService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/service/PayRateService.java

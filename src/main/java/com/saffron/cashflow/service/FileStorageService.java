@@ -140,4 +140,38 @@ public class FileStorageService {
         int i = name.lastIndexOf('.');
         return i >= 0 ? name.substring(i) : "";
     }
+
+    // ---------- Menu item photos ----------
+
+    /**
+     * Save a menu item photo into {@code <uploadDir>/menu/} and return the
+     * relative path (e.g. {@code menu/1716628231-abc.jpg}). Independent of the
+     * shift-entry receipt flow because menu photos belong to the catalog, not
+     * a daily entry.
+     */
+    public String storeMenuImage(MultipartFile file) throws IOException {
+        AuthHelper.requireOperations();
+        String original = file.getOriginalFilename();
+        if (original == null || !original.matches("(?i).+\\.(jpg|jpeg|png|webp)$")) {
+            throw new IllegalArgumentException("Only JPG, PNG or WEBP images are allowed");
+        }
+        Path menuDir = uploadDir.resolve("menu");
+        Files.createDirectories(menuDir);
+        String stored = "menu/" + System.currentTimeMillis() + "-" + UUID.randomUUID()
+                + getExtension(original).toLowerCase();
+        Files.copy(file.getInputStream(), uploadDir.resolve(stored));
+        return stored;
+    }
+
+    public Path resolveMenuImage(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) return null;
+        // Defence against path traversal.
+        if (relativePath.contains("..") || relativePath.startsWith("/")) return null;
+        return uploadDir.resolve(relativePath).normalize();
+    }
+
+    /** Expose the configured upload root for low-level consumers (PDF builder). */
+    public Path getUploadDir() {
+        return uploadDir;
+    }
 }

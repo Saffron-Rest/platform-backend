@@ -176,6 +176,10 @@ public class MenuService {
         item.setCategoryId(cat.getId());
         item.setSku(sku);
         item.setDescription(trimToNull(req.description(), 500));
+        item.setLongDescription(trimToNull(req.longDescription(), 1000));
+        item.setDietaryTags(normaliseTags(req.dietaryTags()));
+        item.setAllergens(normaliseTags(req.allergens()));
+        if (req.featured() != null) item.setFeatured(req.featured());
         item.setSellPrice(sellPrice);
         item.setFoodCost(foodCost);
         item.setVatRatePct(vat);
@@ -214,6 +218,10 @@ public class MenuService {
         }
         if (req.vatRatePct() != null) item.setVatRatePct(requireNonNegative(req.vatRatePct(), "VAT rate"));
         if (req.description() != null) item.setDescription(trimToNull(req.description(), 500));
+        if (req.longDescription() != null) item.setLongDescription(trimToNull(req.longDescription(), 1000));
+        if (req.dietaryTags() != null) item.setDietaryTags(normaliseTags(req.dietaryTags()));
+        if (req.allergens() != null) item.setAllergens(normaliseTags(req.allergens()));
+        if (req.featured() != null) item.setFeatured(req.featured());
         if (req.sku() != null) {
             String sku = req.sku().trim();
             if (sku.isEmpty()) {
@@ -506,6 +514,14 @@ public class MenuService {
         m.put("name", item.getName());
         m.put("sku", item.getSku());
         m.put("description", item.getDescription());
+        m.put("longDescription", item.getLongDescription());
+        m.put("imagePath", item.getImagePath());
+        m.put("imageUrl", item.getImagePath() != null && item.getImagePath().startsWith("menu/")
+                ? "/api/files/" + item.getImagePath()
+                : null);
+        m.put("dietaryTags", item.getDietaryTags());
+        m.put("allergens", item.getAllergens());
+        m.put("featured", item.isFeatured());
         m.put("categoryId", item.getCategoryId());
         m.put("categoryName", cat != null ? cat.getName() : null);
         m.put("sellPrice", item.getSellPrice());
@@ -533,15 +549,77 @@ public class MenuService {
         return m;
     }
 
+    private static String normaliseTags(String raw) {
+        if (raw == null) return null;
+        String t = raw.trim();
+        if (t.isEmpty()) return null;
+        // Normalise to comma-separated, lowercase, no duplicates, no spaces around
+        // commas. Tags are short kebab-case slugs so they're easy to render as
+        // chips and look consistent on the printed menu.
+        List<String> parts = new ArrayList<>();
+        for (String part : t.split("[,;]")) {
+            String p = part.trim().toLowerCase().replaceAll("\\s+", "-");
+            if (!p.isEmpty() && !parts.contains(p)) parts.add(p);
+        }
+        return parts.isEmpty() ? null : String.join(",", parts);
+    }
+
+    // ---------- Photo upload ----------
+
+    /** Set the image path after the upload controller has saved the file. */
+    @Transactional
+    public Map<String, Object> setItemImage(String id, String relativePath) {
+        AuthHelper.requireOperations();
+        MenuItem item = itemRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Menu item not found"));
+        item.setImagePath(relativePath);
+        item = itemRepository.save(item);
+        MenuCategory cat = categoryRepository.findById(item.getCategoryId()).orElse(null);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "MenuItem", item.getId(),
+                Map.of(), Map.of("imagePath", relativePath), null);
+        return itemToMap(item, cat);
+    }
+
+    @Transactional
+    public Map<String, Object> clearItemImage(String id) {
+        AuthHelper.requireOperations();
+        MenuItem item = itemRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Menu item not found"));
+        String before = item.getImagePath();
+        item.setImagePath(null);
+        item = itemRepository.save(item);
+        MenuCategory cat = categoryRepository.findById(item.getCategoryId()).orElse(null);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "MenuItem", item.getId(),
+                Map.of("imagePath", String.valueOf(before)), Map.of("imagePath", "null"), null);
+        return itemToMap(item, cat);
+    }
+
+    /** Used by the menu PDF builder — active items, grouped by category. */
+    @Transactional(readOnly = true)
+    public List<MenuCategory> activeCategoriesInOrder() {
+        return categoryRepository.findAllByActiveTrueOrderBySortOrderAscNameAsc();
+    }
+
+    @Transactional(readOnly = true)
+    public List<MenuItem> activeItemsForCategory(String categoryId) {
+        return itemRepository.findAllByCategoryIdOrderByNameAsc(categoryId).stream()
+                .filter(MenuItem::isActive)
+                .toList();
+    }
+
     /** Request payload for create / update — used by controller. */
     public record MenuItemRequest(
             String name,
             String sku,
             String description,
+            String longDescription,
+            String dietaryTags,
+            String allergens,
             String categoryId,
             BigDecimal sellPrice,
             BigDecimal foodCost,
             BigDecimal vatRatePct,
+            Boolean featured,
             Boolean active) {
         public MenuItemRequest {
             Objects.requireNonNullElse(name, "");

@@ -49,6 +49,7 @@ com/saffron/cashflow/dto/TagReplaceRequest.class
 com/saffron/cashflow/dto/ExpenseItemRequest.class
 com/saffron/cashflow/util/EntryCalculator.class
 com/saffron/cashflow/repository/NotificationDispatchRepository.class
+com/saffron/cashflow/service/MenuPrintService$MenuFooter.class
 com/saffron/cashflow/dto/BankDepositRequest$LinkPayload.class
 com/saffron/cashflow/dto/TagBulkAssignmentRequest.class
 com/saffron/cashflow/dto/EntryRequest.class
@@ -67,6 +68,7 @@ com/saffron/cashflow/domain/PosIntegration.class
 com/saffron/cashflow/service/MenuAnalyticsService$ItemAgg.class
 com/saffron/cashflow/controller/ExpenseController.class
 com/saffron/cashflow/report/PdfReportBuilder.class
+com/saffron/cashflow/service/MenuPrintService$Layout.class
 com/saffron/cashflow/service/PushNotificationService.class
 com/saffron/cashflow/repository/SystemSettingRepository.class
 com/saffron/cashflow/service/ProfitLossService.class
@@ -98,6 +100,7 @@ com/saffron/cashflow/service/ManualDeliveryService$1.class
 com/saffron/cashflow/controller/SavedViewController.class
 com/saffron/cashflow/util/SalaryCalculator.class
 com/saffron/cashflow/util/TreasurySettings.class
+com/saffron/cashflow/service/MenuPrintService.class
 com/saffron/cashflow/domain/EntryStatus.class
 com/saffron/cashflow/domain/AuditLog.class
 com/saffron/cashflow/service/TreasuryService$DepositLinkRef.class

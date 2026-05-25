@@ -56,6 +56,23 @@ public class FileController {
                 .body(resource);
     }
 
+    /**
+     * Serve menu item photos directly. These live under {@code <uploadDir>/menu/}
+     * and don't need the receipt-file lookup. The path is sanitized inside
+     * {@link FileStorageService#resolveMenuImage(String)} so callers cannot
+     * traverse outside the menu directory.
+     */
+    @GetMapping("/menu/{name:.+}")
+    public ResponseEntity<Resource> downloadMenuImage(@PathVariable("name") String name) throws Exception {
+        Path path = fileStorageService.resolveMenuImage("menu/" + name);
+        if (path == null || !path.toFile().exists()) return ResponseEntity.notFound().build();
+        Resource resource = new UrlResource(path.toUri());
+        return ResponseEntity.ok()
+                .contentType(contentTypeForFilename(name))
+                .cacheControl(org.springframework.http.CacheControl.maxAge(java.time.Duration.ofDays(7)).cachePublic())
+                .body(resource);
+    }
+
     private static MediaType contentTypeForFilename(String filename) {
         String lower = filename.toLowerCase();
         if (lower.endsWith(".png")) return MediaType.IMAGE_PNG;

@@ -49,6 +49,26 @@ public class MenuItem {
     @Column(name = "vat_rate_pct", nullable = false, precision = 5, scale = 2)
     private BigDecimal vatRatePct = new BigDecimal("8.00");
 
+    /** Optional longer-form text shown on the printable menu (e.g. "Slow-braised lamb shoulder, saffron rice, sour barberries"). */
+    @Column(name = "long_description", length = 1000)
+    private String longDescription;
+
+    /** Relative path under {@code app.upload-dir} (e.g. "menu/abc.jpg"). Served via /uploads/. */
+    @Column(name = "image_path", length = 255)
+    private String imagePath;
+
+    /** Comma-separated dietary tags, e.g. "vegetarian,vegan,gluten-free,spicy,signature". */
+    @Column(name = "dietary_tags", length = 255)
+    private String dietaryTags;
+
+    /** Comma-separated allergens, e.g. "gluten,dairy,nuts,sesame,eggs". */
+    @Column(length = 255)
+    private String allergens;
+
+    /** Whether to feature this item on the printable menu (e.g. chef's recommendation). */
+    @Column(name = "featured", nullable = false)
+    private boolean featured = false;
+
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
@@ -89,6 +109,16 @@ public class MenuItem {
     public void setFoodCost(BigDecimal foodCost) { this.foodCost = foodCost; }
     public BigDecimal getVatRatePct() { return vatRatePct; }
     public void setVatRatePct(BigDecimal vatRatePct) { this.vatRatePct = vatRatePct; }
+    public String getLongDescription() { return longDescription; }
+    public void setLongDescription(String longDescription) { this.longDescription = longDescription; }
+    public String getImagePath() { return imagePath; }
+    public void setImagePath(String imagePath) { this.imagePath = imagePath; }
+    public String getDietaryTags() { return dietaryTags; }
+    public void setDietaryTags(String dietaryTags) { this.dietaryTags = dietaryTags; }
+    public String getAllergens() { return allergens; }
+    public void setAllergens(String allergens) { this.allergens = allergens; }
+    public boolean isFeatured() { return featured; }
+    public void setFeatured(boolean featured) { this.featured = featured; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public Instant getArchivedAt() { return archivedAt; }

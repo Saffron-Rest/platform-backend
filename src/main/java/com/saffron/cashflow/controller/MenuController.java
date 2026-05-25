@@ -1,8 +1,13 @@
 package com.saffron.cashflow.controller;
 
+import com.saffron.cashflow.service.FileStorageService;
+import com.saffron.cashflow.service.MenuPrintService;
 import com.saffron.cashflow.service.MenuService;
 import com.saffron.cashflow.service.MenuService.MenuItemRequest;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -15,9 +20,16 @@ import java.util.Map;
 public class MenuController {
 
     private final MenuService menuService;
+    private final FileStorageService fileStorageService;
+    private final MenuPrintService menuPrintService;
 
-    public MenuController(MenuService menuService) {
+    public MenuController(
+            MenuService menuService,
+            FileStorageService fileStorageService,
+            MenuPrintService menuPrintService) {
         this.menuService = menuService;
+        this.fileStorageService = fileStorageService;
+        this.menuPrintService = menuPrintService;
     }
 
     // ---------- Categories ----------
@@ -76,11 +88,49 @@ public class MenuController {
         menuService.deleteItem(id);
     }
 
+    // ---------- Photo upload ----------
+
+    @PostMapping("/items/{id}/photo")
+    public Map<String, Object> uploadPhoto(
+            @PathVariable String id,
+            @RequestParam("file") MultipartFile file) throws IOException {
+        String path = fileStorageService.storeMenuImage(file);
+        return menuService.setItemImage(id, path);
+    }
+
+    @DeleteMapping("/items/{id}/photo")
+    public Map<String, Object> deletePhoto(@PathVariable String id) {
+        return menuService.clearItemImage(id);
+    }
+
     // ---------- CSV import ----------
 
     @PostMapping("/items/import")
     public Map<String, Object> importCsv(@RequestParam("file") MultipartFile file) throws IOException {
         return menuService.importCsv(file.getInputStream());
+    }
+
+    // ---------- Printable PDF ----------
+
+    /**
+     * Generate a designer-style PDF menu for printing. Layouts:
+     *   - {@code grid}    : photo cards in a 2-column grid (the default — modern and visual)
+     *   - {@code list}    : single column with small thumbnails and full descriptions
+     *   - {@code compact} : two-column text-only, perfect for table tents
+     */
+    @GetMapping(value = "/print", produces = MediaType.APPLICATION_PDF_VALUE)
+    public ResponseEntity<byte[]> printMenu(
+            @RequestParam(value = "layout", defaultValue = "grid") String layout,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "subtitle", required = false) String subtitle,
+            @RequestParam(value = "showPrices", defaultValue = "true") boolean showPrices,
+            @RequestParam(value = "language", defaultValue = "en") String language) {
+        byte[] pdf = menuPrintService.buildMenu(layout, title, subtitle, showPrices, language);
+        String filename = "saffron-menu-" + java.time.LocalDate.now() + ".pdf";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_PDF);
+        headers.add(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"");
+        return new ResponseEntity<>(pdf, headers, HttpStatus.OK);
     }
 
     public record CategoryRequest(String name, Integer sortOrder, Boolean active) {}
