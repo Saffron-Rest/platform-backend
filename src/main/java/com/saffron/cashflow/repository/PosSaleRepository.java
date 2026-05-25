@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -20,4 +21,10 @@ public interface PosSaleRepository extends JpaRepository<PosSale, String> {
 
     @Query("select count(s) from PosSale s where s.businessDay between :from and :to and s.menuItemId is null")
     long countUnmatchedInRange(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    long countByIntegrationId(String integrationId);
+
+    long countByIntegrationIdAndReceivedAtAfter(String integrationId, Instant cutoff);
+
+    List<PosSale> findTop5ByIntegrationIdOrderByReceivedAtDesc(String integrationId);
 }

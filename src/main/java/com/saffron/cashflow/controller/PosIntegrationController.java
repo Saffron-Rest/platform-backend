@@ -1,10 +1,16 @@
 package com.saffron.cashflow.controller;
 
+import com.saffron.cashflow.domain.PosSale;
 import com.saffron.cashflow.integration.dotykacka.DotykackaSyncService;
+import com.saffron.cashflow.repository.PosSaleRepository;
+import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.service.PosIntegrationService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -14,10 +20,15 @@ public class PosIntegrationController {
 
     private final PosIntegrationService service;
     private final DotykackaSyncService dotykackaSync;
+    private final PosSaleRepository saleRepository;
 
-    public PosIntegrationController(PosIntegrationService service, DotykackaSyncService dotykackaSync) {
+    public PosIntegrationController(
+            PosIntegrationService service,
+            DotykackaSyncService dotykackaSync,
+            PosSaleRepository saleRepository) {
         this.service = service;
         this.dotykackaSync = dotykackaSync;
+        this.saleRepository = saleRepository;
     }
 
     @GetMapping
@@ -75,6 +86,41 @@ public class PosIntegrationController {
     @DeleteMapping("/{id}/dotykacka/webhook")
     public Map<String, Object> unregisterWebhook(@PathVariable String id) {
         return service.unregisterDotyposWebhook(id);
+    }
+
+    /**
+     * Quick health summary for the admin UI — counts how many sales we
+     * received recently and lists the last few payloads. Lets admins
+     * confirm "yes, Dotypos is pushing" without grepping the logs.
+     */
+    @GetMapping("/{id}/activity")
+    public Map<String, Object> activity(@PathVariable String id) {
+        AuthHelper.requireOperations();
+        Instant now = Instant.now();
+        Instant lastHour = now.minus(1, ChronoUnit.HOURS);
+        Instant last24h = now.minus(24, ChronoUnit.HOURS);
+        long total = saleRepository.countByIntegrationId(id);
+        long inLastHour = saleRepository.countByIntegrationIdAndReceivedAtAfter(id, lastHour);
+        long inLast24h = saleRepository.countByIntegrationIdAndReceivedAtAfter(id, last24h);
+        List<PosSale> recent = saleRepository.findTop5ByIntegrationIdOrderByReceivedAtDesc(id);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("totalSales", total);
+        out.put("lastHour", inLastHour);
+        out.put("last24h", inLast24h);
+        out.put("recent", recent.stream().map(s -> {
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("externalId", s.getExternalId());
+            r.put("itemName", s.getItemName());
+            r.put("sku", s.getSku());
+            r.put("quantity", s.getQuantity());
+            r.put("unitPrice", s.getUnitPrice());
+            r.put("matched", s.getMenuItemId() != null);
+            r.put("occurredAt", s.getOccurredAt() != null ? s.getOccurredAt().toString() : null);
+            r.put("receivedAt", s.getReceivedAt() != null ? s.getReceivedAt().toString() : null);
+            return r;
+        }).toList());
+        return out;
     }
 
     public record IntegrationRequest(String name, String vendor) {}
