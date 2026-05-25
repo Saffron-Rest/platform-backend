@@ -56,6 +56,13 @@ public class ExpenseController {
         return expenseService.updateStandalone(id, data, invoice);
     }
 
+    @PutMapping(value = "/standalone/{id}/json", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> updateStandaloneJson(
+            @PathVariable String id,
+            @Valid @RequestBody StandaloneExpenseRequest data) throws Exception {
+        return expenseService.updateStandalone(id, data, null);
+    }
+
     @DeleteMapping("/standalone/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteStandalone(@PathVariable String id) {
