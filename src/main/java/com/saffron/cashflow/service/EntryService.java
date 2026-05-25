@@ -663,14 +663,34 @@ public class EntryService {
     }
 
     /**
-     * Opening = latest restaurant actual cash counted (same day from any colleague, else last close day).
+     * Opening drawer the cashier should start their shift with.
+     *
+     * <p>= latest restaurant {@code actualCashCounted}
+     *   <b>minus</b> any cash that left the drawer after that count was
+     *   locked (standalone cash expenses from the Finance page + non-excluded
+     *   cash salary payouts) up to and including the new shift's date.</p>
+     *
+     * <p>This is the same formula the Treasury page uses for the
+     * <i>Cash on hand</i> tile (see
+     * {@link TreasuryService#overview()} and {@link #postCountCashMovements})
+     * — so the opening drawer on a freshly created / synced report always
+     * agrees with what the manager sees as the current drawer balance.</p>
      */
     private Optional<BigDecimal> resolveAutomaticOpening(String cashierId, LocalDate date) {
         Optional<DailyEntry> sameDay = findSameDayRestaurantHandover(cashierId, date);
         if (sameDay.isPresent()) {
-            return Optional.of(sameDay.get().getActualCashCounted());
+            return Optional.of(adjustedOpeningFrom(sameDay.get(), date));
         }
-        return findLatestRestaurantCloseBefore(date).map(DailyEntry::getActualCashCounted);
+        return findLatestRestaurantCloseBefore(date)
+                .map(src -> adjustedOpeningFrom(src, date));
+    }
+
+    /** Source count minus post-count cash outflows, clamped at zero so a
+     *  drawer that's been over-paid never produces a negative opening. */
+    private BigDecimal adjustedOpeningFrom(DailyEntry source, LocalDate newShiftDate) {
+        BigDecimal raw = nullToZero(source.getActualCashCounted());
+        BigDecimal postCountOut = postCountCashMovements(source, newShiftDate);
+        return raw.subtract(postCountOut).max(BigDecimal.ZERO);
     }
 
     private record HandoverPendingInfo(String colleagueName) {}
