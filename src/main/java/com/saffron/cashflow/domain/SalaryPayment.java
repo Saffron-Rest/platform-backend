@@ -34,6 +34,13 @@ public class SalaryPayment {
 
     private String notes;
 
+    /** When true the payment is recorded for payroll bookkeeping but does NOT
+     *  reduce treasury balances (e.g. off-the-books bonus paid from owner's
+     *  personal pocket, or any reconciliation we don't want to affect cash/card
+     *  on hand). Nullable for historical rows; null is treated as false. */
+    @Column(name = "exclude_from_treasury")
+    private Boolean excludeFromTreasury;
+
     @Column(name = "created_by", nullable = false)
     private String createdBy;
 
@@ -62,6 +69,8 @@ public class SalaryPayment {
     public void setPeriodTo(LocalDate periodTo) { this.periodTo = periodTo; }
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+    public boolean isExcludeFromTreasury() { return Boolean.TRUE.equals(excludeFromTreasury); }
+    public void setExcludeFromTreasury(Boolean excludeFromTreasury) { this.excludeFromTreasury = excludeFromTreasury; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public Instant getCreatedAt() { return createdAt; }

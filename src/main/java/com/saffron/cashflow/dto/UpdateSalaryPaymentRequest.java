@@ -15,5 +15,7 @@ public record UpdateSalaryPaymentRequest(
         String notes,
         /** Set true to explicitly clear an optional field (paidDate cannot be cleared). */
         Boolean clearPeriod,
-        Boolean clearNotes
+        Boolean clearNotes,
+        /** When provided, toggle whether this payment affects treasury balances. */
+        Boolean excludeFromTreasury
 ) {}

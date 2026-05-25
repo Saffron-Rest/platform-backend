@@ -135,13 +135,41 @@ public class TreasuryService {
         Optional<DailyEntry> latestCount = findLatestLockedCount();
         LocalDate cutoff = latestCount.map(DailyEntry::getDate).orElse(null);
 
+        // Anything paid from the drawer AFTER the latest physical count must be
+        // subtracted from the displayed "cash on hand" — neither standalone cash
+        // expenses (Finance page) nor cash salary payouts are baked into the count.
+        // Same-day events (effectiveDate / paidDate == cutoff) are treated as
+        // pre-count to be consistent with how the drawer is usually counted at
+        // shift end (after the day's events).
+        BigDecimal standaloneCashExpensesPostCount = BigDecimal.ZERO;
+        for (ExpenseItem ex : expenseService.findStandaloneBetween(from, to)) {
+            if (ex.getPaymentSource() != PaymentSource.CASH) continue;
+            BigDecimal amt = ex.getAmount();
+            if (amt == null || amt.signum() <= 0) continue;
+            if (cutoff == null || ex.getEffectiveDate().isAfter(cutoff)) {
+                standaloneCashExpensesPostCount = standaloneCashExpensesPostCount.add(amt);
+            }
+        }
+
         // Split salary payouts: any payout dated after the latest physical cash count
         // hasn't been reflected in the drawer yet and must be subtracted from the
         // displayed "cash on hand". Card-side always subtracts all payouts.
+        // Payments flagged `excludeFromTreasury` are tracked separately so the
+        // treasury card / ledger does NOT move when they are recorded.
         BigDecimal salaryCashOut = BigDecimal.ZERO;
         BigDecimal salaryCashOutPostCount = BigDecimal.ZERO;
         BigDecimal salaryCardOut = BigDecimal.ZERO;
+        BigDecimal salaryCashExcluded = BigDecimal.ZERO;
+        BigDecimal salaryCardExcluded = BigDecimal.ZERO;
         for (SalaryPayment p : salaryPaymentRepository.findAllByOrderByPaidDateDescCreatedAtDesc()) {
+            if (p.isExcludeFromTreasury()) {
+                if (p.getPaymentSource() == PaymentSource.CASH) {
+                    salaryCashExcluded = salaryCashExcluded.add(p.getAmount());
+                } else {
+                    salaryCardExcluded = salaryCardExcluded.add(p.getAmount());
+                }
+                continue;
+            }
             if (p.getPaymentSource() == PaymentSource.CASH) {
                 salaryCashOut = salaryCashOut.add(p.getAmount());
                 if (cutoff == null || p.getPaidDate().isAfter(cutoff)) {
@@ -155,7 +183,11 @@ public class TreasuryService {
         BigDecimal cashRaw = latestCount
                 .map(DailyEntry::getActualCashCounted)
                 .orElse(settings.getInitialCashBalance());
-        BigDecimal cashBalance = cashRaw.subtract(salaryCashOutPostCount);
+        // Drawer after non-salary post-count outflows — the baseline before
+        // we additionally subtract salaries (the UI's "include salary" toggle
+        // flips between this baseline and the fully-adjusted balance).
+        BigDecimal cashBalanceBeforeSalary = cashRaw.subtract(standaloneCashExpensesPostCount);
+        BigDecimal cashBalance = cashBalanceBeforeSalary.subtract(salaryCashOutPostCount);
         // Card balance stays cumulative (no physical count).
         BigDecimal cardBalanceBeforeSalary = settings.getInitialCardBalance().add(cardFromEntries);
         BigDecimal cardBalance = cardBalanceBeforeSalary.subtract(salaryCardOut);
@@ -169,8 +201,10 @@ public class TreasuryService {
         result.put("cashBalance", toDouble(cashBalance));
         result.put("cardBalance", toDouble(cardBalance));
         // Pre-salary variants so the UI can toggle salary inclusion without re-fetching.
-        result.put("cashBalanceBeforeSalary", toDouble(cashRaw));
+        result.put("cashBalanceBeforeSalary", toDouble(cashBalanceBeforeSalary));
         result.put("cardBalanceBeforeSalary", toDouble(cardBalanceBeforeSalary));
+        // Raw drawer count (pre any post-count adjustments) for transparency.
+        result.put("cashRawCount", toDouble(cashRaw));
         // Latest-count context for the cash card
         result.put("cashSource", latestCount.isPresent() ? "LATEST_COUNT" : "INITIAL");
         latestCount.ifPresent(e -> {
@@ -194,10 +228,15 @@ public class TreasuryService {
         result.put("cardFromManualSettlement", toDouble(cardFromManualSettlement));
         result.put("cardFromBankDeposits", toDouble(cardFromBankDeposits));
         result.put("standaloneCashExpenses", toDouble(standaloneCashExpenses));
+        result.put("standaloneCashExpensesPostCount", toDouble(standaloneCashExpensesPostCount));
         result.put("standaloneCardExpenses", toDouble(standaloneCardExpenses));
         result.put("salaryPaidFromCash", toDouble(salaryCashOut));
         result.put("salaryPaidFromCashPostCount", toDouble(salaryCashOutPostCount));
         result.put("salaryPaidFromCard", toDouble(salaryCardOut));
+        // Salary marked as excluded from treasury — tracked for transparency but
+        // not subtracted from the displayed balances above.
+        result.put("salaryPaidFromCashExcluded", toDouble(salaryCashExcluded));
+        result.put("salaryPaidFromCardExcluded", toDouble(salaryCardExcluded));
         result.put("currency", "PLN");
         return result;
     }
@@ -382,9 +421,11 @@ public class TreasuryService {
             rows.add(row);
         }
 
-        // 4) Salary payouts from this source
+        // 4) Salary payouts from this source — excluded payments are bookkeeping
+        //    only and intentionally do NOT show up as treasury movements.
         for (SalaryPayment p : salaryPaymentRepository.findByPaidDateBetween(from, to)) {
             if (p.getPaymentSource() != source) continue;
+            if (p.isExcludeFromTreasury()) continue;
             BigDecimal amt = p.getAmount();
             if (amt == null || amt.signum() <= 0) continue;
             String name = userRepository.findById(p.getUserId()).map(User::getName).orElse("Employee");
@@ -695,14 +736,17 @@ public class TreasuryService {
         User employee = userRepository.findById(req.userId())
                 .orElseThrow(() -> new NotFoundException("Employee not found"));
 
-        Map<String, Object> balances = overview();
-        double available = req.source() == PaymentSource.CASH
-                ? (Double) balances.get("cashBalance")
-                : (Double) balances.get("cardBalance");
-        if (req.amount().doubleValue() > available + 0.005) {
-            throw new BadRequestException(
-                    "Insufficient " + req.source().name().toLowerCase() + " balance (available "
-                            + roundMoney(available) + " PLN)");
+        boolean excluded = Boolean.TRUE.equals(req.excludeFromTreasury());
+        if (!excluded) {
+            Map<String, Object> balances = overview();
+            double available = req.source() == PaymentSource.CASH
+                    ? (Double) balances.get("cashBalance")
+                    : (Double) balances.get("cardBalance");
+            if (req.amount().doubleValue() > available + 0.005) {
+                throw new BadRequestException(
+                        "Insufficient " + req.source().name().toLowerCase() + " balance (available "
+                                + roundMoney(available) + " PLN)");
+            }
         }
 
         SalaryPayment payment = new SalaryPayment();
@@ -713,11 +757,13 @@ public class TreasuryService {
         payment.setPeriodFrom(req.periodFrom());
         payment.setPeriodTo(req.periodTo());
         payment.setNotes(req.notes());
+        payment.setExcludeFromTreasury(excluded);
         payment.setCreatedBy(AuthHelper.currentUser().id());
         payment = salaryPaymentRepository.save(payment);
 
         auditService.log(AuthHelper.currentUser().id(), AuditAction.CREATE, "SalaryPayment", payment.getId(),
-                paymentToMap(payment), "Salary paid from " + req.source().name());
+                paymentToMap(payment),
+                "Salary paid from " + req.source().name() + (excluded ? " (excluded from treasury)" : ""));
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("payment", paymentToMap(payment));
@@ -736,38 +782,33 @@ public class TreasuryService {
         BigDecimal targetAmount = req.amount() != null
                 ? req.amount().setScale(2, RoundingMode.HALF_UP)
                 : payment.getAmount();
+        boolean targetExcluded = req.excludeFromTreasury() != null
+                ? req.excludeFromTreasury()
+                : payment.isExcludeFromTreasury();
 
-        // Re-validate against treasury: simulate "if I removed this payment and
-        // re-added the new version, do I still have enough in the source?"
-        Map<String, Object> balances = overview();
-        double available = targetSource == PaymentSource.CASH
-                ? (Double) balances.get("cashBalance")
-                : (Double) balances.get("cardBalance");
-        // Restore this payment's current contribution to the available balance,
-        // since it was already subtracted in `overview()`.
-        if (payment.getPaymentSource() == targetSource) {
-            available += payment.getAmount().doubleValue();
-        } else {
-            // Source is changing — add back current source, but check target source separately.
-            double targetAvailable = targetSource == PaymentSource.CASH
+        // Re-validate against treasury only when the target version still affects
+        // the balance — excluded payments skip the cash/card availability check.
+        if (!targetExcluded) {
+            Map<String, Object> balances = overview();
+            double available = targetSource == PaymentSource.CASH
                     ? (Double) balances.get("cashBalance")
                     : (Double) balances.get("cardBalance");
-            if (targetAmount.doubleValue() > targetAvailable + 0.005) {
+            // Restore this payment's current contribution to the available balance,
+            // since (when not excluded) it was already subtracted in `overview()`.
+            if (!payment.isExcludeFromTreasury() && payment.getPaymentSource() == targetSource) {
+                available += payment.getAmount().doubleValue();
+            }
+            if (targetAmount.doubleValue() > available + 0.005) {
                 throw new BadRequestException(
                         "Insufficient " + targetSource.name().toLowerCase() + " balance (available "
-                                + roundMoney(targetAvailable) + " PLN)");
+                                + roundMoney(available) + " PLN)");
             }
-            available = Double.POSITIVE_INFINITY; // already validated target above
-        }
-        if (targetAmount.doubleValue() > available + 0.005) {
-            throw new BadRequestException(
-                    "Insufficient " + targetSource.name().toLowerCase() + " balance (available "
-                            + roundMoney(available) + " PLN)");
         }
 
         if (req.amount() != null) payment.setAmount(targetAmount);
         if (req.paidDate() != null) payment.setPaidDate(req.paidDate());
         if (req.source() != null) payment.setPaymentSource(req.source());
+        if (req.excludeFromTreasury() != null) payment.setExcludeFromTreasury(req.excludeFromTreasury());
         if (Boolean.TRUE.equals(req.clearPeriod())) {
             payment.setPeriodFrom(null);
             payment.setPeriodTo(null);
@@ -846,6 +887,7 @@ public class TreasuryService {
         if (p.getPeriodFrom() != null) m.put("periodFrom", p.getPeriodFrom().toString());
         if (p.getPeriodTo() != null) m.put("periodTo", p.getPeriodTo().toString());
         if (p.getNotes() != null && !p.getNotes().isBlank()) m.put("notes", p.getNotes());
+        m.put("excludeFromTreasury", p.isExcludeFromTreasury());
         m.put("createdAt", p.getCreatedAt().toString());
         return m;
     }

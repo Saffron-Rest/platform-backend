@@ -241,6 +241,7 @@ public class SalaryService {
             if (p.getPeriodFrom() != null) m.put("periodFrom", p.getPeriodFrom().toString());
             if (p.getPeriodTo() != null) m.put("periodTo", p.getPeriodTo().toString());
             if (p.getNotes() != null && !p.getNotes().isBlank()) m.put("notes", p.getNotes());
+            m.put("excludeFromTreasury", p.isExcludeFromTreasury());
             rows.add(m);
         }
         return rows;

@@ -14,5 +14,8 @@ public record RecordSalaryPaymentRequest(
         @NotNull PaymentSource source,
         LocalDate periodFrom,
         LocalDate periodTo,
-        String notes
+        String notes,
+        /** When true the payment is recorded but does NOT reduce treasury
+         *  balances and skips the cash/card availability check. */
+        Boolean excludeFromTreasury
 ) {}
