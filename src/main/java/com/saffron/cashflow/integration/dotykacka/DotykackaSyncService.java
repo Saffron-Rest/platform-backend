@@ -109,8 +109,11 @@ public class DotykackaSyncService {
         // Fall back to 7 days ago on first run so we don't pull all-time history.
         Instant cursor = integration.getDotykackaSyncCursor();
         if (cursor == null) cursor = Instant.now().minusSeconds(7 * 24 * 3600L);
-        String filter = "documentType|eq|RECEIPT;versionDate|gte|"
-                + DotykackaClient.enc(cursor.toString());
+        // Dotykačka's filter syntax uses literal "|" and ";" which Java's URI
+        // parser rejects, so we percent-encode the whole filter value as one
+        // unit rather than only the timestamp inside it.
+        String filter = DotykackaClient.enc(
+                "documentType|eq|RECEIPT;versionDate|gte|" + cursor.toString());
 
         int inserted = 0, skipped = 0, unmatched = 0, pagesFetched = 0;
         Instant maxSeen = cursor;

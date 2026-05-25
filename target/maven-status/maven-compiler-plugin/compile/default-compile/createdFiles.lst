@@ -2,6 +2,7 @@ com/saffron/cashflow/util/AuditDiff$1.class
 com/saffron/cashflow/controller/PosIntegrationController$IntegrationRequest.class
 com/saffron/cashflow/controller/AuditController.class
 com/saffron/cashflow/service/PosIngestService.class
+com/saffron/cashflow/service/MenuPrintService$RenderResult.class
 com/saffron/cashflow/service/MenuService.class
 com/saffron/cashflow/controller/CommentController$CreateCommentRequest.class
 com/saffron/cashflow/controller/FileController.class
@@ -49,13 +50,13 @@ com/saffron/cashflow/dto/TagReplaceRequest.class
 com/saffron/cashflow/dto/ExpenseItemRequest.class
 com/saffron/cashflow/util/EntryCalculator.class
 com/saffron/cashflow/repository/NotificationDispatchRepository.class
-com/saffron/cashflow/service/MenuPrintService$MenuFooter.class
 com/saffron/cashflow/dto/BankDepositRequest$LinkPayload.class
 com/saffron/cashflow/dto/TagBulkAssignmentRequest.class
 com/saffron/cashflow/dto/EntryRequest.class
 com/saffron/cashflow/domain/Notification.class
 com/saffron/cashflow/controller/PosIntegrationController.class
 com/saffron/cashflow/controller/EntryController.class
+com/saffron/cashflow/service/MenuPrintService$MenuChrome.class
 com/saffron/cashflow/service/ReportService$DateRange.class
 com/saffron/cashflow/controller/UserController.class
 com/saffron/cashflow/service/NotificationService.class
