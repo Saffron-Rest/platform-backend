@@ -245,7 +245,12 @@ public class MenuPrintService {
             chrome.setRunningHead("Notes from the kitchen");
             drawHeritage(doc, writer);
 
-            // 5 — Contents
+            // 5 — Symbols of Azerbaijan
+            doc.newPage();
+            chrome.setRunningHead("Symbols of Azerbaijan");
+            drawSymbolsPage(doc, writer);
+
+            // 6 — Contents
             doc.newPage();
             chrome.setRunningHead("Contents");
             drawContents(doc, categories, contentsPageStarts);
@@ -306,53 +311,269 @@ public class MenuPrintService {
     private void drawCover(Document doc, PdfWriter writer, String title, String subtitle)
             throws DocumentException {
         PdfContentByte cb = writer.getDirectContent();
-
         Rectangle page = doc.getPageSize();
+        float w = page.getWidth(), h = page.getHeight();
+        float cx = w / 2f;
+
+        // Bookplate frames + decorative corner butas. Two concentric saffron
+        // rules give the cover the "library edition" feel; the corner
+        // ornaments anchor it to Azerbaijani carpet design vocabulary.
         float inset = 36f;
-        // Outer thin saffron frame (luxury hotel menus do this)
         drawThinFrame(cb, page, inset, SAFFRON, 0.6f);
-        // Second, even-thinner frame nudged inward gives a bookplate feel.
         drawThinFrame(cb, page, inset + 8, SAFFRON, 0.25f);
+        drawCornerOrnaments(cb, page, inset + 14f, 14f, SAFFRON);
 
         Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10, SAFFRON_DEEP);
         Font year = FontFactory.getFont(FontFactory.HELVETICA, 9, MUTED);
-        Font brand = FontFactory.getFont(FontFactory.TIMES_BOLD, 96, INK);
-        Font sub = FontFactory.getFont(FontFactory.TIMES_ITALIC, 18, MUTED);
+        Font brand = FontFactory.getFont(FontFactory.TIMES_BOLD, 102, INK);
+        Font sub = FontFactory.getFont(FontFactory.TIMES_ITALIC, 19, MUTED);
         Font cite = FontFactory.getFont(FontFactory.TIMES_ITALIC, 12, SAFFRON_DEEP);
         Font foot = FontFactory.getFont(FontFactory.HELVETICA, 8.5f, MUTED);
+        Font est = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8.5f, SAFFRON_DEEP);
 
-        // Top eyebrow — printed centered just below the inner frame.
+        // Eight-pointed Şirvan star above the eyebrow — single small motif.
+        drawEightStar(cb, cx, h - inset - 38, 7f, SAFFRON, true);
+
         showCentered(cb, spacedCaps("La carte · A book of dishes"), eyebrow,
-                page.getWidth() / 2f, page.getHeight() - inset - 32);
+                cx, h - inset - 56);
 
-        // Brand wordmark in the upper third.
-        showCentered(cb, title, brand, page.getWidth() / 2f, page.getHeight() * 0.62f);
+        // Brand wordmark — primary visual anchor of the cover.
+        showCentered(cb, title, brand, cx, h * 0.64f);
 
-        // Hairline rule under the wordmark.
+        // Refined ornamental rule under the wordmark: short rule – tiny diamond – short rule.
+        float ruleY = h * 0.64f - 36f;
         cb.saveState();
         cb.setColorStroke(SAFFRON);
         cb.setLineWidth(1.2f);
-        float ruleY = page.getHeight() * 0.62f - 32f;
-        cb.moveTo(page.getWidth() / 2f - 60f, ruleY);
-        cb.lineTo(page.getWidth() / 2f + 60f, ruleY);
+        cb.moveTo(cx - 70, ruleY);
+        cb.lineTo(cx - 8, ruleY);
+        cb.moveTo(cx + 8, ruleY);
+        cb.lineTo(cx + 70, ruleY);
         cb.stroke();
+        cb.setColorFill(SAFFRON);
+        cb.moveTo(cx, ruleY + 4);
+        cb.lineTo(cx + 4, ruleY);
+        cb.lineTo(cx, ruleY - 4);
+        cb.lineTo(cx - 4, ruleY);
+        cb.closePathFillStroke();
         cb.restoreState();
 
-        // Subtitle in italic
-        showCentered(cb, subtitle, sub, page.getWidth() / 2f, ruleY - 24);
+        showCentered(cb, subtitle, sub, cx, ruleY - 26);
 
-        // Drawn pomegranate-flower ornament between subtitle and quote.
-        drawPomegranateOrnament(cb, page.getWidth() / 2f, page.getHeight() * 0.38f);
+        // Large central buta (paisley) — the most iconic Azerbaijani motif.
+        // Flanked by two thin saffron rules so it lives on a horizontal beat.
+        float butaY = h * 0.40f;
+        cb.saveState();
+        cb.setColorStroke(SAFFRON);
+        cb.setLineWidth(0.6f);
+        cb.moveTo(cx - 120, butaY);
+        cb.lineTo(cx - 32, butaY);
+        cb.moveTo(cx + 32, butaY);
+        cb.lineTo(cx + 120, butaY);
+        cb.stroke();
+        cb.restoreState();
+        drawButa(cb, cx, butaY, 22f, SAFFRON_DEEP, false);
 
-        // Italic motif under the ornament.
-        showCentered(cb, "Şirniyyat · Plov · Kabab · Çay", cite,
-                page.getWidth() / 2f, page.getHeight() * 0.30f);
+        // Italic motif under the buta.
+        showCentered(cb, "Şirniyyat · Plov · Kabab · Çay", cite, cx, h * 0.30f);
 
-        // Bottom block — edition and address line
+        // Bottom: refined three-line edition block.
+        showCentered(cb, "EST. SAFFRON · WARSZAWA · AZƏRBAYCAN MƏTBƏXİ",
+                est, cx, inset + 72);
         showCentered(cb, "EDITION · " + LocalDate.now().format(MENU_DATE).toUpperCase(Locale.ROOT),
-                year, page.getWidth() / 2f, inset + 56);
+                year, cx, inset + 54);
         showCentered(cb, "S A F F R O N · W A R S Z A W A · P O L A N D",
-                foot, page.getWidth() / 2f, inset + 38);
+                foot, cx, inset + 38);
+    }
+
+    /**
+     * Hand-drawn buta (paisley / "flame") — the most recognisable Azerbaijani
+     * motif. Found on carpets, embroidery, manuscript margins, architecture.
+     * Symbol of fire, eternity, and the Zoroastrian sun. Built from a single
+     * closed cubic-bezier path so it scales cleanly at any size, plus an
+     * inner-leaf accent for depth.
+     *
+     * @param size  approx. width in PDF points (the leaf is taller than wide).
+     * @param filled fill with the colour as well as stroking the outline.
+     */
+    private void drawButa(PdfContentByte cb, float cx, float cy, float size,
+                           Color color, boolean filled) {
+        cb.saveState();
+        cb.setColorStroke(color);
+        if (filled) cb.setColorFill(color);
+        cb.setLineWidth(0.8f);
+        float s = size;
+
+        // Outer paisley outline. The shape: bulges out on the right, curls
+        // back to a point at the top, narrows down to a stem at the bottom.
+        // Tweaked by hand until it read as a "flame" silhouette at small sizes.
+        cb.moveTo(cx, cy - s);
+        cb.curveTo(cx - s * 0.95f, cy - s * 0.6f,
+                   cx - s * 1.05f, cy + s * 0.4f,
+                   cx - s * 0.55f, cy + s * 0.95f);
+        cb.curveTo(cx - s * 0.15f, cy + s * 1.35f,
+                   cx + s * 0.45f, cy + s * 1.30f,
+                   cx + s * 0.50f, cy + s * 0.70f);
+        cb.curveTo(cx + s * 0.55f, cy + s * 0.25f,
+                   cx + s * 0.10f, cy + s * 0.55f,
+                   cx + s * 0.05f, cy + s * 0.20f);
+        cb.curveTo(cx + s * 0.02f, cy - s * 0.10f,
+                   cx + s * 0.90f, cy - s * 0.20f,
+                   cx + s * 0.40f, cy - s * 0.70f);
+        cb.curveTo(cx + s * 0.10f, cy - s * 1.00f,
+                   cx - s * 0.05f, cy - s * 0.95f,
+                   cx, cy - s);
+        if (filled) cb.closePathFillStroke();
+        else { cb.closePathStroke(); }
+
+        // Inner accent leaf — a smaller buta nested inside for ornament depth.
+        cb.setLineWidth(0.55f);
+        cb.moveTo(cx - s * 0.05f, cy - s * 0.45f);
+        cb.curveTo(cx - s * 0.55f, cy - s * 0.10f,
+                   cx - s * 0.60f, cy + s * 0.45f,
+                   cx - s * 0.25f, cy + s * 0.65f);
+        cb.curveTo(cx + s * 0.10f, cy + s * 0.85f,
+                   cx + s * 0.20f, cy + s * 0.40f,
+                   cx - s * 0.05f, cy - s * 0.45f);
+        cb.stroke();
+
+        // Three petite seed dots inside — a flourish from Azerbaijani textile work.
+        if (filled) {
+            cb.setColorFill(color);
+            cb.circle(cx - s * 0.10f, cy + s * 0.25f, 0.8f);
+            cb.fill();
+            cb.circle(cx - s * 0.20f, cy - s * 0.05f, 0.8f);
+            cb.fill();
+            cb.circle(cx - s * 0.05f, cy - s * 0.30f, 0.8f);
+            cb.fill();
+        }
+        cb.restoreState();
+    }
+
+    /**
+     * Eight-pointed Şirvan star — appears all over Azerbaijani carpets and
+     * historical architecture. Drawn as a 16-vertex polygon alternating between
+     * an outer and an inner radius so the points are sharp.
+     */
+    private void drawEightStar(PdfContentByte cb, float cx, float cy, float outerR,
+                                Color color, boolean filled) {
+        cb.saveState();
+        cb.setColorStroke(color);
+        if (filled) cb.setColorFill(color);
+        cb.setLineWidth(0.6f);
+        float inner = outerR * 0.40f;
+        for (int i = 0; i < 16; i++) {
+            double a = -Math.PI / 2 + i * Math.PI / 8.0;
+            float r = (i % 2 == 0) ? outerR : inner;
+            float x = cx + (float) Math.cos(a) * r;
+            float y = cy + (float) Math.sin(a) * r;
+            if (i == 0) cb.moveTo(x, y); else cb.lineTo(x, y);
+        }
+        if (filled) cb.closePathFillStroke(); else cb.closePathStroke();
+        cb.restoreState();
+    }
+
+    /**
+     * Stylised saffron crocus — three petals fanning up from a centre, with
+     * three saffron stigmas at the very top. The actual plant we owe the
+     * restaurant's name to.
+     */
+    private void drawSaffronCrocus(PdfContentByte cb, float cx, float cy, float size, Color color) {
+        cb.saveState();
+        cb.setColorStroke(color);
+        cb.setColorFill(color);
+        cb.setLineWidth(0.7f);
+
+        // Three petals
+        for (int i = -1; i <= 1; i++) {
+            double a = -Math.PI / 2 + i * (Math.PI / 5);
+            float dx = (float) Math.cos(a) * size * 0.45f;
+            float dy = (float) Math.sin(a) * size * 0.6f;
+            cb.moveTo(cx, cy);
+            cb.curveTo(cx + dx * 0.4f - dy * 0.3f, cy + dy * 0.4f + dx * 0.3f,
+                       cx + dx * 0.9f - dy * 0.2f, cy + dy * 0.9f + dx * 0.2f,
+                       cx + dx, cy + dy);
+            cb.curveTo(cx + dx * 0.9f + dy * 0.2f, cy + dy * 0.9f - dx * 0.2f,
+                       cx + dx * 0.4f + dy * 0.3f, cy + dy * 0.4f - dx * 0.3f,
+                       cx, cy);
+            cb.stroke();
+        }
+        // Three stigmas (the actual saffron threads)
+        cb.setColorStroke(SAFFRON_DEEP);
+        cb.setLineWidth(1.2f);
+        for (int i = -1; i <= 1; i++) {
+            float dx = i * size * 0.10f;
+            cb.moveTo(cx + dx, cy);
+            cb.curveTo(cx + dx, cy + size * 0.35f,
+                       cx + dx * 1.5f, cy + size * 0.55f,
+                       cx + dx * 2.0f, cy + size * 0.75f);
+            cb.stroke();
+        }
+        cb.restoreState();
+    }
+
+    /**
+     * Small "L"-shaped saffron corner ornament — drawn at each of the four
+     * inner corners of the cover/closing frame so the page feels stamped, like
+     * a stationery border.
+     */
+    private void drawCornerOrnaments(PdfContentByte cb, Rectangle page, float inset, float size,
+                                      Color color) {
+        cb.saveState();
+        cb.setColorStroke(color);
+        cb.setColorFill(color);
+        cb.setLineWidth(0.5f);
+        float w = page.getWidth(), h = page.getHeight();
+        float[][] anchors = {
+                {inset, inset, +1, +1},                       // bottom-left
+                {w - inset, inset, -1, +1},                   // bottom-right
+                {inset, h - inset, +1, -1},                   // top-left
+                {w - inset, h - inset, -1, -1},               // top-right
+        };
+        for (float[] a : anchors) {
+            float x = a[0], y = a[1], sx = a[2], sy = a[3];
+            cb.moveTo(x, y + sy * size);
+            cb.lineTo(x, y);
+            cb.lineTo(x + sx * size, y);
+            cb.stroke();
+            cb.circle(x + sx * size * 0.55f, y + sy * size * 0.55f, 1.4f);
+            cb.fill();
+        }
+        cb.restoreState();
+    }
+
+    /**
+     * Decorative band — a row of small diamonds with thin rules either side.
+     * Echoes the borders of Azerbaijani carpets. Used under chapter blurbs and
+     * inside the glossary page.
+     */
+    private void drawCarpetBand(PdfContentByte cb, float x, float y, float width, Color color) {
+        cb.saveState();
+        cb.setColorStroke(color);
+        cb.setColorFill(color);
+        cb.setLineWidth(0.5f);
+        // Two thin rules.
+        cb.moveTo(x, y + 4);
+        cb.lineTo(x + width, y + 4);
+        cb.moveTo(x, y - 4);
+        cb.lineTo(x + width, y - 4);
+        cb.stroke();
+        // Diamonds and dots across the centre.
+        float step = 14f;
+        float d = 2.2f;
+        for (float xi = x + step / 2; xi < x + width; xi += step) {
+            cb.moveTo(xi, y + d);
+            cb.lineTo(xi + d, y);
+            cb.lineTo(xi, y - d);
+            cb.lineTo(xi - d, y);
+            cb.closePathFillStroke();
+            // tiny dot between diamonds
+            if (xi + step / 2 < x + width) {
+                cb.circle(xi + step / 2, y, 0.7f);
+                cb.fill();
+            }
+        }
+        cb.restoreState();
     }
 
     /** Hand-drawn pomegranate-flower ornament — a stylised six-petal motif we
@@ -582,6 +803,119 @@ public class MenuPrintService {
         doc.add(grid);
     }
 
+    // ---------- Symbols of Azerbaijan ----------
+
+    /**
+     * A small visual essay: four motifs that appear again and again in
+     * Azerbaijani art — buta, eight-pointed star, pomegranate, saffron
+     * crocus — each rendered with our drawing primitives so they feel
+     * intentional rather than clip-arty.
+     */
+    private void drawSymbolsPage(Document doc, PdfWriter writer) throws DocumentException {
+        PdfContentByte cb = writer.getDirectContent();
+        Rectangle page = doc.getPageSize();
+
+        Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9.5f, SAFFRON_DEEP);
+        Font head = FontFactory.getFont(FontFactory.TIMES_BOLD, 32, INK);
+        Font cardEn = FontFactory.getFont(FontFactory.TIMES_BOLD, 14, INK);
+        Font cardAz = FontFactory.getFont(FontFactory.TIMES_ITALIC, 10.5f, MUTED);
+        Font cardBody = FontFactory.getFont(FontFactory.TIMES_ROMAN, 10.5f, INK_SOFT);
+
+        doc.add(new Paragraph(spacedCaps("A book of motifs"), eyebrow));
+        Paragraph h = new Paragraph("Symbols of Azerbaijan", head);
+        h.setSpacingBefore(6);
+        h.setSpacingAfter(4);
+        doc.add(h);
+        doc.add(saffronRule(60f));
+
+        // Intro line in italic
+        Font intro = FontFactory.getFont(FontFactory.TIMES_ITALIC, 11.5f, INK_SOFT);
+        Paragraph p = new Paragraph(
+                "Some shapes follow us through Azerbaijani art for a thousand years — onto carpets, "
+                        + "tiles, manuscripts and tea-glasses. You will see them again throughout this book.",
+                intro);
+        p.setLeading(17f);
+        p.setSpacingBefore(20);
+        p.setSpacingAfter(8);
+        p.setAlignment(Element.ALIGN_LEFT);
+        doc.add(p);
+
+        // Lay out four motif cards in a 2×2 grid. We position the drawn symbols
+        // absolutely (via the content byte) over invisible spacer rows so the
+        // text underneath flows in normal document order — that way page-break
+        // safety isn't compromised even if the page margin changes.
+        float gridTop = page.getHeight() * 0.66f;
+        float gridBottom = page.getHeight() * 0.16f;
+        float colW = (doc.right() - doc.left()) / 2f;
+        float rowH = (gridTop - gridBottom) / 2f;
+
+        String[][] motifs = new String[][] {
+                {"Buta", "Buta", "An eternal flame shaped like a paisley leaf. Found on Azerbaijani carpets and embroidery from Nakhchivan to Bakı — symbol of fire, life and renewal."},
+                {"Eight-pointed Şirvan star", "Səkkizguşəli ulduz", "The eight-pointed star of the Şirvan school of carpet weaving — protection, balance, and the cardinal directions of the Azerbaijani plateau."},
+                {"Pomegranate", "Nar", "A fruit with hundreds of seeds — the Azerbaijani symbol of fertility, unity, and an abundant table. Goychay even hosts a yearly Pomegranate Festival."},
+                {"Saffron crocus", "Zəfəran", "Three crimson stigmas hand-pulled from each flower at dawn. The plant that bound the silk roads — and the namesake of this kitchen."},
+        };
+
+        // Four absolute-positioned symbol drawings.
+        float[][] centres = new float[][] {
+                {doc.left() + colW * 0.25f, gridTop - rowH * 0.40f},
+                {doc.left() + colW * 1.25f, gridTop - rowH * 0.40f},
+                {doc.left() + colW * 0.25f, gridTop - rowH * 1.40f},
+                {doc.left() + colW * 1.25f, gridTop - rowH * 1.40f},
+        };
+        drawButa(cb, centres[0][0], centres[0][1], 18f, SAFFRON_DEEP, false);
+        drawEightStar(cb, centres[1][0], centres[1][1], 18f, SAFFRON_DEEP, false);
+        drawPomegranateOrnament(cb, centres[2][0], centres[2][1]);
+        drawSaffronCrocus(cb, centres[3][0], centres[3][1], 22f, SAFFRON);
+
+        // The four caption blocks, positioned just below each motif.
+        PdfPTable grid = new PdfPTable(2);
+        grid.setWidthPercentage(100);
+        grid.setSpacingBefore(28);
+        grid.getDefaultCell().setBorder(Rectangle.NO_BORDER);
+        try { grid.setWidths(new float[]{1, 1}); } catch (DocumentException ignored) {}
+
+        for (String[] m : motifs) {
+            PdfPTable card = new PdfPTable(1);
+            card.setWidthPercentage(100);
+
+            // Empty top cell holds vertical space for the absolute-positioned glyph.
+            PdfPCell space = new PdfPCell(new Phrase(" "));
+            space.setBorder(Rectangle.NO_BORDER);
+            space.setFixedHeight(68f);
+            card.addCell(space);
+
+            PdfPCell name = new PdfPCell(new Phrase(m[0], cardEn));
+            name.setBorder(Rectangle.NO_BORDER);
+            name.setHorizontalAlignment(Element.ALIGN_CENTER);
+            card.addCell(name);
+
+            PdfPCell az = new PdfPCell(new Phrase(m[1], cardAz));
+            az.setBorder(Rectangle.NO_BORDER);
+            az.setHorizontalAlignment(Element.ALIGN_CENTER);
+            az.setPaddingBottom(6);
+            card.addCell(az);
+
+            Paragraph bodyP = new Paragraph(m[2], cardBody);
+            bodyP.setLeading(14.5f);
+            bodyP.setAlignment(Element.ALIGN_CENTER);
+            PdfPCell body = new PdfPCell();
+            body.setBorder(Rectangle.NO_BORDER);
+            body.addElement(bodyP);
+            body.setPaddingTop(4);
+            body.setPaddingBottom(8);
+            body.setPaddingLeft(16);
+            body.setPaddingRight(16);
+            card.addCell(body);
+
+            PdfPCell wrap = new PdfPCell(card);
+            wrap.setBorder(Rectangle.NO_BORDER);
+            wrap.setPaddingBottom(10);
+            grid.addCell(wrap);
+        }
+        doc.add(grid);
+    }
+
     // ---------- Contents ----------
 
     private void drawContents(Document doc, List<MenuCategory> cats, Map<String, Integer> starts)
@@ -671,6 +1005,10 @@ public class MenuPrintService {
         float colRight = doc.right();
         float ribbonTop = page.getHeight() * 0.74f;
 
+        // Eight-pointed Şirvan star sits above the eyebrow — small but it
+        // immediately roots the page in Azerbaijani carpet vocabulary.
+        drawEightStar(cb, colLeft + 6, ribbonTop + 22, 7f, SAFFRON, true);
+
         // Eyebrow row with right-aligned chapter index
         try {
             ColumnText.showTextAligned(cb, Element.ALIGN_LEFT,
@@ -689,6 +1027,10 @@ public class MenuPrintService {
         cb.lineTo(colLeft + 38, ribbonTop - 8);
         cb.stroke();
         cb.restoreState();
+
+        // Watermark buta in the left margin — very faint cream, so it reads as
+        // texture rather than illustration. Mirrors carpet "ground" patterns.
+        drawButa(cb, doc.left() - 8, page.getHeight() * 0.30f, 32f, CREAM_DEEP, true);
 
         // Title block via ColumnText so it wraps cleanly on long names
         ColumnText tBlock = new ColumnText(cb);
@@ -723,7 +1065,7 @@ public class MenuPrintService {
         String blurbText = blurbFor(name);
         if (blurbText != null) {
             ColumnText bBlock = new ColumnText(cb);
-            bBlock.setSimpleColumn(colLeft, page.getHeight() * 0.18f,
+            bBlock.setSimpleColumn(colLeft, page.getHeight() * 0.22f,
                     colRight, ruleY - 12);
             Paragraph blurbP = new Paragraph(blurbText, blurb);
             blurbP.setLeading(19f);
@@ -731,6 +1073,11 @@ public class MenuPrintService {
             bBlock.addElement(blurbP);
             try { bBlock.go(); } catch (Exception ignored) {}
         }
+
+        // Decorative Azerbaijani carpet-band between the blurb and the hero
+        // image — small diamonds + rules, drawn at the right column width.
+        drawCarpetBand(cb, colLeft, page.getHeight() * 0.18f,
+                Math.min(220f, colRight - colLeft - 200f), SAFFRON);
 
         // Hero image: pick the featured item with a photo, otherwise the first item with a photo.
         MenuItem hero = null;
@@ -1166,25 +1513,44 @@ public class MenuPrintService {
     private void drawClosing(Document doc, PdfWriter writer, Options opt) throws DocumentException {
         PdfContentByte cb = writer.getDirectContent();
         Rectangle page = doc.getPageSize();
+        float cx = page.getWidth() / 2f;
 
-        // Same bordered frame as the cover for a deliberate book-end feel.
+        // Mirror the cover: double frame + corner ornaments. The book closes
+        // with the same visual stamp it opened with.
         float inset = 36f;
         drawThinFrame(cb, page, inset, SAFFRON, 0.6f);
         drawThinFrame(cb, page, inset + 8, SAFFRON, 0.25f);
+        drawCornerOrnaments(cb, page, inset + 14f, 14f, SAFFRON);
 
         Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10, SAFFRON_DEEP);
-        Font hero = FontFactory.getFont(FontFactory.TIMES_BOLD, 56, INK);
+        Font hero = FontFactory.getFont(FontFactory.TIMES_BOLD, 60, INK);
         Font az = FontFactory.getFont(FontFactory.TIMES_ITALIC, 20, MUTED);
         Font addr = FontFactory.getFont(FontFactory.HELVETICA, 10, INK);
         Font foot = FontFactory.getFont(FontFactory.HELVETICA, 8.5f, MUTED);
 
-        float cx = page.getWidth() / 2f;
+        // Tiny 8-pointed star above the eyebrow mirrors the cover marker.
+        drawEightStar(cb, cx, page.getHeight() * 0.80f, 7f, SAFFRON, true);
 
-        showCentered(cb, spacedCaps("Until we see you again"), eyebrow, cx, page.getHeight() * 0.78f);
+        showCentered(cb, spacedCaps("Until we see you again"), eyebrow,
+                cx, page.getHeight() * 0.76f);
         showCentered(cb, "Çox sağ olun", hero, cx, page.getHeight() * 0.66f);
         showCentered(cb, "Thank you for dining with us.", az, cx, page.getHeight() * 0.58f);
 
-        drawPomegranateOrnament(cb, cx, page.getHeight() * 0.48f);
+        // Buta flanked by short saffron rules — the cover ornament, returning.
+        float butaY = page.getHeight() * 0.46f;
+        cb.saveState();
+        cb.setColorStroke(SAFFRON);
+        cb.setLineWidth(0.6f);
+        cb.moveTo(cx - 120, butaY);
+        cb.lineTo(cx - 32, butaY);
+        cb.moveTo(cx + 32, butaY);
+        cb.lineTo(cx + 120, butaY);
+        cb.stroke();
+        cb.restoreState();
+        drawButa(cb, cx, butaY, 22f, SAFFRON_DEEP, false);
+
+        // Decorative carpet band under the ornament.
+        drawCarpetBand(cb, cx - 110, page.getHeight() * 0.38f, 220f, SAFFRON);
 
         if (opt.contactBlock() != null && !opt.contactBlock().isBlank()) {
             String[] lines = opt.contactBlock().trim().split("\\r?\\n");
@@ -1195,6 +1561,8 @@ public class MenuPrintService {
             }
         }
 
+        showCentered(cb, "S A F F R O N · W A R S Z A W A · A Z Ə R B A Y C A N",
+                foot, cx, inset + 56);
         showCentered(cb, "EDITION · " + LocalDate.now().format(MENU_DATE).toUpperCase(Locale.ROOT),
                 foot, cx, inset + 38);
     }
