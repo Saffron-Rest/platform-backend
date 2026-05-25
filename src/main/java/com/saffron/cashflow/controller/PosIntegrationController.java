@@ -89,8 +89,30 @@ public class PosIntegrationController {
     @PostMapping("/{id}/dotykacka/webhook/register")
     public Map<String, Object> registerWebhook(
             @PathVariable String id,
-            @RequestBody(required = false) RegisterWebhookRequest req) {
-        return service.registerDotyposWebhook(id, req == null ? null : req.baseUrl());
+            @RequestBody(required = false) RegisterWebhookRequest req,
+            jakarta.servlet.http.HttpServletRequest httpReq) {
+        String override = req == null ? null : req.baseUrl();
+        // Fall back to the request's own origin if the admin didn't pass an
+        // override and the app.public-base-url config is empty. Honours the
+        // X-Forwarded-* headers Kong sets, so we end up with the real public
+        // origin (e.g. https://cash-flow.saffron.waw.pl) instead of the
+        // internal :3001 the backend container listens on.
+        if (override == null || override.isBlank()) {
+            override = deriveOrigin(httpReq);
+        }
+        return service.registerDotyposWebhook(id, override);
+    }
+
+    private static String deriveOrigin(jakarta.servlet.http.HttpServletRequest req) {
+        if (req == null) return null;
+        String proto = req.getHeader("X-Forwarded-Proto");
+        if (proto == null || proto.isBlank()) proto = req.getScheme();
+        String host = req.getHeader("X-Forwarded-Host");
+        if (host == null || host.isBlank()) host = req.getHeader("Host");
+        if (host == null || host.isBlank()) return null;
+        // X-Forwarded-Host may include the port already; only append default
+        // proxy port if neither host nor proto already encode it.
+        return proto + "://" + host;
     }
 
     @DeleteMapping("/{id}/dotykacka/webhook")

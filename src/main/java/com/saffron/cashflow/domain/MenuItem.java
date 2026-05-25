@@ -66,7 +66,7 @@ public class MenuItem {
     private String allergens;
 
     /** Whether to feature this item on the printable menu (e.g. chef's recommendation). */
-    @Column(name = "featured", nullable = false)
+    @Column(name = "featured", nullable = false, columnDefinition = "boolean default false")
     private boolean featured = false;
 
     @Column(name = "is_active", nullable = false)
