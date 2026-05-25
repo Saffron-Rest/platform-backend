@@ -175,7 +175,7 @@ public class PosIntegrationService {
                 // Stale id — Dotypos may have already dropped it. Carry on.
             }
         }
-        String webhookUrl = base + "/api/pos/dotypos-webhook/" + p.getId()
+        String webhookUrl = base + "/api/pos/push/" + p.getId()
                 + "?token=" + p.getWebhookSecret();
         String accessToken = dotykackaClient.getAccessToken(p.getDotykackaRefreshToken(), p.getDotykackaCloudId());
         long webhookId = dotykackaClient.registerWebhook(
@@ -241,7 +241,10 @@ public class PosIntegrationService {
         return t.length() > max ? t.substring(0, max) : t;
     }
 
-    /** Public response — does NOT include the secret. */
+    /** Public response — includes a ready-to-paste push URL with the token
+     *  already embedded, since admins need to copy it into Dotypos / any POS
+     *  webhook config. The plain HMAC webhook URL is also included for
+     *  advanced custom integrations. */
     private static Map<String, Object> toMap(PosIntegration p) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", p.getId());
@@ -252,6 +255,7 @@ public class PosIntegrationService {
         m.put("lastExternalId", p.getLastExternalId());
         m.put("lastSyncedAt", p.getLastSyncedAt() != null ? p.getLastSyncedAt().toString() : null);
         m.put("webhookUrl", "/api/pos/webhook/" + p.getId());
+        m.put("pushUrl", "/api/pos/push/" + p.getId() + "?token=" + p.getWebhookSecret());
         m.put("createdAt", p.getCreatedAt() != null ? p.getCreatedAt().toString() : null);
         // Dotykačka — we expose presence flags only, never the values themselves.
         if ("dotykacka".equalsIgnoreCase(p.getVendor())) {

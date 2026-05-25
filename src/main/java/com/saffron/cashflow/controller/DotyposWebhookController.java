@@ -16,16 +16,24 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * Receives webhooks pushed by Dotypos (payloadEntity = "ORDERBEAN").
+ * Public POS push endpoint.
  *
- * Dotypos doesn't sign their webhook payloads — instead we embed a
- * per-integration token in the registered URL and check it on every call.
- * That token is the same {@code webhookSecret} we generate when an
- * integration is created, so rotating it via the admin UI invalidates the
- * Dotypos webhook in one step.
+ * Authenticates by a per-integration token embedded in the URL
+ * ({@code ?token=…}). This works for any POS that posts webhooks but cannot
+ * sign requests (e.g. Dotypos / Dotykačka, whose webhooks deliver an
+ * {@code ORDERBEAN} JSON array). The token is the same
+ * {@code webhookSecret} we generate when an integration is created, so
+ * rotating it invalidates the URL in one step.
+ *
+ * Two URL paths point at the same handler:
+ *   <ul>
+ *     <li>{@code /api/pos/push/{id}} — preferred, vendor-agnostic.</li>
+ *     <li>{@code /api/pos/dotypos-webhook/{id}} — original path, kept for
+ *         compatibility with anything already registered.</li>
+ *   </ul>
  */
 @RestController
-@RequestMapping("/api/pos/dotypos-webhook")
+@RequestMapping({"/api/pos/push", "/api/pos/dotypos-webhook"})
 public class DotyposWebhookController {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
