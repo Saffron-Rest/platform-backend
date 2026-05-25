@@ -2,6 +2,7 @@ package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.EntryStatus;
+import com.saffron.cashflow.domain.ManualDeliveryIncome;
 import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.SystemSettingRepository;
@@ -63,7 +64,15 @@ public class AnalyticsService {
             totals.add(e, treasury);
             byDate.computeIfAbsent(e.getDate(), d -> new ArrayList<>()).add(e);
         }
-        totals.addManualDelivery(manualDeliveryService.totalCardCreditBetween(from, to, treasury));
+        // Manual delivery income (Finance page) is also revenue — group by date so
+        // each day's totals reflect ALL income recorded for that day, not just shift
+        // reports. We bucket once and reuse for both period totals and per-day rows.
+        List<ManualDeliveryIncome> allManual = manualDeliveryService.findBetween(from, to);
+        Map<LocalDate, List<ManualDeliveryIncome>> manualByDate = new HashMap<>();
+        for (ManualDeliveryIncome m : allManual) {
+            totals.addManualDeliveryRow(m, treasury);
+            manualByDate.computeIfAbsent(m.getEffectiveDate(), d -> new ArrayList<>()).add(m);
+        }
 
         List<Map<String, Object>> days = new ArrayList<>();
         for (var dayEntry : byDate.entrySet()) {
@@ -77,7 +86,9 @@ public class AnalyticsService {
             for (DailyEntry e : dayList) {
                 dayTotals.add(e, treasury);
             }
-            dayTotals.addManualDelivery(manualDeliveryService.totalCardCreditForDate(date, treasury));
+            for (ManualDeliveryIncome m : manualByDate.getOrDefault(date, List.of())) {
+                dayTotals.addManualDeliveryRow(m, treasury);
+            }
 
             List<Map<String, Object>> reports = new ArrayList<>();
             for (DailyEntry e : dayList) {
@@ -144,6 +155,7 @@ public class AnalyticsService {
         double cashSales;
         double cardSales;
         double platformSales;
+        double manualDeliverySales;
         double returns;
         double expenses;
         double payouts;
@@ -177,8 +189,16 @@ public class AnalyticsService {
             }
         }
 
-        void addManualDelivery(BigDecimal manualToCard) {
-            cardBalance += EntryCalculator.toDouble(manualToCard);
+        /** Apply a manual delivery row to every relevant bucket. Gross feeds
+         *  revenue totals (totalSales / platformSales); settled portion feeds
+         *  the card balance (when the bank actually credits the money). */
+        void addManualDeliveryRow(ManualDeliveryIncome m, TreasurySettings treasury) {
+            double gross = EntryCalculator.toDouble(m.getGrossAmount());
+            totalSales += gross;
+            platformSales += gross;
+            manualDeliverySales += gross;
+            cardBalance += EntryCalculator.toDouble(
+                    com.saffron.cashflow.util.ManualDeliverySettlement.settledToCard(m, treasury));
         }
 
         Map<String, Object> toMap() {
@@ -187,6 +207,7 @@ public class AnalyticsService {
             m.put("cashSales", cashSales);
             m.put("cardSales", cardSales);
             m.put("platformSales", platformSales);
+            m.put("manualDeliverySales", manualDeliverySales);
             m.put("returns", returns);
             m.put("expenses", expenses);
             m.put("payouts", payouts);
@@ -217,8 +238,11 @@ public class AnalyticsService {
             cardBalance += EntryCalculator.toDouble(EntryCalculator.cardNetForTreasury(e, treasury));
         }
 
-        void addManualDelivery(BigDecimal manualToCard) {
-            cardBalance += EntryCalculator.toDouble(manualToCard);
+        void addManualDeliveryRow(ManualDeliveryIncome m, TreasurySettings treasury) {
+            double gross = EntryCalculator.toDouble(m.getGrossAmount());
+            totalSales += gross;
+            cardBalance += EntryCalculator.toDouble(
+                    com.saffron.cashflow.util.ManualDeliverySettlement.settledToCard(m, treasury));
         }
 
         Map<String, Object> toMap() {

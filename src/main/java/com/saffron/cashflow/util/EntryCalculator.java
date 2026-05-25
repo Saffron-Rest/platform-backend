@@ -98,21 +98,33 @@ public final class EntryCalculator {
     }
 
     /**
-     * Net card/bank movement for treasury: settled card sales − card refunds − card expenses + bank deposits.
+     * Net card/bank movement for treasury from a locked shift report.
+     *
+     * <p>Formula: (cardSales − cardRefunds) × settlementRate + bankDeposit − card expenses.
      *
      * <p>Delivery → card is <b>not</b> included here: delivery income sits as "pending bank
      * settlement" until the bank actually credits it. The credit is recognised once a
      * {@code BankDeposit} or {@code CardSettlement} reconciliation is attached to the delivery
      * row in /treasury/history. This keeps the card balance honest — only money already in
      * the bank is reflected.
+     *
+     * <p>Platform refunds are <b>not</b> subtracted here either: a refund on a Wolt/Glovo
+     * order is recovered by the platform from their next settlement payout to us. That
+     * shortfall is reflected automatically through the lower {@code BankDeposit} /
+     * {@code CardSettlement} reconciliation — subtracting it here would double-count.
+     *
+     * <p>Settlement rate is applied to net in-store card volume (sales − refunds) so a
+     * refund "costs" the same proportion that a sale earned. Otherwise a 100 PLN refund
+     * would penalise the balance by the full 100 while a 100 PLN sale only added 97.
      */
     public static BigDecimal cardNetForTreasury(DailyEntry e, TreasurySettings settings) {
-        BigDecimal settledCardSales = e.getCardSales().multiply(settings.getCardSalesSettlementRate());
-        BigDecimal out = e.getCardRefunds().add(e.getPlatformRefunds());
+        BigDecimal netCardVolume = e.getCardSales().subtract(e.getCardRefunds());
+        BigDecimal settledCardNet = netCardVolume.multiply(settings.getCardSalesSettlementRate());
+        BigDecimal out = BigDecimal.ZERO;
         if (hasExpenseItems(e)) {
             out = out.add(sumExpenseItems(e.getExpenseItems(), PaymentSource.CARD));
         }
-        return round(settledCardSales.subtract(out).add(e.getBankDeposit()));
+        return round(settledCardNet.subtract(out).add(e.getBankDeposit()));
     }
 
     private static BigDecimal expenseTotalForCashClosing(DailyEntry e) {

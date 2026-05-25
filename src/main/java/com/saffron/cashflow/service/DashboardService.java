@@ -1,6 +1,7 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.DailyEntry;
+import com.saffron.cashflow.domain.ManualDeliveryIncome;
 import com.saffron.cashflow.domain.Role;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.security.AuthHelper;
@@ -16,9 +17,13 @@ import java.util.*;
 public class DashboardService {
 
     private final DailyEntryRepository entryRepository;
+    private final ManualDeliveryService manualDeliveryService;
 
-    public DashboardService(DailyEntryRepository entryRepository) {
+    public DashboardService(
+            DailyEntryRepository entryRepository,
+            ManualDeliveryService manualDeliveryService) {
         this.entryRepository = entryRepository;
+        this.manualDeliveryService = manualDeliveryService;
     }
 
     @Transactional(readOnly = true)
@@ -62,12 +67,33 @@ public class DashboardService {
             }
         }
 
+        // Roll today's manual delivery income (Finance page) into the same buckets
+        // so the dashboard shows ALL revenue captured for today, not just sales
+        // entered through a shift report. Manual entries are platform-source by
+        // definition (cash/card unaffected); we add gross to platform + total.
+        double manualDeliverySales = 0;
+        if (user.role() != Role.CASHIER) {
+            for (ManualDeliveryIncome m : manualDeliveryService.findBetween(today, today)) {
+                double gross = EntryCalculator.toDouble(m.getGrossAmount());
+                totalSales += gross;
+                manualDeliverySales += gross;
+                switch (m.getPlatform()) {
+                    case WOLT -> wolt += gross;
+                    case BOLT -> bolt += gross;
+                    case UBER_EATS -> uber += gross;
+                    case GLOVO -> glovo += gross;
+                    case OTHER -> other += gross;
+                }
+            }
+        }
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("date", today.toString());
         result.put("entryCount", entries.size());
         result.put("totalSales", totalSales);
         result.put("cashSales", cashSales);
         result.put("cardSales", cardSales);
+        result.put("manualDeliverySales", manualDeliverySales);
         result.put("platforms", Map.of("wolt", wolt, "bolt", bolt, "uber", uber, "glovo", glovo, "other", other));
         result.put("expenses", expenses);
         result.put("netCashFlow", netCashFlow);

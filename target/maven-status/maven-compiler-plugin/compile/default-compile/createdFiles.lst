@@ -92,6 +92,7 @@ com/saffron/cashflow/controller/EntryController.class
 com/saffron/cashflow/service/AuditService.class
 com/saffron/cashflow/service/EntryService.class
 com/saffron/cashflow/report/PdfReportBuilder$PeriodTotals.class
+com/saffron/cashflow/service/DashboardService$1.class
 com/saffron/cashflow/service/ReportService$DateRange.class
 com/saffron/cashflow/controller/UserController.class
 com/saffron/cashflow/domain/PayType.class
