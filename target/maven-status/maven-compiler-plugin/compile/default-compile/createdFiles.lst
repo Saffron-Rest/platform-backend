@@ -23,9 +23,11 @@ com/saffron/cashflow/report/PdfReportBuilder$ShiftTotals.class
 com/saffron/cashflow/service/SettingsService.class
 com/saffron/cashflow/repository/ReceiptFileRepository.class
 com/saffron/cashflow/controller/DataHealthController.class
+com/saffron/cashflow/service/ExportService$FooterEvent.class
 com/saffron/cashflow/domain/AuditAction.class
 com/saffron/cashflow/util/WeeklyOperatingHours.class
 com/saffron/cashflow/service/AuthService.class
+com/saffron/cashflow/service/ExportService$1.class
 com/saffron/cashflow/service/ExportService$ExportFilters.class
 com/saffron/cashflow/domain/CashierNotificationType.class
 com/saffron/cashflow/service/ReportService.class
@@ -53,6 +55,7 @@ com/saffron/cashflow/service/NotificationService.class
 com/saffron/cashflow/security/JwtAuthFilter.class
 com/saffron/cashflow/repository/AuditLogRepository.class
 com/saffron/cashflow/util/SalaryCalculator$1.class
+com/saffron/cashflow/service/ExportService$PdfReport.class
 com/saffron/cashflow/controller/ExpenseController.class
 com/saffron/cashflow/report/PdfReportBuilder.class
 com/saffron/cashflow/service/PushNotificationService.class
@@ -63,6 +66,7 @@ com/saffron/cashflow/service/EntrySpecification.class
 com/saffron/cashflow/service/SearchService$Hit.class
 com/saffron/cashflow/service/SalaryService$1.class
 com/saffron/cashflow/service/DataHealthService.class
+com/saffron/cashflow/service/ExportService$Kpi.class
 com/saffron/cashflow/domain/DeliveryPlatform.class
 com/saffron/cashflow/util/AuditSnapshots.class
 com/saffron/cashflow/web/BadRequestException.class
