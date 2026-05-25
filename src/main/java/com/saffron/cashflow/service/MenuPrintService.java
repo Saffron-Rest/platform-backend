@@ -13,11 +13,13 @@ import com.lowagie.text.Phrase;
 import com.lowagie.text.Rectangle;
 import com.lowagie.text.pdf.ColumnText;
 import com.lowagie.text.pdf.PdfContentByte;
+import com.lowagie.text.pdf.PdfGState;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfPageEventHelper;
 import com.lowagie.text.pdf.PdfWriter;
 import com.lowagie.text.pdf.draw.LineSeparator;
+import org.springframework.core.io.ClassPathResource;
 import com.saffron.cashflow.domain.MenuCategory;
 import com.saffron.cashflow.domain.MenuItem;
 import com.saffron.cashflow.web.BadRequestException;
@@ -315,33 +317,58 @@ public class MenuPrintService {
         float w = page.getWidth(), h = page.getHeight();
         float cx = w / 2f;
 
-        // Bookplate frames + decorative corner butas. Two concentric saffron
-        // rules give the cover the "library edition" feel; the corner
-        // ornaments anchor it to Azerbaijani carpet design vocabulary.
+        // 1. Full-bleed editorial food photograph as the cover background.
+        // We always render the photo behind everything else; ornaments and the
+        // title block sit on top. If the bundled image is missing for some
+        // reason we degrade gracefully to a cream surface — the saffron
+        // ornaments still hold the page together.
+        Image hero = loadBundledImage("cover-hero-feast.jpg");
+        if (hero != null) {
+            // scaleAbsolute fills the page edge-to-edge; we accept some
+            // cropping for the sake of true full bleed.
+            hero.scaleAbsolute(w, h);
+            hero.setAbsolutePosition(0, 0);
+            try { doc.add(hero); } catch (DocumentException ignored) {}
+        } else {
+            cb.saveState();
+            cb.setColorFill(CREAM);
+            cb.rectangle(0, 0, w, h);
+            cb.fill();
+            cb.restoreState();
+        }
+
+        // 2. A soft darken at the very top so the eyebrow + frame read on
+        // the photo, and a stronger darken on the bottom half where the
+        // title sits. This is the classic magazine-cover treatment.
+        applyOverlay(cb, 0, h * 0.86f, w, h * 0.14f, INK, 0.30f);
+        applyOverlay(cb, 0, 0, w, h * 0.54f, INK, 0.62f);
+
+        // 3. Double saffron frame + corner ornaments — sit over the photo
+        //    and give the cover its bookplate character.
         float inset = 36f;
-        drawThinFrame(cb, page, inset, SAFFRON, 0.6f);
-        drawThinFrame(cb, page, inset + 8, SAFFRON, 0.25f);
-        drawCornerOrnaments(cb, page, inset + 14f, 14f, SAFFRON);
+        drawThinFrame(cb, page, inset, CREAM, 0.7f);
+        drawThinFrame(cb, page, inset + 8, SAFFRON, 0.5f);
+        drawCornerOrnaments(cb, page, inset + 14f, 14f, CREAM);
 
-        Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10, SAFFRON_DEEP);
-        Font year = FontFactory.getFont(FontFactory.HELVETICA, 9, MUTED);
-        Font brand = FontFactory.getFont(FontFactory.TIMES_BOLD, 102, INK);
-        Font sub = FontFactory.getFont(FontFactory.TIMES_ITALIC, 19, MUTED);
-        Font cite = FontFactory.getFont(FontFactory.TIMES_ITALIC, 12, SAFFRON_DEEP);
-        Font foot = FontFactory.getFont(FontFactory.HELVETICA, 8.5f, MUTED);
-        Font est = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8.5f, SAFFRON_DEEP);
+        // 4. Typography — cream / saffron over the dark areas so it pops.
+        Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10, SAFFRON);
+        Font year = FontFactory.getFont(FontFactory.HELVETICA, 9, CREAM_DEEP);
+        Font brand = FontFactory.getFont(FontFactory.TIMES_BOLD, 102, CREAM);
+        Font sub = FontFactory.getFont(FontFactory.TIMES_ITALIC, 19, CREAM_DEEP);
+        Font cite = FontFactory.getFont(FontFactory.TIMES_ITALIC, 12, SAFFRON);
+        Font foot = FontFactory.getFont(FontFactory.HELVETICA, 8.5f, CREAM_DEEP);
+        Font est = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8.5f, SAFFRON);
 
-        // Eight-pointed Şirvan star above the eyebrow — single small motif.
+        // Top eyebrow + 8-star marker — keep it light over the photo.
         drawEightStar(cb, cx, h - inset - 38, 7f, SAFFRON, true);
-
         showCentered(cb, spacedCaps("La carte · A book of dishes"), eyebrow,
                 cx, h - inset - 56);
 
-        // Brand wordmark — primary visual anchor of the cover.
-        showCentered(cb, title, brand, cx, h * 0.64f);
+        // Bottom title block. Sits in the darkened area — wordmark large.
+        showCentered(cb, title, brand, cx, h * 0.42f);
 
-        // Refined ornamental rule under the wordmark: short rule – tiny diamond – short rule.
-        float ruleY = h * 0.64f - 36f;
+        // Ornamental rule + tiny diamond beneath the wordmark.
+        float ruleY = h * 0.42f - 36f;
         cb.saveState();
         cb.setColorStroke(SAFFRON);
         cb.setLineWidth(1.2f);
@@ -360,30 +387,54 @@ public class MenuPrintService {
 
         showCentered(cb, subtitle, sub, cx, ruleY - 26);
 
-        // Large central buta (paisley) — the most iconic Azerbaijani motif.
-        // Flanked by two thin saffron rules so it lives on a horizontal beat.
-        float butaY = h * 0.40f;
+        // Buta between two short rules — anchor near the bottom of the panel.
+        float butaY = h * 0.22f;
         cb.saveState();
         cb.setColorStroke(SAFFRON);
         cb.setLineWidth(0.6f);
-        cb.moveTo(cx - 120, butaY);
-        cb.lineTo(cx - 32, butaY);
-        cb.moveTo(cx + 32, butaY);
-        cb.lineTo(cx + 120, butaY);
+        cb.moveTo(cx - 110, butaY);
+        cb.lineTo(cx - 28, butaY);
+        cb.moveTo(cx + 28, butaY);
+        cb.lineTo(cx + 110, butaY);
         cb.stroke();
         cb.restoreState();
-        drawButa(cb, cx, butaY, 22f, SAFFRON_DEEP, false);
+        drawButa(cb, cx, butaY, 18f, SAFFRON, false);
 
         // Italic motif under the buta.
-        showCentered(cb, "Şirniyyat · Plov · Kabab · Çay", cite, cx, h * 0.30f);
+        showCentered(cb, "Şirniyyat · Plov · Kabab · Çay", cite, cx, h * 0.14f);
 
-        // Bottom: refined three-line edition block.
+        // Bottom edition block — restrained.
         showCentered(cb, "EST. SAFFRON · WARSZAWA · AZƏRBAYCAN MƏTBƏXİ",
-                est, cx, inset + 72);
+                est, cx, inset + 56);
         showCentered(cb, "EDITION · " + LocalDate.now().format(MENU_DATE).toUpperCase(Locale.ROOT),
-                year, cx, inset + 54);
-        showCentered(cb, "S A F F R O N · W A R S Z A W A · P O L A N D",
-                foot, cx, inset + 38);
+                year, cx, inset + 38);
+    }
+
+    /** Translucent fill — used to darken parts of the cover photo so the
+     *  cream-coloured title text reads. OpenPDF supports opacity via
+     *  PdfGState; we save/restore so the surrounding text isn't affected. */
+    private void applyOverlay(PdfContentByte cb, float x, float y, float w, float h,
+                              Color color, float opacity) {
+        cb.saveState();
+        PdfGState gs = new PdfGState();
+        gs.setFillOpacity(opacity);
+        cb.setGState(gs);
+        cb.setColorFill(color);
+        cb.rectangle(x, y, w, h);
+        cb.fill();
+        cb.restoreState();
+    }
+
+    /** Load a curated cookbook-style photo bundled with the JAR. Returns
+     *  null if the resource isn't on the classpath — callers must fall back
+     *  to a generated placeholder so a stripped distribution doesn't crash. */
+    private Image loadBundledImage(String name) {
+        try {
+            byte[] bytes = new ClassPathResource("menu-assets/" + name).getInputStream().readAllBytes();
+            return Image.getInstance(bytes);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -649,10 +700,41 @@ public class MenuPrintService {
     private void drawStory(Document doc, PdfWriter writer, Options opt) throws DocumentException {
         Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9.5f, SAFFRON_DEEP);
         Font head = FontFactory.getFont(FontFactory.TIMES_BOLD, 42, INK);
+        Font caption = FontFactory.getFont(FontFactory.HELVETICA_OBLIQUE, 8.5f, MUTED);
         Font dropCap = FontFactory.getFont(FontFactory.TIMES_BOLD, 64, SAFFRON_DEEP);
         Font body = FontFactory.getFont(FontFactory.TIMES_ROMAN, 12.5f, INK_SOFT);
         Font quote = FontFactory.getFont(FontFactory.TIMES_ITALIC, 17, SAFFRON_DEEP);
         Font attribution = FontFactory.getFont(FontFactory.HELVETICA, 8.5f, MUTED);
+
+        // Editorial hero photo at the top — saffron threads on linen with a
+        // brass spoon. Bleeds slightly past the right margin for a more
+        // generous magazine-spread feel.
+        PdfContentByte cb = writer.getDirectContent();
+        Image storyPhoto = loadBundledImage("story-saffron-closeup.jpg");
+        if (storyPhoto != null) {
+            float maxW = (doc.right() - doc.left()) + 30f;
+            float maxH = doc.getPageSize().getHeight() * 0.30f;
+            storyPhoto.scaleToFit(maxW, maxH);
+            storyPhoto.setAbsolutePosition(
+                    doc.left() - 15f,
+                    doc.getPageSize().getHeight() - doc.topMargin() - storyPhoto.getScaledHeight() - 6);
+            try { doc.add(storyPhoto); } catch (DocumentException ignored) {}
+
+            // Photo caption under the image — like in a printed cookbook.
+            try {
+                ColumnText.showTextAligned(cb, Element.ALIGN_LEFT,
+                        new Phrase("Saffron — Zəfəran. Hand-pulled stigmas, the most precious spice on earth.",
+                                caption),
+                        doc.left(),
+                        doc.getPageSize().getHeight() - doc.topMargin() - storyPhoto.getScaledHeight() - 18,
+                        0);
+            } catch (Exception ignored) {}
+
+            // Push the body content below the photo by adding spacing.
+            Paragraph push = new Paragraph(" ");
+            push.setSpacingBefore(storyPhoto.getScaledHeight() + 12);
+            doc.add(push);
+        }
 
         Paragraph eb = new Paragraph(spacedCaps("Welcome"), eyebrow);
         eb.setSpacingBefore(0);
@@ -1079,7 +1161,11 @@ public class MenuPrintService {
         drawCarpetBand(cb, colLeft, page.getHeight() * 0.18f,
                 Math.min(220f, colRight - colLeft - 200f), SAFFRON);
 
-        // Hero image: pick the featured item with a photo, otherwise the first item with a photo.
+        // Hero image — preferred order:
+        //   1. The featured item in this category, if its photo loads.
+        //   2. Any item with a photo.
+        //   3. The bundled "Azerbaijani feast" fallback so the page never
+        //      ends up empty in the corner where the eye expects an image.
         MenuItem hero = null;
         for (MenuItem it : items) {
             if (it.isFeatured() && it.getImagePath() != null) { hero = it; break; }
@@ -1089,30 +1175,50 @@ public class MenuPrintService {
                 if (it.getImagePath() != null) { hero = it; break; }
             }
         }
+        Image img = null;
+        String heroLabel = null;
+        String heroName = null;
         if (hero != null) {
-            Image img = tryLoadImage(hero.getImagePath());
+            img = tryLoadImage(hero.getImagePath());
             if (img != null) {
-                float maxW = (doc.right() - doc.left()) * 0.45f;
-                float maxH = page.getHeight() * 0.30f;
-                img.scaleToFit(maxW, maxH);
-                img.setAbsolutePosition(
-                        doc.right() - img.getScaledWidth(),
-                        doc.bottom());
-                try { doc.add(img); } catch (DocumentException ignored) {}
-
-                // Caption "Featured · <name>" under the image
-                Font cap = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8.5f, SAFFRON_DEEP);
-                Font capName = FontFactory.getFont(FontFactory.TIMES_ITALIC, 10, INK);
-                try {
-                    float captionY = doc.bottom() - 4;
-                    ColumnText.showTextAligned(cb, Element.ALIGN_RIGHT,
-                            new Phrase(spacedCaps("Featured"), cap),
-                            doc.right(), captionY, 0);
-                    ColumnText.showTextAligned(cb, Element.ALIGN_RIGHT,
-                            new Phrase(hero.getName(), capName),
-                            doc.right(), captionY - 12, 0);
-                } catch (Exception ignored) {}
+                heroLabel = "Featured";
+                heroName = hero.getName();
             }
+        }
+        if (img == null) {
+            // No admin-uploaded photo yet — use the bundled editorial image
+            // so the page still feels styled. The caption shifts to a
+            // category-neutral phrase that doesn't lie about the dish shown.
+            img = loadBundledImage("chapter-fallback-plov.jpg");
+            if (img != null) {
+                heroLabel = "From the kitchen";
+                heroName = null;
+            }
+        }
+        if (img != null) {
+            float maxW = (doc.right() - doc.left()) * 0.50f;
+            float maxH = page.getHeight() * 0.34f;
+            img.scaleToFit(maxW, maxH);
+            img.setAbsolutePosition(
+                    doc.right() - img.getScaledWidth(),
+                    doc.bottom());
+            try { doc.add(img); } catch (DocumentException ignored) {}
+
+            Font cap = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8.5f, SAFFRON_DEEP);
+            Font capName = FontFactory.getFont(FontFactory.TIMES_ITALIC, 10.5f, INK);
+            try {
+                float captionY = doc.bottom() - 6;
+                if (heroLabel != null) {
+                    ColumnText.showTextAligned(cb, Element.ALIGN_RIGHT,
+                            new Phrase(spacedCaps(heroLabel), cap),
+                            doc.right(), captionY, 0);
+                }
+                if (heroName != null) {
+                    ColumnText.showTextAligned(cb, Element.ALIGN_RIGHT,
+                            new Phrase(heroName, capName),
+                            doc.right(), captionY - 12, 0);
+                }
+            } catch (Exception ignored) {}
         }
 
         // "Continued →" hint top-right
