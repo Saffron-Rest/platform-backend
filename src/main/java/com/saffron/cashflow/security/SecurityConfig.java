@@ -37,6 +37,9 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health", "/api/auth/login").permitAll()
+                        // POS webhooks authenticate via HMAC signature in the
+                        // handler, not JWT — open the path here.
+                        .requestMatchers(HttpMethod.POST, "/api/pos/webhook/**").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(mustChangePasswordFilter, JwtAuthFilter.class);
