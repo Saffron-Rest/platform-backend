@@ -532,6 +532,22 @@ public class EntryService {
      * settled-to-card overrides, treasury %, edits made on a different
      * device, …) hasn't already triggered one for them.
      *
+     * <p>What sync does:</p>
+     * <ol>
+     *   <li>Re-resolves the <b>opening balance</b> from the latest restaurant
+     *       handover / prior-close actual cash counted. This catches the
+     *       common case where the prior shift's count was edited after this
+     *       report was created — the old opening was frozen at create-time
+     *       and would otherwise stay stale forever.</li>
+     *   <li>Re-runs {@link #recalculateEntry(String)} which derives
+     *       {@code closingBalance} and {@code difference} from the live
+     *       values on the entry.</li>
+     * </ol>
+     *
+     * <p>If the opening actually moves we write an audit row tagged with
+     * {@code synced: true} so the change shows up in "View history" and
+     * can be reverted just like any other update.</p>
+     *
      * <p>Allowed for cashiers on their own entry and for any operations
      * role. Does <i>not</i> require the entry to be a draft — locking only
      * blocks user-facing edits, not the underlying recompute, and ops users
@@ -545,8 +561,37 @@ public class EntryService {
         if (AuthHelper.isCashier() && !entry.getCashierId().equals(user.id())) {
             throw new ForbiddenException("Forbidden");
         }
+
+        Map<String, Object> beforeForAudit = AuditSnapshots.entry(entry);
+
+        // (1) Re-resolve the opening from the most recent same-day handover
+        // or prior LOCKED close. If the prior shift's actualCashCounted was
+        // bumped after this report was created, that change only surfaces
+        // here on sync — `recalculateEntry` alone won't touch it because the
+        // opening is a stored field, not a derived one.
+        BigDecimal resolvedOpening = resolveAutomaticOpening(
+                entry.getCashierId(), entry.getDate())
+                .orElse(BigDecimal.ZERO);
+        BigDecimal currentOpening = nullToZero(entry.getOpeningBalance());
+        boolean openingChanged = resolvedOpening.compareTo(currentOpening) != 0;
+        if (openingChanged) {
+            entry.setOpeningBalance(resolvedOpening);
+            entryRepository.save(entry);
+        }
+
+        // (2) Standard derived-field recompute (closing balance + difference,
+        // both formulas — closing-shift and normal — handled by the helper).
         recalculateEntry(id);
+
         DailyEntry saved = load(id);
+        if (openingChanged) {
+            Map<String, Object> afterForAudit = AuditSnapshots.entry(saved);
+            auditService.logChange(user.id(), AuditAction.UPDATE, "DailyEntry",
+                    saved.getId(), beforeForAudit, afterForAudit,
+                    Map.of("synced", true,
+                            "openingResolvedFrom", currentOpening.doubleValue(),
+                            "openingResolvedTo", resolvedOpening.doubleValue()));
+        }
         return mapEntry(saved);
     }
 
