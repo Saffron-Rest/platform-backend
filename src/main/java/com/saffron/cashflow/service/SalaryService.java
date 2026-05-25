@@ -172,9 +172,48 @@ public class SalaryService {
             grandTotal = grandTotal.add(totalPay);
             grandHours = grandHours.add(totalHours);
 
+            // "Earned till today" — only shifts whose date is on or before today
+            // count. Lets the UI show progress within the current pay period
+            // (e.g. "1,500 of 2,000 PLN earned so far"). For past periods this
+            // equals totalPay; for future periods it's zero.
+            LocalDate today = LocalDate.now();
+            BigDecimal earnedToDate;
+            int daysWorkedToDate = 0;
+            BigDecimal hoursToDate = BigDecimal.ZERO;
+            if (today.isBefore(from)) {
+                earnedToDate = BigDecimal.ZERO;
+            } else if (today.isAfter(to)) {
+                earnedToDate = totalPay;
+                daysWorkedToDate = userShifts.size();
+                hoursToDate = totalHours;
+            } else {
+                BigDecimal sum = BigDecimal.ZERO;
+                for (int i = 0; i < userShifts.size(); i++) {
+                    WorkShift shift = userShifts.get(i);
+                    if (shift.getDate().isAfter(today)) continue;
+                    daysWorkedToDate++;
+                    Map<String, Object> row = shiftRows.get(i);
+                    Object pay = row.get("pay");
+                    if (pay instanceof Number n) {
+                        sum = sum.add(BigDecimal.valueOf(n.doubleValue()));
+                    }
+                    Object hrs = row.get("hours");
+                    if (hrs instanceof Number n) {
+                        hoursToDate = hoursToDate.add(BigDecimal.valueOf(n.doubleValue()));
+                    }
+                }
+                earnedToDate = sum.setScale(2, RoundingMode.HALF_UP);
+                hoursToDate = hoursToDate.setScale(2, RoundingMode.HALF_UP);
+            }
+
             BigDecimal paidAmount = paidByUser.getOrDefault(cashier.getId(), BigDecimal.ZERO)
                     .setScale(2, RoundingMode.HALF_UP);
             BigDecimal remainingPay = totalPay.subtract(paidAmount).max(BigDecimal.ZERO)
+                    .setScale(2, RoundingMode.HALF_UP);
+            // "Owed right now" — what's been earned through today minus what's
+            // been paid so far. Useful when the period is mid-flight: pays out
+            // exactly what's due even though more days are scheduled later.
+            BigDecimal owedNow = earnedToDate.subtract(paidAmount).max(BigDecimal.ZERO)
                     .setScale(2, RoundingMode.HALF_UP);
             grandPaid = grandPaid.add(paidAmount);
 
@@ -198,10 +237,14 @@ public class SalaryService {
                                     currentPayType, currentPayAmount, userShifts.size(), calendarDays));
             emp.put("usesPayHistory", multipleRates);
             emp.put("shiftCount", userShifts.size());
+            emp.put("daysWorkedToDate", daysWorkedToDate);
             emp.put("totalHours", toDouble(totalHours));
+            emp.put("hoursToDate", toDouble(hoursToDate));
             emp.put("totalPay", toDouble(totalPay));
+            emp.put("earnedToDate", toDouble(earnedToDate));
             emp.put("paidAmount", toDouble(paidAmount));
             emp.put("remainingPay", toDouble(remainingPay));
+            emp.put("owedNow", toDouble(owedNow));
             emp.put("fullyPaid", remainingPay.compareTo(BigDecimal.ZERO) <= 0 && totalPay.compareTo(BigDecimal.ZERO) > 0);
             emp.put("payments", paymentMaps(paymentsByUser.getOrDefault(cashier.getId(), List.of())));
             emp.put("shifts", shiftRows);

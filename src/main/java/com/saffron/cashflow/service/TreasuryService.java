@@ -34,6 +34,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -134,19 +135,22 @@ public class TreasuryService {
         // Falls back to initial cash balance if no locked report exists yet.
         Optional<DailyEntry> latestCount = findLatestLockedCount();
         LocalDate cutoff = latestCount.map(DailyEntry::getDate).orElse(null);
+        Instant cutoffStamp = latestCount.map(DailyEntry::getSubmittedAt).orElse(null);
 
         // Anything paid from the drawer AFTER the latest physical count must be
         // subtracted from the displayed "cash on hand" — neither standalone cash
         // expenses (Finance page) nor cash salary payouts are baked into the count.
-        // Same-day events (effectiveDate / paidDate == cutoff) are treated as
-        // pre-count to be consistent with how the drawer is usually counted at
-        // shift end (after the day's events).
+        // Same-day events are disambiguated by comparing the record's createdAt
+        // timestamp to the count's submittedAt — a salary recorded AFTER the
+        // count was locked has not yet reduced the drawer, so it counts as
+        // post-count even when the calendar dates are equal. This fixes the
+        // common "I paid salary today and the balance didn't move" issue.
         BigDecimal standaloneCashExpensesPostCount = BigDecimal.ZERO;
         for (ExpenseItem ex : expenseService.findStandaloneBetween(from, to)) {
             if (ex.getPaymentSource() != PaymentSource.CASH) continue;
             BigDecimal amt = ex.getAmount();
             if (amt == null || amt.signum() <= 0) continue;
-            if (cutoff == null || ex.getEffectiveDate().isAfter(cutoff)) {
+            if (isAfterCutoff(ex.getEffectiveDate(), ex.getCreatedAt(), cutoff, cutoffStamp)) {
                 standaloneCashExpensesPostCount = standaloneCashExpensesPostCount.add(amt);
             }
         }
@@ -172,7 +176,7 @@ public class TreasuryService {
             }
             if (p.getPaymentSource() == PaymentSource.CASH) {
                 salaryCashOut = salaryCashOut.add(p.getAmount());
-                if (cutoff == null || p.getPaidDate().isAfter(cutoff)) {
+                if (isAfterCutoff(p.getPaidDate(), p.getCreatedAt(), cutoff, cutoffStamp)) {
                     salaryCashOutPostCount = salaryCashOutPostCount.add(p.getAmount());
                 }
             } else {
@@ -664,6 +668,29 @@ public class TreasuryService {
 
     private static BigDecimal round2(BigDecimal v) {
         return v.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * Returns true when a record dated {@code recordDate} (created at
+     * {@code recordCreatedAt}) happened strictly AFTER the latest cash count
+     * (dated {@code cutoffDate}, locked at {@code cutoffStamp}).
+     *
+     * <p>Same-day events are disambiguated by comparing the timestamps so a
+     * salary recorded after the count was locked correctly counts as post-count
+     * even though the calendar date is the same.
+     */
+    private static boolean isAfterCutoff(
+            LocalDate recordDate, Instant recordCreatedAt,
+            LocalDate cutoffDate, Instant cutoffStamp) {
+        if (cutoffDate == null) return true;
+        if (recordDate == null) return false;
+        if (recordDate.isAfter(cutoffDate)) return true;
+        if (recordDate.isBefore(cutoffDate)) return false;
+        // Same calendar date — fall back to timestamps when both are present;
+        // otherwise treat as post-count (the most likely real-world workflow:
+        // drawer is counted at shift close, then payroll is processed).
+        if (recordCreatedAt == null || cutoffStamp == null) return true;
+        return recordCreatedAt.isAfter(cutoffStamp);
     }
 
     /** Latest locked report (any cashier) with an actual cash count > 0. */
