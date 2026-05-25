@@ -13,6 +13,7 @@ import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.SalaryCalculator;
 import com.saffron.cashflow.util.WeeklyOperatingHours;
 import com.saffron.cashflow.web.BadRequestException;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
@@ -36,18 +37,21 @@ public class SalaryService {
     private final SettingsService settingsService;
     private final PayRateService payRateService;
     private final SalaryPaymentRepository salaryPaymentRepository;
+    private final TagService tagService;
 
     public SalaryService(
             UserRepository userRepository,
             WorkShiftRepository workShiftRepository,
             SettingsService settingsService,
             PayRateService payRateService,
-            SalaryPaymentRepository salaryPaymentRepository) {
+            SalaryPaymentRepository salaryPaymentRepository,
+            @Lazy TagService tagService) {
         this.userRepository = userRepository;
         this.workShiftRepository = workShiftRepository;
         this.settingsService = settingsService;
         this.payRateService = payRateService;
         this.salaryPaymentRepository = salaryPaymentRepository;
+        this.tagService = tagService;
     }
 
     @Transactional(readOnly = true)
@@ -273,6 +277,10 @@ public class SalaryService {
     }
 
     private List<Map<String, Object>> paymentMaps(List<SalaryPayment> payments) {
+        if (payments.isEmpty()) return List.of();
+        Map<String, List<Map<String, Object>>> tagsByPayment = tagService.tagsForBulk(
+                com.saffron.cashflow.domain.TaggedEntityType.SALARY_PAYMENT,
+                payments.stream().map(SalaryPayment::getId).toList());
         List<Map<String, Object>> rows = new ArrayList<>();
         for (SalaryPayment p : payments) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -285,6 +293,7 @@ public class SalaryService {
             if (p.getPeriodTo() != null) m.put("periodTo", p.getPeriodTo().toString());
             if (p.getNotes() != null && !p.getNotes().isBlank()) m.put("notes", p.getNotes());
             m.put("excludeFromTreasury", p.isExcludeFromTreasury());
+            m.put("tags", tagsByPayment.getOrDefault(p.getId(), List.of()));
             rows.add(m);
         }
         return rows;

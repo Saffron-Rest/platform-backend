@@ -24,8 +24,9 @@ public class ExpenseController {
     @GetMapping
     public List<Map<String, Object>> listAll(
             @RequestParam String from,
-            @RequestParam String to) {
-        return expenseService.listAll(from, to);
+            @RequestParam String to,
+            @RequestParam(value = "tagId", required = false) List<String> tagIds) {
+        return expenseService.listAll(from, to, tagIds);
     }
 
     @GetMapping("/entry/{entryId}")

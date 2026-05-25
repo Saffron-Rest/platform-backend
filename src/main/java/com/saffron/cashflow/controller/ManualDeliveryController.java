@@ -21,8 +21,9 @@ public class ManualDeliveryController {
     @GetMapping
     public List<Map<String, Object>> list(
             @RequestParam String from,
-            @RequestParam String to) {
-        return manualDeliveryService.list(from, to);
+            @RequestParam String to,
+            @RequestParam(value = "tagId", required = false) List<String> tagIds) {
+        return manualDeliveryService.list(from, to, tagIds);
     }
 
     @PostMapping

@@ -25,8 +25,9 @@ public class EntryController {
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
             @RequestParam(required = false) String cashierId,
-            @RequestParam(required = false) String status) {
-        return entryService.list(from, to, cashierId, status);
+            @RequestParam(required = false) String status,
+            @RequestParam(value = "tagId", required = false) List<String> tagIds) {
+        return entryService.list(from, to, cashierId, status, tagIds);
     }
 
     @GetMapping("/today")

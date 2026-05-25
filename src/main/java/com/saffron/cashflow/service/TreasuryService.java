@@ -29,6 +29,7 @@ import com.saffron.cashflow.util.TreasurySettings;
 import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.NotFoundException;
 import org.hibernate.Hibernate;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,6 +56,8 @@ public class TreasuryService {
     private final ExpenseService expenseService;
     private final CardSettlementService cardSettlementService;
     private final BankDepositService bankDepositService;
+    private final TagService tagService;
+    private final CommentService commentService;
 
     public TreasuryService(
             SystemSettingRepository settingRepository,
@@ -65,7 +68,9 @@ public class TreasuryService {
             ManualDeliveryService manualDeliveryService,
             ExpenseService expenseService,
             CardSettlementService cardSettlementService,
-            BankDepositService bankDepositService) {
+            BankDepositService bankDepositService,
+            @Lazy TagService tagService,
+            @Lazy CommentService commentService) {
         this.settingRepository = settingRepository;
         this.entryRepository = entryRepository;
         this.salaryPaymentRepository = salaryPaymentRepository;
@@ -75,6 +80,8 @@ public class TreasuryService {
         this.expenseService = expenseService;
         this.cardSettlementService = cardSettlementService;
         this.bankDepositService = bankDepositService;
+        this.tagService = tagService;
+        this.commentService = commentService;
     }
 
     /** Default settlement % — any logged-in user (for shift report form). */
@@ -866,6 +873,7 @@ public class TreasuryService {
         SalaryPayment payment = salaryPaymentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Salary payment not found"));
         Map<String, Object> before = paymentToMap(payment);
+        tagService.clearForEntity(com.saffron.cashflow.domain.TaggedEntityType.SALARY_PAYMENT, id);
         salaryPaymentRepository.delete(payment);
         auditService.log(AuthHelper.currentUser().id(), AuditAction.DELETE, "SalaryPayment", id,
                 before, "Salary payment removed");
@@ -916,6 +924,11 @@ public class TreasuryService {
         if (p.getNotes() != null && !p.getNotes().isBlank()) m.put("notes", p.getNotes());
         m.put("excludeFromTreasury", p.isExcludeFromTreasury());
         m.put("createdAt", p.getCreatedAt().toString());
+        m.put("tags", tagService.tagsFor(
+                com.saffron.cashflow.domain.TaggedEntityType.SALARY_PAYMENT, p.getId()));
+        m.put("commentCount", commentService.countByEntities(
+                com.saffron.cashflow.domain.TaggedEntityType.SALARY_PAYMENT,
+                List.of(p.getId())).getOrDefault(p.getId(), 0L));
         return m;
     }
 

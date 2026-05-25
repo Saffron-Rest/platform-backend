@@ -3,9 +3,11 @@ package com.saffron.cashflow.service;
 import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.DeliveryPlatform;
 import com.saffron.cashflow.domain.ManualDeliveryIncome;
+import com.saffron.cashflow.domain.TaggedEntityType;
 import com.saffron.cashflow.dto.ManualDeliveryIncomeRequest;
 import com.saffron.cashflow.repository.ManualDeliveryIncomeRepository;
 import com.saffron.cashflow.repository.SystemSettingRepository;
+import org.springframework.context.annotation.Lazy;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.EntryCalculator;
 import com.saffron.cashflow.util.ManualDeliverySettlement;
@@ -17,9 +19,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class ManualDeliveryService {
@@ -27,18 +31,24 @@ public class ManualDeliveryService {
     private final ManualDeliveryIncomeRepository repository;
     private final SystemSettingRepository settingRepository;
     private final AuditService auditService;
+    private final TagService tagService;
+    private final CommentService commentService;
 
     public ManualDeliveryService(
             ManualDeliveryIncomeRepository repository,
             SystemSettingRepository settingRepository,
-            AuditService auditService) {
+            AuditService auditService,
+            @Lazy TagService tagService,
+            @Lazy CommentService commentService) {
         this.repository = repository;
         this.settingRepository = settingRepository;
         this.auditService = auditService;
+        this.tagService = tagService;
+        this.commentService = commentService;
     }
 
     @Transactional(readOnly = true)
-    public List<Map<String, Object>> list(String fromParam, String toParam) {
+    public List<Map<String, Object>> list(String fromParam, String toParam, List<String> tagIds) {
         AuthHelper.requireOperations();
         LocalDate from = LocalDate.parse(fromParam);
         LocalDate to = LocalDate.parse(toParam);
@@ -46,15 +56,33 @@ public class ManualDeliveryService {
             throw new BadRequestException("'from' must be on or before 'to'");
         }
         TreasurySettings settings = loadSettings();
-        return repository.findByEffectiveDateBetweenOrderByEffectiveDateDescCreatedAtDesc(from, to).stream()
-                .map(r -> toMap(r, settings))
-                .toList();
+        List<ManualDeliveryIncome> rows = repository
+                .findByEffectiveDateBetweenOrderByEffectiveDateDescCreatedAtDesc(from, to);
+        if (tagIds != null && !tagIds.isEmpty()) {
+            Set<String> allowed = new HashSet<>(
+                    tagService.entityIdsTaggedWithAll(TaggedEntityType.MANUAL_DELIVERY, tagIds));
+            rows = rows.stream().filter(r -> allowed.contains(r.getId())).toList();
+        }
+        if (rows.isEmpty()) return List.of();
+        List<String> ids = rows.stream().map(ManualDeliveryIncome::getId).toList();
+        Map<String, List<Map<String, Object>>> tagsByRow = tagService.tagsForBulk(
+                TaggedEntityType.MANUAL_DELIVERY, ids);
+        Map<String, Long> commentsByRow = commentService.countByEntities(
+                TaggedEntityType.MANUAL_DELIVERY, ids);
+        List<Map<String, Object>> out = new ArrayList<>(rows.size());
+        for (ManualDeliveryIncome r : rows) {
+            Map<String, Object> m = new LinkedHashMap<>(toMap(r, settings));
+            m.put("tags", tagsByRow.getOrDefault(r.getId(), List.of()));
+            m.put("commentCount", commentsByRow.getOrDefault(r.getId(), 0L));
+            out.add(m);
+        }
+        return out;
     }
 
     @Transactional(readOnly = true)
     public List<Map<String, Object>> listForDate(String dateParam) {
         LocalDate date = LocalDate.parse(dateParam);
-        return list(date.toString(), date.toString());
+        return list(date.toString(), date.toString(), null);
     }
 
     @Transactional
@@ -86,6 +114,7 @@ public class ManualDeliveryService {
         AuthHelper.requireOperations();
         ManualDeliveryIncome row = load(id);
         Map<String, Object> before = toMap(row, loadSettings());
+        tagService.clearForEntity(TaggedEntityType.MANUAL_DELIVERY, id);
         repository.delete(row);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE, "ManualDeliveryIncome", id,
                 before, Map.of(), null);

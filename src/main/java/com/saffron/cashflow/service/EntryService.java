@@ -27,6 +27,7 @@ import com.saffron.cashflow.util.EntryMapper;
 import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.ConflictException;
 import com.saffron.cashflow.web.NotFoundException;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
@@ -35,8 +36,10 @@ import java.math.BigDecimal;
 import org.springframework.data.domain.PageRequest;
 import java.time.LocalDate;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -54,6 +57,8 @@ public class EntryService {
     private final SystemSettingRepository settingRepository;
     private final ManualDeliveryService manualDeliveryService;
     private final SalaryPaymentRepository salaryPaymentRepository;
+    private final TagService tagService;
+    private final CommentService commentService;
 
     /** File category for POS card sales report uploads attached to a shift entry. */
     public static final String POS_REPORT_CATEGORY = "pos-report";
@@ -68,7 +73,9 @@ public class EntryService {
             WorkShiftService workShiftService,
             SystemSettingRepository settingRepository,
             ManualDeliveryService manualDeliveryService,
-            SalaryPaymentRepository salaryPaymentRepository) {
+            SalaryPaymentRepository salaryPaymentRepository,
+            @Lazy TagService tagService,
+            @Lazy CommentService commentService) {
         this.entryRepository = entryRepository;
         this.expenseRepository = expenseRepository;
         this.receiptFileRepository = receiptFileRepository;
@@ -79,10 +86,12 @@ public class EntryService {
         this.settingRepository = settingRepository;
         this.manualDeliveryService = manualDeliveryService;
         this.salaryPaymentRepository = salaryPaymentRepository;
+        this.tagService = tagService;
+        this.commentService = commentService;
     }
 
     @Transactional(readOnly = true)
-    public List<Map<String, Object>> list(String from, String to, String cashierId, String status) {
+    public List<Map<String, Object>> list(String from, String to, String cashierId, String status, List<String> tagIds) {
         AuthUser user = AuthHelper.currentUser();
         String filterCashier = AuthHelper.isCashier() ? user.id() : (cashierId != null && !cashierId.isBlank() ? cashierId : null);
         LocalDate fromDate = parseDate(from);
@@ -94,8 +103,26 @@ public class EntryService {
         }
         EntryStatus st = status != null && !status.isBlank() ? EntryStatus.valueOf(status) : null;
         Specification<DailyEntry> spec = EntrySpecification.filter(filterCashier, fromDate, toDate, st);
-        return entryRepository.findAll(spec, Sort.by(Sort.Direction.DESC, "date")).stream()
-                .map(e -> mapEntry(load(e.getId())))
+        List<DailyEntry> rows = entryRepository.findAll(spec, Sort.by(Sort.Direction.DESC, "date"));
+        if (tagIds != null && !tagIds.isEmpty()) {
+            Set<String> allowed = new HashSet<>(
+                    tagService.entityIdsTaggedWithAll(
+                            com.saffron.cashflow.domain.TaggedEntityType.ENTRY, tagIds));
+            rows = rows.stream().filter(e -> allowed.contains(e.getId())).toList();
+        }
+        if (rows.isEmpty()) return List.of();
+        List<String> ids = rows.stream().map(DailyEntry::getId).toList();
+        Map<String, List<Map<String, Object>>> tagsByEntry = tagService.tagsForBulk(
+                com.saffron.cashflow.domain.TaggedEntityType.ENTRY, ids);
+        Map<String, Long> commentsByEntry = commentService.countByEntities(
+                com.saffron.cashflow.domain.TaggedEntityType.ENTRY, ids);
+        return rows.stream()
+                .map(e -> {
+                    Map<String, Object> m = new LinkedHashMap<>(mapEntry(load(e.getId())));
+                    m.put("tags", tagsByEntry.getOrDefault(e.getId(), List.of()));
+                    m.put("commentCount", commentsByEntry.getOrDefault(e.getId(), 0L));
+                    return m;
+                })
                 .toList();
     }
 
@@ -308,6 +335,10 @@ public class EntryService {
         entry.setDeletedAt(Instant.now());
         entry.setDeleteReason(reason);
         entryRepository.save(entry);
+        // Drop tag assignments so the tag library's usage counts stay honest
+        // (the entry row itself is soft-deleted but the tag join would never
+        // resolve back to a visible record).
+        tagService.clearForEntity(com.saffron.cashflow.domain.TaggedEntityType.ENTRY, id);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE, "DailyEntry", entry.getId(), before, Map.of(),
                 Map.of("reason", reason));
     }

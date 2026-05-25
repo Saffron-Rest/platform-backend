@@ -36,6 +36,8 @@ public class ExpenseService {
     private final EntryService entryService;
     private final WorkShiftService workShiftService;
     private final AuditService auditService;
+    private final TagService tagService;
+    private final CommentService commentService;
 
     public ExpenseService(
             @Value("${app.upload-dir}") String uploadDir,
@@ -43,7 +45,9 @@ public class ExpenseService {
             DailyEntryRepository entryRepository,
             @Lazy EntryService entryService,
             WorkShiftService workShiftService,
-            AuditService auditService) throws IOException {
+            AuditService auditService,
+            @Lazy TagService tagService,
+            @Lazy CommentService commentService) throws IOException {
         this.uploadDir = Path.of(uploadDir).toAbsolutePath().normalize();
         Files.createDirectories(this.uploadDir);
         this.expenseRepository = expenseRepository;
@@ -51,6 +55,8 @@ public class ExpenseService {
         this.entryService = entryService;
         this.workShiftService = workShiftService;
         this.auditService = auditService;
+        this.tagService = tagService;
+        this.commentService = commentService;
     }
 
     public List<Map<String, Object>> listForEntry(String entryId) {
@@ -62,15 +68,33 @@ public class ExpenseService {
     }
 
     @Transactional(readOnly = true)
-    public List<Map<String, Object>> listAll(String fromParam, String toParam) {
+    public List<Map<String, Object>> listAll(String fromParam, String toParam, List<String> tagIds) {
         AuthHelper.requireOperations();
         LocalDate from = LocalDate.parse(fromParam);
         LocalDate to = LocalDate.parse(toParam);
         if (from.isAfter(to)) {
             throw new BadRequestException("'from' must be on or before 'to'");
         }
-        return expenseRepository.findByEffectiveDateBetweenWithInvoices(from, to).stream()
-                .map(EntryMapper::expenseToMap)
+        List<ExpenseItem> rows = expenseRepository.findByEffectiveDateBetweenWithInvoices(from, to);
+        if (tagIds != null && !tagIds.isEmpty()) {
+            Set<String> allowed = new HashSet<>(
+                    tagService.entityIdsTaggedWithAll(
+                            com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, tagIds));
+            rows = rows.stream().filter(e -> allowed.contains(e.getId())).toList();
+        }
+        if (rows.isEmpty()) return List.of();
+        List<String> ids = rows.stream().map(ExpenseItem::getId).toList();
+        Map<String, List<Map<String, Object>>> tagsByExpense = tagService.tagsForBulk(
+                com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, ids);
+        Map<String, Long> commentsByExpense = commentService.countByEntities(
+                com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, ids);
+        return rows.stream()
+                .map(e -> {
+                    Map<String, Object> m = new java.util.LinkedHashMap<>(EntryMapper.expenseToMap(e));
+                    m.put("tags", tagsByExpense.getOrDefault(e.getId(), List.of()));
+                    m.put("commentCount", commentsByExpense.getOrDefault(e.getId(), 0L));
+                    return m;
+                })
                 .collect(Collectors.toList());
     }
 
@@ -142,6 +166,7 @@ public class ExpenseService {
         for (ReceiptFile inv : new ArrayList<>(item.getInvoices())) {
             deleteFile(inv.getPath());
         }
+        tagService.clearForEntity(com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, expenseId);
         expenseRepository.delete(item);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE, "ExpenseItem", expenseId, before,
                 Map.of(), Map.of("standalone", true));
@@ -238,6 +263,7 @@ public class ExpenseService {
         for (ReceiptFile inv : new ArrayList<>(item.getInvoices())) {
             deleteFile(inv.getPath());
         }
+        tagService.clearForEntity(com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, expenseId);
         expenseRepository.delete(item);
         entryService.recalculateEntry(entry.getId());
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE, "ExpenseItem", expenseId, before, Map.of(),
@@ -346,9 +372,12 @@ public class ExpenseService {
     }
 
     private Map<String, Object> mapExpense(String expenseId) {
-        return expenseRepository.findByIdWithInvoices(expenseId)
-                .map(EntryMapper::expenseToMap)
+        ExpenseItem item = expenseRepository.findByIdWithInvoices(expenseId)
                 .orElseThrow(() -> new NotFoundException("Expense not found"));
+        Map<String, Object> m = new java.util.LinkedHashMap<>(EntryMapper.expenseToMap(item));
+        m.put("tags", tagService.tagsFor(
+                com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, expenseId));
+        return m;
     }
 
     private ExpenseItem loadStandalone(String expenseId) {
