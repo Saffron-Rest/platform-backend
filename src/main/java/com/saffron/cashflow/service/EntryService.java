@@ -9,9 +9,12 @@ import com.saffron.cashflow.dto.EntryRequest;
 import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.domain.ExpenseItem;
 import com.saffron.cashflow.domain.ReceiptFile;
+import com.saffron.cashflow.domain.PaymentSource;
+import com.saffron.cashflow.domain.SalaryPayment;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.ExpenseItemRepository;
 import com.saffron.cashflow.repository.ReceiptFileRepository;
+import com.saffron.cashflow.repository.SalaryPaymentRepository;
 import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.util.TreasurySettings;
@@ -50,6 +53,7 @@ public class EntryService {
     private final WorkShiftService workShiftService;
     private final SystemSettingRepository settingRepository;
     private final ManualDeliveryService manualDeliveryService;
+    private final SalaryPaymentRepository salaryPaymentRepository;
 
     /** File category for POS card sales report uploads attached to a shift entry. */
     public static final String POS_REPORT_CATEGORY = "pos-report";
@@ -63,7 +67,8 @@ public class EntryService {
             AlertService alertService,
             WorkShiftService workShiftService,
             SystemSettingRepository settingRepository,
-            ManualDeliveryService manualDeliveryService) {
+            ManualDeliveryService manualDeliveryService,
+            SalaryPaymentRepository salaryPaymentRepository) {
         this.entryRepository = entryRepository;
         this.expenseRepository = expenseRepository;
         this.receiptFileRepository = receiptFileRepository;
@@ -73,6 +78,7 @@ public class EntryService {
         this.workShiftService = workShiftService;
         this.settingRepository = settingRepository;
         this.manualDeliveryService = manualDeliveryService;
+        this.salaryPaymentRepository = salaryPaymentRepository;
     }
 
     @Transactional(readOnly = true)
@@ -147,11 +153,13 @@ public class EntryService {
         Optional<DailyEntry> previous = findLatestRestaurantCloseBefore(date);
         if (previous.isEmpty()) {
             result.put("openingBalance", 0);
+            result.put("rawCountedBalance", 0);
+            result.put("postCountCashOut", 0);
             result.put("previousDate", null);
             result.put("previousEntryId", null);
             return result;
         }
-        putPreviousRestaurantCloseResult(result, previous.get());
+        putPreviousRestaurantCloseResult(result, previous.get(), date);
         return result;
     }
 
@@ -415,7 +423,12 @@ public class EntryService {
     }
 
     private void putSameDayHandoverResult(Map<String, Object> result, DailyEntry sourceEntry, LocalDate date) {
-        result.put("openingBalance", EntryCalculator.toDouble(sourceEntry.getActualCashCounted()));
+        BigDecimal raw = nullToZero(sourceEntry.getActualCashCounted());
+        BigDecimal postCountOut = postCountCashMovements(sourceEntry, date);
+        BigDecimal opening = raw.subtract(postCountOut).max(BigDecimal.ZERO);
+        result.put("openingBalance", EntryCalculator.toDouble(opening));
+        result.put("rawCountedBalance", EntryCalculator.toDouble(raw));
+        result.put("postCountCashOut", EntryCalculator.toDouble(postCountOut));
         result.put("previousDate", date.toString());
         result.put("previousEntryId", sourceEntry.getId());
         result.put("source", "SAME_DAY_HANDOVER");
@@ -425,8 +438,14 @@ public class EntryService {
         }
     }
 
-    private void putPreviousRestaurantCloseResult(Map<String, Object> result, DailyEntry sourceEntry) {
-        result.put("openingBalance", EntryCalculator.toDouble(sourceEntry.getActualCashCounted()));
+    private void putPreviousRestaurantCloseResult(
+            Map<String, Object> result, DailyEntry sourceEntry, LocalDate newShiftDate) {
+        BigDecimal raw = nullToZero(sourceEntry.getActualCashCounted());
+        BigDecimal postCountOut = postCountCashMovements(sourceEntry, newShiftDate);
+        BigDecimal opening = raw.subtract(postCountOut).max(BigDecimal.ZERO);
+        result.put("openingBalance", EntryCalculator.toDouble(opening));
+        result.put("rawCountedBalance", EntryCalculator.toDouble(raw));
+        result.put("postCountCashOut", EntryCalculator.toDouble(postCountOut));
         result.put("previousDate", sourceEntry.getDate().toString());
         result.put("previousEntryId", sourceEntry.getId());
         result.put("source", "PREVIOUS_DAY");
@@ -434,6 +453,58 @@ public class EntryService {
         if (sourceEntry.getCashier() != null) {
             result.put("handoverCashierName", sourceEntry.getCashier().getName());
         }
+    }
+
+    /**
+     * Sum of cash that left the drawer AFTER the source count was locked but
+     * on/before the new shift's date — standalone cash expenses and cash
+     * salary payouts that affect treasury. Mirrors the post-count adjustment
+     * in {@code TreasuryService.overview()} so the opening drawer always
+     * agrees with the "Cash on hand" tile.
+     */
+    private BigDecimal postCountCashMovements(DailyEntry source, LocalDate newShiftDate) {
+        LocalDate cutoffDate = source.getDate();
+        Instant cutoffStamp = source.getSubmittedAt();
+        if (cutoffDate == null) return BigDecimal.ZERO;
+        LocalDate upper = newShiftDate != null && !newShiftDate.isBefore(cutoffDate)
+                ? newShiftDate
+                : cutoffDate;
+
+        BigDecimal total = BigDecimal.ZERO;
+        for (ExpenseItem ex : expenseRepository.findStandaloneBetweenWithInvoices(cutoffDate, upper)) {
+            if (ex.getPaymentSource() != PaymentSource.CASH) continue;
+            BigDecimal amt = ex.getAmount();
+            if (amt == null || amt.signum() <= 0) continue;
+            if (isAfterCutoff(ex.getEffectiveDate(), ex.getCreatedAt(), cutoffDate, cutoffStamp)) {
+                total = total.add(amt);
+            }
+        }
+        for (SalaryPayment p : salaryPaymentRepository.findByPaidDateBetween(cutoffDate, upper)) {
+            if (p.getPaymentSource() != PaymentSource.CASH) continue;
+            if (p.isExcludeFromTreasury()) continue;
+            BigDecimal amt = p.getAmount();
+            if (amt == null || amt.signum() <= 0) continue;
+            if (isAfterCutoff(p.getPaidDate(), p.getCreatedAt(), cutoffDate, cutoffStamp)) {
+                total = total.add(amt);
+            }
+        }
+        return total;
+    }
+
+    /** Same timestamp-aware cutoff rule used by {@code TreasuryService}. */
+    private static boolean isAfterCutoff(
+            LocalDate recordDate, Instant recordCreatedAt,
+            LocalDate cutoffDate, Instant cutoffStamp) {
+        if (cutoffDate == null) return true;
+        if (recordDate == null) return false;
+        if (recordDate.isAfter(cutoffDate)) return true;
+        if (recordDate.isBefore(cutoffDate)) return false;
+        if (recordCreatedAt == null || cutoffStamp == null) return true;
+        return recordCreatedAt.isAfter(cutoffStamp);
+    }
+
+    private static BigDecimal nullToZero(BigDecimal v) {
+        return v == null ? BigDecimal.ZERO : v;
     }
 
     private void applyOpeningBalance(
