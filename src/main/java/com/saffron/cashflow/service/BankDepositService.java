@@ -35,16 +35,22 @@ public class BankDepositService {
     private final BankDepositLinkRepository linkRepository;
     private final CardSettlementRepository cardSettlementRepository;
     private final AuditService auditService;
+    private final TagService tagService;
+    private final CommentService commentService;
 
     public BankDepositService(
             BankDepositRepository depositRepository,
             BankDepositLinkRepository linkRepository,
             CardSettlementRepository cardSettlementRepository,
-            AuditService auditService) {
+            AuditService auditService,
+            @org.springframework.context.annotation.Lazy TagService tagService,
+            @org.springframework.context.annotation.Lazy CommentService commentService) {
         this.depositRepository = depositRepository;
         this.linkRepository = linkRepository;
         this.cardSettlementRepository = cardSettlementRepository;
         this.auditService = auditService;
+        this.tagService = tagService;
+        this.commentService = commentService;
     }
 
     @Transactional(readOnly = true)
@@ -58,12 +64,27 @@ public class BankDepositService {
         // Show deposits whose bankDate OR any linkedDate falls in window so a deposit
         // booked next month doesn't suddenly hide today's linked rows.
         Set<String> seen = new HashSet<>();
-        List<Map<String, Object>> out = new ArrayList<>();
+        List<BankDeposit> rows = new ArrayList<>();
         for (BankDeposit d : depositRepository.findByBankDateBetween(from, to)) {
-            if (seen.add(d.getId())) out.add(toMap(d));
+            if (seen.add(d.getId())) rows.add(d);
         }
         for (BankDeposit d : depositRepository.findByLinkedDateBetween(from, to)) {
-            if (seen.add(d.getId())) out.add(toMap(d));
+            if (seen.add(d.getId())) rows.add(d);
+        }
+        // Bulk-fetch tags + comment counts once per page so each row doesn't
+        // make its own query.
+        List<String> ids = rows.stream().map(BankDeposit::getId).toList();
+        Map<String, List<Map<String, Object>>> tagsByDeposit =
+                tagService.tagsForBulk(com.saffron.cashflow.domain.TaggedEntityType.BANK_DEPOSIT, ids);
+        Map<String, Long> commentsByDeposit =
+                commentService.countByEntities(com.saffron.cashflow.domain.TaggedEntityType.BANK_DEPOSIT, ids);
+
+        List<Map<String, Object>> out = new ArrayList<>(rows.size());
+        for (BankDeposit d : rows) {
+            Map<String, Object> m = new LinkedHashMap<>(toMap(d));
+            m.put("tags", tagsByDeposit.getOrDefault(d.getId(), List.of()));
+            m.put("commentCount", commentsByDeposit.getOrDefault(d.getId(), 0L));
+            out.add(m);
         }
         return out;
     }
@@ -133,6 +154,7 @@ public class BankDepositService {
                 .orElseThrow(() -> new NotFoundException("Bank deposit not found"));
         Map<String, Object> before = toMap(d);
         depositRepository.delete(d);
+        tagService.clearForEntity(com.saffron.cashflow.domain.TaggedEntityType.BANK_DEPOSIT, id);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE,
                 "BankDeposit", id, before, Map.of(), null);
     }

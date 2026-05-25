@@ -54,8 +54,22 @@ public class ExportService {
         this.settingRepository = settingRepository;
     }
 
+    public enum Format {
+        CSV, XLSX, PDF;
+        public static Format parse(String s) {
+            if (s == null || s.isBlank()) return CSV;
+            return switch (s.trim().toLowerCase()) {
+                case "csv" -> CSV;
+                case "xlsx", "excel" -> XLSX;
+                case "pdf" -> PDF;
+                default -> throw new BadRequestException("Unsupported format: " + s);
+            };
+        }
+    }
+
     public record ExportFilters(
             String type,
+            Format format,
             LocalDate from,
             LocalDate to,
             String cashierId,
@@ -99,7 +113,7 @@ public class ExportService {
                 e -> e.getEntry() == null,
                 e -> e.getEntry() != null ? e.getEntry().getDate() : "",
                 e -> e.getInvoices() == null ? 0 : e.getInvoices().size());
-        return csv("expenses", from, to, headers, rows, cols);
+        return render("expenses", from, to, f.format(), headers, rows, cols);
     }
 
     private ExportResult renderEntries(ExportFilters f) {
@@ -133,7 +147,7 @@ public class ExportService {
                 DailyEntry::getActualCashCounted,
                 DailyEntry::getDifference,
                 e -> e.getSubmittedAt() == null ? "" : e.getSubmittedAt().toString());
-        return csv("shift-reports", from, to, headers, rows, cols);
+        return render("shift-reports", from, to, f.format(), headers, rows, cols);
     }
 
     private ExportResult renderPayouts(ExportFilters f) {
@@ -161,7 +175,7 @@ public class ExportService {
                 p -> p.getPeriodTo() == null ? "" : p.getPeriodTo(),
                 SalaryPayment::isExcludeFromTreasury,
                 p -> nullSafe(p.getNotes()));
-        return csv("payouts", from, to, headers, rows, cols);
+        return render("payouts", from, to, f.format(), headers, rows, cols);
     }
 
     private ExportResult renderDeliveries(ExportFilters f) {
@@ -183,31 +197,150 @@ public class ExportService {
                 r -> EntryCalculator.toDouble(ManualDeliverySettlement.settledToCard(r, settings)),
                 r -> r.getSettledToCard() != null,
                 r -> nullSafe(r.getNotes()));
-        return csv("delivery-income", from, to, headers, rows, cols);
+        return render("delivery-income", from, to, f.format(), headers, rows, cols);
     }
 
-    // ---------- CSV helper ----------
+    // ---------- format dispatch ----------
 
-    private <T> ExportResult csv(
-            String slug,
-            LocalDate from,
-            LocalDate to,
-            List<String> headers,
-            List<T> rows,
-            List<Function<T, Object>> cols) {
+    /** Renders headers + materialised rows into the requested format. */
+    private <T> ExportResult render(String slug, LocalDate from, LocalDate to,
+                                     Format format, List<String> headers, List<T> rows,
+                                     List<Function<T, Object>> cols) {
+        // Materialise rows once — keeps writers branchless across formats.
+        List<List<Object>> data = new ArrayList<>(rows.size());
+        for (T row : rows) {
+            List<Object> values = new ArrayList<>(cols.size());
+            for (Function<T, Object> col : cols) values.add(col.apply(row));
+            data.add(values);
+        }
+        return switch (format == null ? Format.CSV : format) {
+            case CSV -> csv(slug, from, to, headers, data);
+            case XLSX -> xlsx(slug, from, to, headers, data);
+            case PDF -> pdf(slug, from, to, headers, data);
+        };
+    }
+
+    private ExportResult csv(String slug, LocalDate from, LocalDate to,
+                              List<String> headers, List<List<Object>> rows) {
         StringBuilder sb = new StringBuilder();
         // UTF-8 BOM so Excel opens the file in the correct encoding without
         // the "Get Data > From Text" dance.
         sb.append('\uFEFF');
         sb.append(joinCells(headers.stream().map(Object.class::cast).toList())).append("\r\n");
-        for (T row : rows) {
-            List<Object> values = new ArrayList<>(cols.size());
-            for (Function<T, Object> col : cols) values.add(col.apply(row));
-            sb.append(joinCells(values)).append("\r\n");
-        }
-        String filename = slug + "_" + from + "_" + to + ".csv";
-        return new ExportResult(filename, sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
+        for (List<Object> row : rows) sb.append(joinCells(row)).append("\r\n");
+        return new ExportResult(slug + "_" + from + "_" + to + ".csv",
+                sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 "text/csv; charset=utf-8");
+    }
+
+    /** Excel writer with bold header + frozen top row + auto-sized columns. */
+    private ExportResult xlsx(String slug, LocalDate from, LocalDate to,
+                               List<String> headers, List<List<Object>> rows) {
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook();
+             java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream()) {
+            org.apache.poi.ss.usermodel.Sheet sheet = wb.createSheet(slug);
+            org.apache.poi.ss.usermodel.CellStyle headerStyle = wb.createCellStyle();
+            org.apache.poi.ss.usermodel.Font headerFont = wb.createFont();
+            headerFont.setBold(true);
+            headerStyle.setFont(headerFont);
+
+            org.apache.poi.ss.usermodel.Row headerRow = sheet.createRow(0);
+            for (int i = 0; i < headers.size(); i++) {
+                org.apache.poi.ss.usermodel.Cell c = headerRow.createCell(i);
+                c.setCellValue(headers.get(i));
+                c.setCellStyle(headerStyle);
+            }
+            for (int r = 0; r < rows.size(); r++) {
+                org.apache.poi.ss.usermodel.Row row = sheet.createRow(r + 1);
+                List<Object> values = rows.get(r);
+                for (int c = 0; c < values.size(); c++) writeCell(row.createCell(c), values.get(c));
+            }
+            for (int i = 0; i < headers.size(); i++) sheet.autoSizeColumn(i);
+            sheet.createFreezePane(0, 1);
+            wb.write(bos);
+            return new ExportResult(slug + "_" + from + "_" + to + ".xlsx", bos.toByteArray(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        } catch (Exception e) {
+            throw new RuntimeException("Excel export failed", e);
+        }
+    }
+
+    /** PDF writer for tabular reports. Sized landscape so wide tables fit. */
+    private ExportResult pdf(String slug, LocalDate from, LocalDate to,
+                              List<String> headers, List<List<Object>> rows) {
+        try (java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream()) {
+            com.lowagie.text.Document doc = new com.lowagie.text.Document(
+                    com.lowagie.text.PageSize.A4.rotate(), 24, 24, 36, 36);
+            com.lowagie.text.pdf.PdfWriter.getInstance(doc, bos);
+            doc.open();
+
+            com.lowagie.text.Font titleFont = com.lowagie.text.FontFactory.getFont(
+                    com.lowagie.text.FontFactory.HELVETICA_BOLD, 14);
+            com.lowagie.text.Font subFont = com.lowagie.text.FontFactory.getFont(
+                    com.lowagie.text.FontFactory.HELVETICA, 9, java.awt.Color.GRAY);
+            com.lowagie.text.Font headerFont = com.lowagie.text.FontFactory.getFont(
+                    com.lowagie.text.FontFactory.HELVETICA_BOLD, 9, java.awt.Color.WHITE);
+            com.lowagie.text.Font cellFont = com.lowagie.text.FontFactory.getFont(
+                    com.lowagie.text.FontFactory.HELVETICA, 9);
+
+            doc.add(new com.lowagie.text.Paragraph("Saffron · " + slug.replace('-', ' '), titleFont));
+            doc.add(new com.lowagie.text.Paragraph(
+                    "Range " + from + " → " + to + " · generated " + java.time.LocalDate.now(),
+                    subFont));
+            doc.add(new com.lowagie.text.Paragraph(" "));
+
+            com.lowagie.text.pdf.PdfPTable table = new com.lowagie.text.pdf.PdfPTable(headers.size());
+            table.setWidthPercentage(100);
+            table.setHeaderRows(1);
+            java.awt.Color headerBg = new java.awt.Color(60, 60, 60);
+            for (String h : headers) {
+                com.lowagie.text.pdf.PdfPCell cell = new com.lowagie.text.pdf.PdfPCell(
+                        new com.lowagie.text.Phrase(h, headerFont));
+                cell.setBackgroundColor(headerBg);
+                cell.setPadding(6);
+                table.addCell(cell);
+            }
+            for (List<Object> row : rows) {
+                for (Object v : row) {
+                    com.lowagie.text.pdf.PdfPCell cell = new com.lowagie.text.pdf.PdfPCell(
+                            new com.lowagie.text.Phrase(formatCell(v), cellFont));
+                    cell.setPadding(4);
+                    table.addCell(cell);
+                }
+            }
+            doc.add(table);
+            doc.close();
+            return new ExportResult(slug + "_" + from + "_" + to + ".pdf", bos.toByteArray(),
+                    "application/pdf");
+        } catch (Exception e) {
+            throw new RuntimeException("PDF export failed", e);
+        }
+    }
+
+    private static void writeCell(org.apache.poi.ss.usermodel.Cell cell, Object value) {
+        if (value == null) {
+            cell.setBlank();
+            return;
+        }
+        if (value instanceof Number n) {
+            cell.setCellValue(n.doubleValue());
+            return;
+        }
+        if (value instanceof Boolean b) {
+            cell.setCellValue(b);
+            return;
+        }
+        if (value instanceof BigDecimal bd) {
+            cell.setCellValue(bd.doubleValue());
+            return;
+        }
+        cell.setCellValue(value.toString());
+    }
+
+    private static String formatCell(Object value) {
+        if (value == null) return "";
+        if (value instanceof BigDecimal bd) return bd.stripTrailingZeros().toPlainString();
+        return value.toString();
     }
 
     private static String joinCells(List<Object> cells) {

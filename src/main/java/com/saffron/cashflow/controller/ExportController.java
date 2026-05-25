@@ -28,6 +28,7 @@ public class ExportController {
     @GetMapping
     public ResponseEntity<ByteArrayResource> download(
             @RequestParam String type,
+            @RequestParam(required = false) String format,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
             @RequestParam(required = false) String cashierId,
@@ -36,6 +37,7 @@ public class ExportController {
 
         ExportService.ExportFilters filters = new ExportService.ExportFilters(
                 type,
+                ExportService.Format.parse(format),
                 parseDateOrNull(from),
                 parseDateOrNull(to),
                 cashierId,

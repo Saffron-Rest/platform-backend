@@ -172,6 +172,31 @@ public class ExpenseService {
                 Map.of(), Map.of("standalone", true));
     }
 
+    /** Bulk-delete a set of standalone expense ids. Skips ids that don't
+     *  belong to standalone expenses with a clean error so the UI knows
+     *  which ones survived. Each delete is its own audit row. */
+    @Transactional
+    public Map<String, Object> bulkDeleteStandalone(List<String> ids) {
+        AuthHelper.requireOperations();
+        if (ids == null || ids.isEmpty()) {
+            throw new com.saffron.cashflow.web.BadRequestException("ids required");
+        }
+        List<String> deleted = new ArrayList<>();
+        List<Map<String, String>> failed = new ArrayList<>();
+        for (String id : ids) {
+            try {
+                deleteStandalone(id);
+                deleted.add(id);
+            } catch (Exception e) {
+                failed.add(Map.of("id", id, "reason", e.getMessage() == null ? "Error" : e.getMessage()));
+            }
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("deleted", deleted);
+        out.put("failed", failed);
+        return out;
+    }
+
     @Transactional
     public Map<String, Object> create(String entryId, ExpenseItemRequest req, MultipartFile invoice) throws IOException {
         DailyEntry entry = verifyEntryAccess(entryId);

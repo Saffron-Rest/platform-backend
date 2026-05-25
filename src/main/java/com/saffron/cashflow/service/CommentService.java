@@ -3,6 +3,8 @@ package com.saffron.cashflow.service;
 import com.saffron.cashflow.domain.*;
 import com.saffron.cashflow.repository.CommentMentionRepository;
 import com.saffron.cashflow.repository.CommentRepository;
+import com.saffron.cashflow.repository.BankDepositRepository;
+import com.saffron.cashflow.repository.CardSettlementRepository;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.ExpenseItemRepository;
 import com.saffron.cashflow.repository.ManualDeliveryIncomeRepository;
@@ -44,7 +46,10 @@ public class CommentService {
     private final ExpenseItemRepository expenseRepository;
     private final SalaryPaymentRepository salaryPaymentRepository;
     private final ManualDeliveryIncomeRepository manualDeliveryRepository;
+    private final BankDepositRepository bankDepositRepository;
+    private final CardSettlementRepository cardSettlementRepository;
     private final PushNotificationService pushNotificationService;
+    private final NotificationService notificationService;
     private final AuditService auditService;
 
     public CommentService(
@@ -55,7 +60,10 @@ public class CommentService {
             ExpenseItemRepository expenseRepository,
             SalaryPaymentRepository salaryPaymentRepository,
             ManualDeliveryIncomeRepository manualDeliveryRepository,
+            BankDepositRepository bankDepositRepository,
+            CardSettlementRepository cardSettlementRepository,
             PushNotificationService pushNotificationService,
+            NotificationService notificationService,
             AuditService auditService) {
         this.commentRepository = commentRepository;
         this.mentionRepository = mentionRepository;
@@ -64,7 +72,10 @@ public class CommentService {
         this.expenseRepository = expenseRepository;
         this.salaryPaymentRepository = salaryPaymentRepository;
         this.manualDeliveryRepository = manualDeliveryRepository;
+        this.bankDepositRepository = bankDepositRepository;
+        this.cardSettlementRepository = cardSettlementRepository;
         this.pushNotificationService = pushNotificationService;
+        this.notificationService = notificationService;
         this.auditService = auditService;
     }
 
@@ -171,6 +182,8 @@ public class CommentService {
             case EXPENSE -> expenseRepository.findById(entityId).isPresent();
             case SALARY_PAYMENT -> salaryPaymentRepository.findById(entityId).isPresent();
             case MANUAL_DELIVERY -> manualDeliveryRepository.findById(entityId).isPresent();
+            case BANK_DEPOSIT -> bankDepositRepository.findById(entityId).isPresent();
+            case CARD_SETTLEMENT -> cardSettlementRepository.findById(entityId).isPresent();
         };
         if (!exists) throw new NotFoundException(entityType + " not found: " + entityId);
     }
@@ -230,12 +243,29 @@ public class CommentService {
         String author = userRepository.findById(c.getAuthorId())
                 .map(User::getName).orElse("Someone");
         String preview = c.getBody().length() > 120 ? c.getBody().substring(0, 117) + "…" : c.getBody();
+        String url = urlFor(c.getEntityType(), c.getEntityId());
         Map<String, String> data = new LinkedHashMap<>();
         data.put("kind", "comment-mention");
         data.put("commentId", c.getId());
         data.put("entityType", c.getEntityType().name());
         data.put("entityId", c.getEntityId());
         for (User u : mentioned) {
+            // In-app inbox row — primary delivery channel for web admins.
+            try {
+                notificationService.create(
+                        u.getId(),
+                        "mention",
+                        author + " mentioned you",
+                        preview,
+                        url,
+                        c.getEntityType().name(),
+                        c.getEntityId(),
+                        c.getAuthorId());
+            } catch (Exception ignore) {
+                // Persisting inbox is best-effort — push still goes through.
+            }
+            // Push channel for mobile clients. Failures are silent on
+            // purpose so a missing token doesn't block a comment write.
             try {
                 pushNotificationService.sendToUser(
                         u.getId(),
@@ -243,9 +273,18 @@ public class CommentService {
                         preview,
                         data);
             } catch (Exception ignore) {
-                // Push delivery is best-effort — never let it break comment write.
             }
         }
+    }
+
+    private static String urlFor(com.saffron.cashflow.domain.TaggedEntityType type, String id) {
+        return switch (type) {
+            case ENTRY -> "/entry/" + id;
+            case EXPENSE, MANUAL_DELIVERY -> "/finance";
+            case SALARY_PAYMENT -> "/admin/payouts";
+            case BANK_DEPOSIT -> "/admin/settings";
+            case CARD_SETTLEMENT -> "/admin/settings";
+        };
     }
 
     private Map<String, Object> toMap(Comment c, Map<String, User> authors) {

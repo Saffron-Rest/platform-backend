@@ -390,6 +390,7 @@ public class SearchService {
             case ENTRY -> "/entry/" + id;
             case EXPENSE, MANUAL_DELIVERY -> "/finance";
             case SALARY_PAYMENT -> "/admin/payouts";
+            case BANK_DEPOSIT, CARD_SETTLEMENT -> "/admin/settings";
         };
     }
 

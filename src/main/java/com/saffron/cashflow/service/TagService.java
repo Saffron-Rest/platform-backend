@@ -4,6 +4,8 @@ import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.Tag;
 import com.saffron.cashflow.domain.TagAssignment;
 import com.saffron.cashflow.domain.TaggedEntityType;
+import com.saffron.cashflow.repository.BankDepositRepository;
+import com.saffron.cashflow.repository.CardSettlementRepository;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.ExpenseItemRepository;
 import com.saffron.cashflow.repository.ManualDeliveryIncomeRepository;
@@ -38,6 +40,8 @@ public class TagService {
     private final ExpenseItemRepository expenseRepository;
     private final SalaryPaymentRepository salaryPaymentRepository;
     private final ManualDeliveryIncomeRepository manualDeliveryRepository;
+    private final BankDepositRepository bankDepositRepository;
+    private final CardSettlementRepository cardSettlementRepository;
     private final AuditService auditService;
 
     public TagService(
@@ -47,6 +51,8 @@ public class TagService {
             ExpenseItemRepository expenseRepository,
             SalaryPaymentRepository salaryPaymentRepository,
             ManualDeliveryIncomeRepository manualDeliveryRepository,
+            BankDepositRepository bankDepositRepository,
+            CardSettlementRepository cardSettlementRepository,
             AuditService auditService) {
         this.tagRepository = tagRepository;
         this.assignmentRepository = assignmentRepository;
@@ -54,6 +60,8 @@ public class TagService {
         this.expenseRepository = expenseRepository;
         this.salaryPaymentRepository = salaryPaymentRepository;
         this.manualDeliveryRepository = manualDeliveryRepository;
+        this.bankDepositRepository = bankDepositRepository;
+        this.cardSettlementRepository = cardSettlementRepository;
         this.auditService = auditService;
     }
 
@@ -277,6 +285,8 @@ public class TagService {
             case EXPENSE -> expenseRepository.findById(entityId).isPresent();
             case SALARY_PAYMENT -> salaryPaymentRepository.findById(entityId).isPresent();
             case MANUAL_DELIVERY -> manualDeliveryRepository.findById(entityId).isPresent();
+            case BANK_DEPOSIT -> bankDepositRepository.findById(entityId).isPresent();
+            case CARD_SETTLEMENT -> cardSettlementRepository.findById(entityId).isPresent();
         };
         if (!exists) {
             throw new NotFoundException(entityType.name() + " not found: " + entityId);

@@ -70,6 +70,15 @@ public class ExpenseController {
         expenseService.deleteStandalone(id);
     }
 
+    /** Bulk-delete: POST so the body can carry the id list cleanly (DELETE
+     *  with a request body is ambiguous across HTTP clients). */
+    @PostMapping("/standalone/bulk-delete")
+    public Map<String, Object> bulkDeleteStandalone(@RequestBody BulkIdsRequest req) {
+        return expenseService.bulkDeleteStandalone(req.ids());
+    }
+
+    public record BulkIdsRequest(java.util.List<String> ids) {}
+
     @PostMapping(value = "/entry/{entryId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public Map<String, Object> create(

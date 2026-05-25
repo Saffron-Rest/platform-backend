@@ -12,5 +12,9 @@ public enum TaggedEntityType {
     ENTRY,
     EXPENSE,
     SALARY_PAYMENT,
-    MANUAL_DELIVERY
+    MANUAL_DELIVERY,
+    /** Cash bank deposit records (treasury → bank). */
+    BANK_DEPOSIT,
+    /** Card acquirer settlements (cumulative bank credits from card sales). */
+    CARD_SETTLEMENT
 }

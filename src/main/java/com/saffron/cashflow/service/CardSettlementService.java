@@ -30,14 +30,20 @@ public class CardSettlementService {
     private final CardSettlementRepository repository;
     private final BankDepositLinkRepository bankDepositLinkRepository;
     private final AuditService auditService;
+    private final TagService tagService;
+    private final CommentService commentService;
 
     public CardSettlementService(
             CardSettlementRepository repository,
             BankDepositLinkRepository bankDepositLinkRepository,
-            AuditService auditService) {
+            AuditService auditService,
+            @org.springframework.context.annotation.Lazy TagService tagService,
+            @org.springframework.context.annotation.Lazy CommentService commentService) {
         this.repository = repository;
         this.bankDepositLinkRepository = bankDepositLinkRepository;
         this.auditService = auditService;
+        this.tagService = tagService;
+        this.commentService = commentService;
     }
 
     @Transactional(readOnly = true)
@@ -48,10 +54,19 @@ public class CardSettlementService {
         if (from.isAfter(to)) {
             throw new BadRequestException("'from' must be on or before 'to'");
         }
-        List<Map<String, Object>> rows = new ArrayList<>();
-        for (CardSettlement s :
-                repository.findByEffectiveDateBetweenOrderByEffectiveDateDescCreatedAtDesc(from, to)) {
-            rows.add(toMap(s));
+        List<CardSettlement> raw = repository
+                .findByEffectiveDateBetweenOrderByEffectiveDateDescCreatedAtDesc(from, to);
+        List<String> ids = raw.stream().map(CardSettlement::getId).toList();
+        Map<String, List<Map<String, Object>>> tagsByRow =
+                tagService.tagsForBulk(com.saffron.cashflow.domain.TaggedEntityType.CARD_SETTLEMENT, ids);
+        Map<String, Long> commentsByRow =
+                commentService.countByEntities(com.saffron.cashflow.domain.TaggedEntityType.CARD_SETTLEMENT, ids);
+        List<Map<String, Object>> rows = new ArrayList<>(raw.size());
+        for (CardSettlement s : raw) {
+            Map<String, Object> m = new LinkedHashMap<>(toMap(s));
+            m.put("tags", tagsByRow.getOrDefault(s.getId(), List.of()));
+            m.put("commentCount", commentsByRow.getOrDefault(s.getId(), 0L));
+            rows.add(m);
         }
         return rows;
     }
@@ -128,6 +143,7 @@ public class CardSettlementService {
                 .orElseThrow(() -> new NotFoundException("Settlement not found"));
         Map<String, Object> before = toMap(row);
         repository.delete(row);
+        tagService.clearForEntity(com.saffron.cashflow.domain.TaggedEntityType.CARD_SETTLEMENT, id);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE,
                 "CardSettlement", id, before, Map.of(), null);
     }
