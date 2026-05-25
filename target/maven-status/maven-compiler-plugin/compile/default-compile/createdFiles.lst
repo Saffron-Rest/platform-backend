@@ -17,11 +17,13 @@ com/saffron/cashflow/service/AnalyticsService$DayTotals.class
 com/saffron/cashflow/service/CommentService$1.class
 com/saffron/cashflow/controller/AnalyticsController.class
 com/saffron/cashflow/repository/TagRepository.class
+com/saffron/cashflow/integration/dotykacka/DotykackaSyncService.class
 com/saffron/cashflow/service/UserService.class
 com/saffron/cashflow/util/WeeklyOperatingHours$DaySchedule.class
 com/saffron/cashflow/controller/SalaryController.class
 com/saffron/cashflow/service/AnalyticsService$Totals.class
 com/saffron/cashflow/controller/HealthController.class
+com/saffron/cashflow/controller/PosIntegrationController$DotykackaConfigRequest.class
 com/saffron/cashflow/service/SettingsService.class
 com/saffron/cashflow/repository/ReceiptFileRepository.class
 com/saffron/cashflow/controller/DataHealthController.class
@@ -147,6 +149,7 @@ com/saffron/cashflow/repository/CommentRepository.class
 com/saffron/cashflow/service/CardSettlementService.class
 com/saffron/cashflow/service/DashboardService.class
 com/saffron/cashflow/domain/NotificationDispatch.class
+com/saffron/cashflow/controller/PosIntegrationController$RegisterWebhookRequest.class
 com/saffron/cashflow/domain/Comment.class
 com/saffron/cashflow/report/PdfReportBuilder$CashierAgg.class
 com/saffron/cashflow/controller/BankDepositController.class
@@ -168,6 +171,7 @@ com/saffron/cashflow/service/SavedViewService.class
 com/saffron/cashflow/service/MenuService$MenuItemRequest.class
 com/saffron/cashflow/domain/AlertType.class
 com/saffron/cashflow/service/TagService$1.class
+com/saffron/cashflow/integration/dotykacka/DotykackaClient.class
 com/saffron/cashflow/repository/ExpenseItemRepository.class
 com/saffron/cashflow/controller/CardSettlementController.class
 com/saffron/cashflow/domain/CommentMention.class
@@ -181,6 +185,8 @@ com/saffron/cashflow/controller/ExpenseController$BulkIdsRequest.class
 com/saffron/cashflow/service/CommentService.class
 com/saffron/cashflow/domain/PayType.class
 com/saffron/cashflow/domain/MenuCategory.class
+com/saffron/cashflow/integration/dotykacka/DotykackaClient$CachedToken.class
+com/saffron/cashflow/controller/DotyposWebhookController.class
 com/saffron/cashflow/controller/CommentController$UpdateCommentRequest.class
 com/saffron/cashflow/service/CashierNotificationService.class
 com/saffron/cashflow/service/SearchService$1.class
@@ -196,6 +202,7 @@ com/saffron/cashflow/service/WorkShiftService.class
 com/saffron/cashflow/config/DatabaseMigrationRunner.class
 com/saffron/cashflow/controller/SettingsController.class
 com/saffron/cashflow/domain/PushToken.class
+com/saffron/cashflow/integration/dotykacka/DotykackaSyncService$IngestStats.class
 com/saffron/cashflow/dto/BankDepositRequest.class
 com/saffron/cashflow/service/FileStorageService.class
 com/saffron/cashflow/domain/SalaryPayment.class

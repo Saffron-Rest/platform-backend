@@ -39,6 +39,41 @@ public class PosIntegration {
     @Column(name = "last_external_id", length = 128)
     private String lastExternalId;
 
+    /** When this integration last successfully pulled data (vendor-pull
+     *  mode only — Dotykačka, etc.). */
+    @Column(name = "last_synced_at")
+    private Instant lastSyncedAt;
+
+    // ---------- Dotykačka credentials (only used when vendor = "dotykacka") ----------
+
+    /** Dotykačka API cloud ID — required for token exchange. */
+    @Column(name = "dotykacka_cloud_id", length = 64)
+    private String dotykackaCloudId;
+
+    /** OAuth2 Client ID issued by Dotykačka to our application. */
+    @Column(name = "dotykacka_client_id", length = 128)
+    private String dotykackaClientId;
+
+    /** OAuth2 Client Secret — paired with clientId. */
+    @Column(name = "dotykacka_client_secret", length = 256)
+    private String dotykackaClientSecret;
+
+    /** Long-lived refresh token obtained via the browser-based connector
+     *  flow. Stored plain text; rotate by re-running the connector. */
+    @Column(name = "dotykacka_refresh_token", length = 512)
+    private String dotykackaRefreshToken;
+
+    /** Cursor for incremental sync — we ask Dotykačka for orders changed
+     *  after this timestamp. */
+    @Column(name = "dotykacka_sync_cursor")
+    private Instant dotykackaSyncCursor;
+
+    /** ID returned by Dotykačka when we register a webhook on their side
+     *  (POST /v2/clouds/{cloudId}/webhooks). Stored so we can unregister or
+     *  rotate it. */
+    @Column(name = "dotykacka_webhook_id")
+    private Long dotykackaWebhookId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -62,5 +97,19 @@ public class PosIntegration {
     public void setLastSeenAt(Instant lastSeenAt) { this.lastSeenAt = lastSeenAt; }
     public String getLastExternalId() { return lastExternalId; }
     public void setLastExternalId(String lastExternalId) { this.lastExternalId = lastExternalId; }
+    public Instant getLastSyncedAt() { return lastSyncedAt; }
+    public void setLastSyncedAt(Instant lastSyncedAt) { this.lastSyncedAt = lastSyncedAt; }
+    public String getDotykackaCloudId() { return dotykackaCloudId; }
+    public void setDotykackaCloudId(String dotykackaCloudId) { this.dotykackaCloudId = dotykackaCloudId; }
+    public String getDotykackaClientId() { return dotykackaClientId; }
+    public void setDotykackaClientId(String dotykackaClientId) { this.dotykackaClientId = dotykackaClientId; }
+    public String getDotykackaClientSecret() { return dotykackaClientSecret; }
+    public void setDotykackaClientSecret(String dotykackaClientSecret) { this.dotykackaClientSecret = dotykackaClientSecret; }
+    public String getDotykackaRefreshToken() { return dotykackaRefreshToken; }
+    public void setDotykackaRefreshToken(String dotykackaRefreshToken) { this.dotykackaRefreshToken = dotykackaRefreshToken; }
+    public Instant getDotykackaSyncCursor() { return dotykackaSyncCursor; }
+    public void setDotykackaSyncCursor(Instant dotykackaSyncCursor) { this.dotykackaSyncCursor = dotykackaSyncCursor; }
+    public Long getDotykackaWebhookId() { return dotykackaWebhookId; }
+    public void setDotykackaWebhookId(Long dotykackaWebhookId) { this.dotykackaWebhookId = dotykackaWebhookId; }
     public Instant getCreatedAt() { return createdAt; }
 }

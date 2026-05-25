@@ -22,6 +22,11 @@ spring:
 
 app:
   timezone: Europe/Warsaw
+  # Set this to the public origin where the backend is reachable (e.g.
+  # https://api.saffron.example.com). Used when registering Dotypos webhooks
+  # so they know where to push receipts. In dev you can pass the override per
+  # request from the admin UI instead.
+  public-base-url: ${PUBLIC_BASE_URL:}
   jwt:
     secret: saffron-dev-jwt-secret-change-in-production-min-32-chars
     expiration-ms: 604800000
@@ -29,3 +34,7 @@ app:
   notifications:
     tomorrow-reminder-hour: 18
     missing-report-hour: 12
+  dotykacka:
+    # Background polling acts as a safety net even when the webhook is active.
+    sync-ms: 300000
+    initial-delay-ms: 60000

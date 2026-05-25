@@ -2,10 +2,12 @@ package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.PosIntegration;
+import com.saffron.cashflow.integration.dotykacka.DotykackaClient;
 import com.saffron.cashflow.repository.PosIntegrationRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.NotFoundException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,10 +33,18 @@ public class PosIntegrationService {
 
     private final PosIntegrationRepository repository;
     private final AuditService auditService;
+    private final DotykackaClient dotykackaClient;
+    private final String publicBaseUrl;
 
-    public PosIntegrationService(PosIntegrationRepository repository, AuditService auditService) {
+    public PosIntegrationService(
+            PosIntegrationRepository repository,
+            AuditService auditService,
+            DotykackaClient dotykackaClient,
+            @Value("${app.public-base-url:}") String publicBaseUrl) {
         this.repository = repository;
         this.auditService = auditService;
+        this.dotykackaClient = dotykackaClient;
+        this.publicBaseUrl = publicBaseUrl == null ? "" : publicBaseUrl.replaceAll("/+$", "");
     }
 
     @Transactional(readOnly = true)
@@ -59,6 +69,36 @@ public class PosIntegrationService {
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.CREATE, "PosIntegration", p.getId(),
                 Map.of(), Map.of("name", p.getName(), "vendor", String.valueOf(p.getVendor())), null);
         return toMapWithSecret(p);
+    }
+
+    /**
+     * Save Dotykačka-specific credentials on an existing integration. We
+     * never log the secret values, only the action.
+     */
+    @Transactional
+    public Map<String, Object> updateDotykackaConfig(
+            String id,
+            String cloudId,
+            String clientId,
+            String clientSecret,
+            String refreshToken) {
+        AuthHelper.requireAdmin();
+        PosIntegration p = repository.findById(id).orElseThrow(() -> new NotFoundException("Integration not found"));
+        p.setVendor("dotykacka");
+        if (cloudId != null) p.setDotykackaCloudId(trimToNull(cloudId, 64));
+        if (clientId != null) p.setDotykackaClientId(trimToNull(clientId, 128));
+        if (clientSecret != null && !clientSecret.isBlank()) {
+            p.setDotykackaClientSecret(clientSecret.trim());
+        }
+        if (refreshToken != null && !refreshToken.isBlank()) {
+            p.setDotykackaRefreshToken(refreshToken.trim());
+            // Reset cursor so the next sync re-pulls from the default window.
+            p.setDotykackaSyncCursor(null);
+        }
+        p = repository.save(p);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "PosIntegration", p.getId(),
+                Map.of(), Map.of("dotykacka", "configured"), null);
+        return toMap(p);
     }
 
     @Transactional
@@ -99,6 +139,88 @@ public class PosIntegrationService {
         repository.save(integration);
     }
 
+    // ---------- Dotypos webhook registration ----------
+
+    /**
+     * Register a webhook on the Dotypos side so receipts arrive in real time.
+     * Returns the updated integration map.
+     *
+     * The URL we register includes the integration id + a per-integration
+     * token (the same {@code webhookSecret} we generated on create), since
+     * Dotypos doesn't sign payloads.
+     */
+    @Transactional
+    public Map<String, Object> registerDotyposWebhook(String id, String overrideBaseUrl) {
+        AuthHelper.requireAdmin();
+        PosIntegration p = repository.findById(id).orElseThrow(() -> new NotFoundException("Integration not found"));
+        if (!"dotykacka".equalsIgnoreCase(p.getVendor())) {
+            throw new BadRequestException("Not a Dotykačka integration");
+        }
+        if (p.getDotykackaCloudId() == null || p.getDotykackaRefreshToken() == null) {
+            throw new BadRequestException("Save Dotypos credentials first");
+        }
+        String base = (overrideBaseUrl != null && !overrideBaseUrl.isBlank())
+                ? overrideBaseUrl.replaceAll("/+$", "")
+                : publicBaseUrl;
+        if (base.isEmpty()) {
+            throw new BadRequestException(
+                    "Public base URL is not configured. Set app.public-base-url or pass overrideBaseUrl.");
+        }
+        // Best-effort cleanup of a previously-registered webhook.
+        if (p.getDotykackaWebhookId() != null) {
+            try {
+                String token = dotykackaClient.getAccessToken(p.getDotykackaRefreshToken(), p.getDotykackaCloudId());
+                dotykackaClient.deleteWebhook(token, p.getDotykackaCloudId(), p.getDotykackaWebhookId());
+            } catch (Exception ignored) {
+                // Stale id — Dotypos may have already dropped it. Carry on.
+            }
+        }
+        String webhookUrl = base + "/api/pos/dotypos-webhook/" + p.getId()
+                + "?token=" + p.getWebhookSecret();
+        String accessToken = dotykackaClient.getAccessToken(p.getDotykackaRefreshToken(), p.getDotykackaCloudId());
+        long webhookId = dotykackaClient.registerWebhook(
+                accessToken, p.getDotykackaCloudId(), webhookUrl, "ORDERBEAN");
+        p.setDotykackaWebhookId(webhookId);
+        p = repository.save(p);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "PosIntegration", p.getId(),
+                Map.of(), Map.of("dotyposWebhookId", webhookId), Map.of("url", webhookUrl));
+        return toMap(p);
+    }
+
+    @Transactional
+    public Map<String, Object> unregisterDotyposWebhook(String id) {
+        AuthHelper.requireAdmin();
+        PosIntegration p = repository.findById(id).orElseThrow(() -> new NotFoundException("Integration not found"));
+        if (p.getDotykackaWebhookId() != null
+                && p.getDotykackaRefreshToken() != null
+                && p.getDotykackaCloudId() != null) {
+            try {
+                String token = dotykackaClient.getAccessToken(p.getDotykackaRefreshToken(), p.getDotykackaCloudId());
+                dotykackaClient.deleteWebhook(token, p.getDotykackaCloudId(), p.getDotykackaWebhookId());
+            } catch (Exception ignored) {
+                // Treat as already-gone.
+            }
+        }
+        p.setDotykackaWebhookId(null);
+        p = repository.save(p);
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "PosIntegration", p.getId(),
+                Map.of(), Map.of("dotyposWebhookId", "removed"), null);
+        return toMap(p);
+    }
+
+    /** Helper for the webhook controller: load + validate that the URL token
+     *  matches before any ingest happens. */
+    @Transactional(readOnly = true)
+    public PosIntegration authorizeWebhookToken(String id, String token) {
+        PosIntegration p = repository.findById(id)
+                .orElseThrow(() -> new BadRequestException("Unknown integration"));
+        if (!p.isActive()) throw new BadRequestException("Integration is inactive");
+        if (token == null || !token.equals(p.getWebhookSecret())) {
+            throw new BadRequestException("Bad token");
+        }
+        return p;
+    }
+
     private static String generateSecret() {
         byte[] buf = new byte[SECRET_BYTES];
         RANDOM.nextBytes(buf);
@@ -128,8 +250,22 @@ public class PosIntegrationService {
         m.put("active", p.isActive());
         m.put("lastSeenAt", p.getLastSeenAt() != null ? p.getLastSeenAt().toString() : null);
         m.put("lastExternalId", p.getLastExternalId());
+        m.put("lastSyncedAt", p.getLastSyncedAt() != null ? p.getLastSyncedAt().toString() : null);
         m.put("webhookUrl", "/api/pos/webhook/" + p.getId());
         m.put("createdAt", p.getCreatedAt() != null ? p.getCreatedAt().toString() : null);
+        // Dotykačka — we expose presence flags only, never the values themselves.
+        if ("dotykacka".equalsIgnoreCase(p.getVendor())) {
+            Map<String, Object> d = new LinkedHashMap<>();
+            d.put("cloudId", p.getDotykackaCloudId());
+            d.put("hasClientId", p.getDotykackaClientId() != null);
+            d.put("hasClientSecret", p.getDotykackaClientSecret() != null);
+            d.put("hasRefreshToken", p.getDotykackaRefreshToken() != null);
+            d.put("syncCursor", p.getDotykackaSyncCursor() != null
+                    ? p.getDotykackaSyncCursor().toString() : null);
+            d.put("webhookId", p.getDotykackaWebhookId());
+            d.put("webhookRegistered", p.getDotykackaWebhookId() != null);
+            m.put("dotykacka", d);
+        }
         return m;
     }
 

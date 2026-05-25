@@ -10,6 +10,7 @@
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/controller/CommentController.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/controller/DashboardController.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/controller/DataHealthController.java
+/Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/controller/DotyposWebhookController.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/controller/EntryController.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/controller/ExpenseController.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/controller/ExportController.java
@@ -92,6 +93,8 @@
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/dto/UpdateSalaryPaymentRequest.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/dto/UpdateUserRequest.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/dto/UpsertScheduleRequest.java
+/Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/integration/dotykacka/DotykackaClient.java
+/Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/integration/dotykacka/DotykackaSyncService.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/report/PdfReportBuilder.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/report/ProfitLossTemplate.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/repository/AdminTelegramDispatchRepository.java

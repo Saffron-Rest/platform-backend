@@ -40,6 +40,9 @@ public class SecurityConfig {
                         // POS webhooks authenticate via HMAC signature in the
                         // handler, not JWT — open the path here.
                         .requestMatchers(HttpMethod.POST, "/api/pos/webhook/**").permitAll()
+                        // Dotypos doesn't sign payloads; instead the URL itself
+                        // carries a per-integration token verified in the handler.
+                        .requestMatchers(HttpMethod.POST, "/api/pos/dotypos-webhook/**").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(mustChangePasswordFilter, JwtAuthFilter.class);
