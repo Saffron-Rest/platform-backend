@@ -1,10 +1,14 @@
 package com.saffron.cashflow.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.saffron.cashflow.domain.PosIntegration;
 import com.saffron.cashflow.domain.PosSale;
 import com.saffron.cashflow.integration.dotykacka.DotykackaSyncService;
+import com.saffron.cashflow.repository.PosIntegrationRepository;
 import com.saffron.cashflow.repository.PosSaleRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.service.PosIntegrationService;
+import com.saffron.cashflow.web.NotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,22 +17,28 @@ import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/pos/integrations")
 public class PosIntegrationController {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private final PosIntegrationService service;
     private final DotykackaSyncService dotykackaSync;
     private final PosSaleRepository saleRepository;
+    private final PosIntegrationRepository integrationRepository;
 
     public PosIntegrationController(
             PosIntegrationService service,
             DotykackaSyncService dotykackaSync,
-            PosSaleRepository saleRepository) {
+            PosSaleRepository saleRepository,
+            PosIntegrationRepository integrationRepository) {
         this.service = service;
         this.dotykackaSync = dotykackaSync;
         this.saleRepository = saleRepository;
+        this.integrationRepository = integrationRepository;
     }
 
     @GetMapping
@@ -121,6 +131,40 @@ public class PosIntegrationController {
             return r;
         }).toList());
         return out;
+    }
+
+    /**
+     * Synthesize a Dotypos-style ORDERBEAN receipt and run it through the
+     * webhook ingest path. Lets admins verify the integration end-to-end
+     * without having to ring up a real sale on the POS.
+     */
+    @PostMapping("/{id}/test-receipt")
+    public Map<String, Object> testReceipt(@PathVariable String id) {
+        AuthHelper.requireOperations();
+        PosIntegration integration = integrationRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Integration not found"));
+        String externalId = "saffron-test-" + UUID.randomUUID();
+        // Minimal payload — ingestOrder pulls items from the canonical array.
+        String json = "[{"
+                + "\"orderid\":\"" + externalId + "\","
+                + "\"branchid\":0,"
+                + "\"completed\":\"" + Instant.now().toString() + "\","
+                + "\"versiondate\":" + Instant.now().toEpochMilli() + ","
+                + "\"items\":[{"
+                + "\"productid\":null,"
+                + "\"name\":\"Saffron self-test\","
+                + "\"quantity\":\"1\","
+                + "\"pricewithvat\":\"1.00\""
+                + "}]"
+                + "}]";
+        try {
+            return dotykackaSync.ingestWebhook(integration, MAPPER.readTree(json));
+        } catch (Exception e) {
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("ok", false);
+            err.put("error", e.getMessage());
+            return err;
+        }
     }
 
     public record IntegrationRequest(String name, String vendor) {}
