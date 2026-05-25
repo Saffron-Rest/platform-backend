@@ -178,6 +178,7 @@ com/saffron/cashflow/integration/dotykacka/DotykackaClient.class
 com/saffron/cashflow/repository/ExpenseItemRepository.class
 com/saffron/cashflow/controller/CardSettlementController.class
 com/saffron/cashflow/domain/CommentMention.class
+com/saffron/cashflow/dto/RevertEntryRequest.class
 com/saffron/cashflow/service/TelegramNotificationService.class
 com/saffron/cashflow/service/PosIntegrationService.class
 com/saffron/cashflow/util/WeeklyOperatingHours$1.class
@@ -202,6 +203,7 @@ com/saffron/cashflow/service/ProfitLossService$Labels.class
 com/saffron/cashflow/service/AlertService$1.class
 com/saffron/cashflow/service/WorkShiftService$ReconcileResult.class
 com/saffron/cashflow/service/WorkShiftService.class
+com/saffron/cashflow/service/EntryService$1.class
 com/saffron/cashflow/config/DatabaseMigrationRunner.class
 com/saffron/cashflow/controller/SettingsController.class
 com/saffron/cashflow/domain/PushToken.class

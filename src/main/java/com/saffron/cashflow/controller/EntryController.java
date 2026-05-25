@@ -2,6 +2,7 @@ package com.saffron.cashflow.controller;
 
 import com.saffron.cashflow.dto.DeleteEntryRequest;
 import com.saffron.cashflow.dto.EntryRequest;
+import com.saffron.cashflow.dto.RevertEntryRequest;
 import com.saffron.cashflow.service.EntryService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -72,6 +73,31 @@ public class EntryController {
     @PostMapping("/{id}/unlock")
     public Map<String, Object> unlock(@PathVariable String id) {
         return entryService.unlock(id);
+    }
+
+    /**
+     * Force-recompute every derived field on a shift report and return the
+     * fresh payload. Cashiers can sync their own entry; operations can sync
+     * any entry. Use this when a change made elsewhere (manual deliveries,
+     * salary payments, treasury settings, edits from another device) might
+     * not yet be reflected in the report's totals.
+     */
+    @PostMapping("/{id}/sync")
+    public Map<String, Object> sync(@PathVariable String id) {
+        return entryService.syncEntry(id);
+    }
+
+    /**
+     * Roll a shift report back to the state recorded in an audit log row.
+     * Admin/manager only; the request body carries the {@code auditId} of the
+     * change being reverted and a short {@code reason} string for the audit
+     * trail of the revert itself.
+     */
+    @PostMapping("/{id}/revert")
+    public Map<String, Object> revert(
+            @PathVariable String id,
+            @Valid @RequestBody RevertEntryRequest body) {
+        return entryService.revertChange(id, body.auditId(), body.reason());
     }
 
     @DeleteMapping("/{id}")

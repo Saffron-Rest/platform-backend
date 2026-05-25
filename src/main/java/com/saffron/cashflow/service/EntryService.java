@@ -1,6 +1,7 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.AuditAction;
+import com.saffron.cashflow.domain.AuditLog;
 import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.EntryStatus;
 import com.saffron.cashflow.domain.Role;
@@ -11,6 +12,7 @@ import com.saffron.cashflow.domain.ExpenseItem;
 import com.saffron.cashflow.domain.ReceiptFile;
 import com.saffron.cashflow.domain.PaymentSource;
 import com.saffron.cashflow.domain.SalaryPayment;
+import com.saffron.cashflow.repository.AuditLogRepository;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.ExpenseItemRepository;
 import com.saffron.cashflow.repository.ReceiptFileRepository;
@@ -59,6 +61,7 @@ public class EntryService {
     private final SalaryPaymentRepository salaryPaymentRepository;
     private final TagService tagService;
     private final CommentService commentService;
+    private final AuditLogRepository auditLogRepository;
 
     /** File category for POS card sales report uploads attached to a shift entry. */
     public static final String POS_REPORT_CATEGORY = "pos-report";
@@ -75,7 +78,8 @@ public class EntryService {
             ManualDeliveryService manualDeliveryService,
             SalaryPaymentRepository salaryPaymentRepository,
             @Lazy TagService tagService,
-            @Lazy CommentService commentService) {
+            @Lazy CommentService commentService,
+            AuditLogRepository auditLogRepository) {
         this.entryRepository = entryRepository;
         this.expenseRepository = expenseRepository;
         this.receiptFileRepository = receiptFileRepository;
@@ -88,6 +92,7 @@ public class EntryService {
         this.salaryPaymentRepository = salaryPaymentRepository;
         this.tagService = tagService;
         this.commentService = commentService;
+        this.auditLogRepository = auditLogRepository;
     }
 
     @Transactional(readOnly = true)
@@ -341,6 +346,208 @@ public class EntryService {
         tagService.clearForEntity(com.saffron.cashflow.domain.TaggedEntityType.ENTRY, id);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE, "DailyEntry", entry.getId(), before, Map.of(),
                 Map.of("reason", reason));
+    }
+
+    /**
+     * Revert a shift report to the state captured by an audit log row's
+     * {@code details.before} snapshot. Admin/manager only.
+     *
+     * <p>Behaviour per original audit action:</p>
+     * <ul>
+     *   <li><b>UPDATE</b> — all scalar fields in the snapshot are re-applied
+     *       (sales, refunds, deposits, opening, count, notes, settled-to-card
+     *       overrides). Status flips back to whatever it was {@code before}.</li>
+     *   <li><b>DELETE</b> — the entry is un-deleted (clearing
+     *       {@code deletedAt} / {@code deleteReason}), then all snapshot
+     *       fields are re-applied.</li>
+     *   <li><b>SUBMIT</b> — same as calling {@link #unlock(String)} — status
+     *       flips LOCKED → DRAFT and {@code submittedAt} is cleared.</li>
+     *   <li><b>UNLOCK</b> — re-submits the entry (status DRAFT → LOCKED,
+     *       sets {@code submittedAt = now}).</li>
+     *   <li><b>CREATE</b> — not supported here; reverting a creation is a
+     *       deletion. Operators should use the "Remove draft" action instead,
+     *       which produces a proper {@code DELETE} audit entry.</li>
+     * </ul>
+     *
+     * <p>Known lossy areas (callers are expected to surface these in the
+     * confirmation dialog):</p>
+     * <ul>
+     *   <li>Expense items and receipt files are <i>not</i> reverted — they
+     *       have their own audit rows and stay at their current state.</li>
+     *   <li>Legacy roll-up expense fields ({@code supplierPayments},
+     *       {@code pettyCash}, etc.) are zeroed by {@link EntryMapper}, so
+     *       they're effectively no-ops on revert.</li>
+     * </ul>
+     */
+    @Transactional
+    public Map<String, Object> revertChange(String entryId, String auditId, String reason) {
+        AuthHelper.requireOperations();
+        if (reason == null || reason.trim().length() < 3) {
+            throw new BadRequestException("Revert reason required (min 3 chars)");
+        }
+        String trimmedReason = reason.trim();
+
+        AuditLog audit = auditLogRepository.findById(auditId)
+                .orElseThrow(() -> new NotFoundException("Audit entry not found"));
+        if (!"DailyEntry".equals(audit.getEntityType()) || !entryId.equals(audit.getEntityId())) {
+            throw new BadRequestException("This audit entry does not belong to the report");
+        }
+
+        // Loading via the soft-delete-aware path because DELETE audits point
+        // at an entity that may still be present but flagged deletedAt.
+        DailyEntry entry = entryRepository.findById(entryId)
+                .orElseThrow(() -> new NotFoundException("Report not found"));
+
+        AuthUser user = AuthHelper.currentUser();
+        Map<String, Object> beforeForAudit = AuditSnapshots.entry(entry);
+        Map<String, Object> snapshot = extractMap(audit.getDetails(), "before");
+
+        switch (audit.getAction()) {
+            case CREATE -> throw new BadRequestException(
+                    "Cannot revert the creation of a report — use 'Remove draft' to delete it instead.");
+            case UPDATE -> applyRevertedSnapshot(entry, snapshot);
+            case DELETE -> {
+                entry.setDeletedAt(null);
+                entry.setDeleteReason(null);
+                applyRevertedSnapshot(entry, snapshot);
+            }
+            case SUBMIT -> {
+                if (entry.getStatus() != EntryStatus.LOCKED) {
+                    throw new BadRequestException("Report is no longer locked — nothing to revert");
+                }
+                entry.setStatus(EntryStatus.DRAFT);
+                entry.setSubmittedAt(null);
+            }
+            case UNLOCK -> {
+                if (entry.getStatus() != EntryStatus.DRAFT) {
+                    throw new BadRequestException("Report is no longer in draft — nothing to revert");
+                }
+                entry.setStatus(EntryStatus.LOCKED);
+                entry.setSubmittedAt(Instant.now());
+            }
+            default -> throw new BadRequestException(
+                    "Reverting a " + audit.getAction() + " action is not supported.");
+        }
+
+        entryRepository.save(entry);
+        recalculateEntry(entry.getId());
+
+        DailyEntry saved = load(entry.getId());
+        Map<String, Object> afterForAudit = AuditSnapshots.entry(saved);
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("revertedFromAuditId", auditId);
+        extra.put("revertedAction", audit.getAction().name());
+        extra.put("reason", trimmedReason);
+        auditService.logChange(user.id(), AuditAction.UPDATE, "DailyEntry", entry.getId(),
+                beforeForAudit, afterForAudit, extra);
+
+        return mapEntry(saved);
+    }
+
+    /** Pulls the values from a {@code details.before} (or {@code .after})
+     *  snapshot into the live {@link DailyEntry}. Missing keys are treated
+     *  as no-ops, so older snapshots that pre-date the
+     *  {@code *SettledToCard} fields still revert cleanly. */
+    private void applyRevertedSnapshot(DailyEntry entry, Map<String, Object> snap) {
+        if (snap == null || snap.isEmpty()) {
+            throw new BadRequestException(
+                    "Audit entry has no 'before' snapshot, so it can't be reverted.");
+        }
+
+        if (snap.containsKey("openingBalance")) entry.setOpeningBalance(big(snap.get("openingBalance")));
+        if (snap.containsKey("cashSales"))     entry.setCashSales(big(snap.get("cashSales")));
+        if (snap.containsKey("cardSales"))     entry.setCardSales(big(snap.get("cardSales")));
+        if (snap.containsKey("woltSales"))     entry.setWoltSales(big(snap.get("woltSales")));
+        if (snap.containsKey("boltSales"))     entry.setBoltSales(big(snap.get("boltSales")));
+        if (snap.containsKey("uberEatsSales")) entry.setUberEatsSales(big(snap.get("uberEatsSales")));
+        if (snap.containsKey("glovoSales"))    entry.setGlovoSales(big(snap.get("glovoSales")));
+        if (snap.containsKey("otherPlatformSales"))
+            entry.setOtherPlatformSales(big(snap.get("otherPlatformSales")));
+        // Nullable settled-to-card overrides — null means "use treasury %".
+        if (snap.containsKey("woltSettledToCard"))
+            entry.setWoltSettledToCard(nullableBig(snap.get("woltSettledToCard")));
+        if (snap.containsKey("boltSettledToCard"))
+            entry.setBoltSettledToCard(nullableBig(snap.get("boltSettledToCard")));
+        if (snap.containsKey("uberEatsSettledToCard"))
+            entry.setUberEatsSettledToCard(nullableBig(snap.get("uberEatsSettledToCard")));
+        if (snap.containsKey("glovoSettledToCard"))
+            entry.setGlovoSettledToCard(nullableBig(snap.get("glovoSettledToCard")));
+        if (snap.containsKey("otherSettledToCard"))
+            entry.setOtherSettledToCard(nullableBig(snap.get("otherSettledToCard")));
+        if (snap.containsKey("cashRefunds"))     entry.setCashRefunds(big(snap.get("cashRefunds")));
+        if (snap.containsKey("cardRefunds"))     entry.setCardRefunds(big(snap.get("cardRefunds")));
+        if (snap.containsKey("platformRefunds")) entry.setPlatformRefunds(big(snap.get("platformRefunds")));
+        if (snap.containsKey("bankDeposit"))     entry.setBankDeposit(big(snap.get("bankDeposit")));
+        if (snap.containsKey("cashWithdrawal"))  entry.setCashWithdrawal(big(snap.get("cashWithdrawal")));
+        if (snap.containsKey("ownerWithdrawal")) entry.setOwnerWithdrawal(big(snap.get("ownerWithdrawal")));
+        if (snap.containsKey("actualCashCounted"))
+            entry.setActualCashCounted(big(snap.get("actualCashCounted")));
+        if (snap.containsKey("notes")) {
+            Object n = snap.get("notes");
+            entry.setNotes(n == null ? null : n.toString());
+        }
+        if (snap.containsKey("status")) {
+            Object s = snap.get("status");
+            if (s instanceof String str && !str.isBlank()) {
+                EntryStatus next = EntryStatus.valueOf(str);
+                entry.setStatus(next);
+                if (next == EntryStatus.DRAFT) {
+                    entry.setSubmittedAt(null);
+                } else if (next == EntryStatus.LOCKED && entry.getSubmittedAt() == null) {
+                    entry.setSubmittedAt(Instant.now());
+                }
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> extractMap(Map<String, Object> source, String key) {
+        if (source == null) return Map.of();
+        Object value = source.get(key);
+        return value instanceof Map ? (Map<String, Object>) value : Map.of();
+    }
+
+    private static BigDecimal big(Object value) {
+        if (value == null) return BigDecimal.ZERO;
+        if (value instanceof BigDecimal bd) return bd;
+        if (value instanceof Number n) return BigDecimal.valueOf(n.doubleValue());
+        try { return new BigDecimal(value.toString()); }
+        catch (NumberFormatException e) { return BigDecimal.ZERO; }
+    }
+
+    private static BigDecimal nullableBig(Object value) {
+        if (value == null) return null;
+        if (value instanceof BigDecimal bd) return bd;
+        if (value instanceof Number n) return BigDecimal.valueOf(n.doubleValue());
+        String s = value.toString();
+        if (s.isBlank() || "null".equalsIgnoreCase(s)) return null;
+        try { return new BigDecimal(s); }
+        catch (NumberFormatException e) { return null; }
+    }
+
+    /**
+     * Recompute every derived field on a shift report and return the fresh
+     * DTO. Used by the front-end "Sync" buttons so operators can force a
+     * recompute when another flow (manual deliveries, salary payments,
+     * settled-to-card overrides, treasury %, edits made on a different
+     * device, …) hasn't already triggered one for them.
+     *
+     * <p>Allowed for cashiers on their own entry and for any operations
+     * role. Does <i>not</i> require the entry to be a draft — locking only
+     * blocks user-facing edits, not the underlying recompute, and ops users
+     * regularly want a fresh closing-balance reading on a submitted report
+     * after adding a late deposit / withdrawal entry.</p>
+     */
+    @Transactional
+    public Map<String, Object> syncEntry(String id) {
+        DailyEntry entry = load(id);
+        AuthUser user = AuthHelper.currentUser();
+        if (AuthHelper.isCashier() && !entry.getCashierId().equals(user.id())) {
+            throw new ForbiddenException("Forbidden");
+        }
+        recalculateEntry(id);
+        DailyEntry saved = load(id);
+        return mapEntry(saved);
     }
 
     @Transactional

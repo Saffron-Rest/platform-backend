@@ -4,6 +4,7 @@ import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.ExpenseItem;
 import com.saffron.cashflow.domain.User;
 import org.hibernate.Hibernate;
+import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -26,6 +27,15 @@ public final class AuditSnapshots {
         m.put("uberEatsSales", EntryCalculator.toDouble(e.getUberEatsSales()));
         m.put("glovoSales", EntryCalculator.toDouble(e.getGlovoSales()));
         m.put("otherPlatformSales", EntryCalculator.toDouble(e.getOtherPlatformSales()));
+        // Per-platform card-settlement overrides — nullable. Null means
+        // "use the global treasury %"; an explicit number overrides it for
+        // this shift. We keep nulls as nulls (not 0.0) so the revert flow
+        // can restore the "use default" state correctly.
+        m.put("woltSettledToCard", nullableDouble(e.getWoltSettledToCard()));
+        m.put("boltSettledToCard", nullableDouble(e.getBoltSettledToCard()));
+        m.put("uberEatsSettledToCard", nullableDouble(e.getUberEatsSettledToCard()));
+        m.put("glovoSettledToCard", nullableDouble(e.getGlovoSettledToCard()));
+        m.put("otherSettledToCard", nullableDouble(e.getOtherSettledToCard()));
         m.put("cashRefunds", EntryCalculator.toDouble(e.getCashRefunds()));
         m.put("cardRefunds", EntryCalculator.toDouble(e.getCardRefunds()));
         m.put("platformRefunds", EntryCalculator.toDouble(e.getPlatformRefunds()));
@@ -67,6 +77,13 @@ public final class AuditSnapshots {
         if (u.getPayAmount() != null) m.put("payAmount", u.getPayAmount().doubleValue());
         if (u.getStartDate() != null) m.put("startDate", u.getStartDate().toString());
         return m;
+    }
+
+    /** Null-preserving variant of {@link EntryCalculator#toDouble(BigDecimal)} —
+     *  used for fields where {@code null} and {@code 0} mean different things
+     *  (e.g. per-platform card-settlement overrides). */
+    private static Double nullableDouble(BigDecimal v) {
+        return v == null ? null : v.doubleValue();
     }
 
     public static Map<String, Object> sanitize(Map<String, Object> source) {
