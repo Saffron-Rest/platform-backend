@@ -2,7 +2,6 @@ com/saffron/cashflow/util/AuditDiff$1.class
 com/saffron/cashflow/controller/PosIntegrationController$IntegrationRequest.class
 com/saffron/cashflow/controller/AuditController.class
 com/saffron/cashflow/service/PosIngestService.class
-com/saffron/cashflow/service/MenuPrintService$RenderResult.class
 com/saffron/cashflow/service/MenuService.class
 com/saffron/cashflow/controller/CommentController$CreateCommentRequest.class
 com/saffron/cashflow/controller/FileController.class
