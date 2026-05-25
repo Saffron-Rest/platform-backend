@@ -5,12 +5,12 @@ import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
 import com.lowagie.text.Element;
 import com.lowagie.text.Font;
-import com.lowagie.text.FontFactory;
 import com.lowagie.text.Image;
 import com.lowagie.text.PageSize;
 import com.lowagie.text.Paragraph;
 import com.lowagie.text.Phrase;
 import com.lowagie.text.Rectangle;
+import com.lowagie.text.pdf.BaseFont;
 import com.lowagie.text.pdf.ColumnText;
 import com.lowagie.text.pdf.PdfContentByte;
 import com.lowagie.text.pdf.PdfPCell;
@@ -18,6 +18,8 @@ import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfPageEventHelper;
 import com.lowagie.text.pdf.PdfWriter;
 import com.lowagie.text.pdf.draw.LineSeparator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.saffron.cashflow.domain.MenuCategory;
 import com.saffron.cashflow.domain.MenuItem;
 import com.saffron.cashflow.web.BadRequestException;
@@ -25,6 +27,7 @@ import org.springframework.stereotype.Service;
 
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.file.Files;
@@ -38,47 +41,90 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Minimalist, typography-led restaurant menu PDF.
+ * Editorial, asymmetric, typography-led restaurant menu PDF.
  *
- * <p>Pure-typography composition — no photographs, no drawn icons. Every
- * page leans on hierarchy, whitespace, and a single saffron accent line.
- * The brief from the owner: "professional and attractive without big titles
- * or imagery". This implementation aims for the calm, restrained typography
- * of the Eleven Madison Park / Noma school of menu design.</p>
+ * <p>No photographs, no drawn icons — but with sharper editorial structure
+ * than the previous minimalist pass. The owner asked for "attractive but
+ * professional, without images or icons or big category titles". The design
+ * leans on four typographic moves:</p>
  *
- * <p>Pages (in order):</p>
  * <ol>
- *   <li><b>Cover</b> — saffron frame, wordmark, italic subtitle, diamond
- *       rule, motif strap-line, edition footer.</li>
- *   <li><b>Welcome / Our story</b> — drop cap body with a pull quote.</li>
- *   <li><b>Notes from the kitchen</b> — four heritage notes in a 2×2 grid.</li>
- *   <li><b>Section dividers + items</b> — every category starts on a new
- *       page with a compact divider (small section number, centred title,
- *       Azerbaijani translation, italic blurb), then the items.</li>
- *   <li><b>Allergens &amp; advisories</b> — the dietary key.</li>
- *   <li><b>Çox sağ olun</b> — minimal closing thank-you, optional contact
- *       block.</li>
+ *   <li><b>Asymmetric composition</b> — cover, section dividers and closing
+ *       are left-aligned with a vertical motif strap on the outer edge,
+ *       instead of being center-aligned.</li>
+ *   <li><b>Roman numerals as section anchors</b> — each category opens with
+ *       a large saffron Roman numeral (II, III, IV…) acting as a typographic
+ *       flourish. The category name itself stays small so the title never
+ *       dominates the page.</li>
+ *   <li><b>Numbered items</b> — every dish gets a small saffron index number
+ *       (01, 02…) that resets per section, giving the page a measured cadence
+ *       and making the menu easy to read aloud ("the 03, please").</li>
+ *   <li><b>Side-margin running label</b> — the current section name reads
+ *       vertically up the outer edge of every body page, like the running
+ *       head of an art book. The folio bottom-centre is a single numeral
+ *       between two saffron dots.</li>
  * </ol>
- *
- * <p>Per-item photos uploaded by the admin still appear on item cards (in
- * grid + list layouts). When no photo is set the placeholder is a quiet
- * cream tile, not an ornamental glyph.</p>
  */
 @Service
 public class MenuPrintService {
 
-    // ---- Palette (warm ink + single saffron accent + cream surface) ----
+    private static final Logger LOG = LoggerFactory.getLogger(MenuPrintService.class);
+
+    // ---- Unicode-capable fonts loaded once at class init ----
+    //
+    // The 14 built-in PDF fonts only cover WinAnsi, which silently drops
+    // Azerbaijani schwa (ə), letters like Ş/ş, and a few other glyphs we
+    // rely on. We bundle Noto Serif + Noto Sans (Apache 2.0) and embed
+    // them as subsets — adds ~25 KB to a typical menu PDF.
+    private static final BaseFont SERIF_REG = loadFont("NotoSerif-Regular.ttf", BaseFont.HELVETICA);
+    private static final BaseFont SERIF_BOLD = loadFont("NotoSerif-Bold.ttf", BaseFont.HELVETICA_BOLD);
+    private static final BaseFont SERIF_ITALIC = loadFont("NotoSerif-Italic.ttf", BaseFont.HELVETICA_OBLIQUE);
+    private static final BaseFont SERIF_BOLD_ITALIC =
+            loadFont("NotoSerif-BoldItalic.ttf", BaseFont.HELVETICA_BOLDOBLIQUE);
+    private static final BaseFont SANS_REG = loadFont("NotoSans-Regular.ttf", BaseFont.HELVETICA);
+    private static final BaseFont SANS_BOLD = loadFont("NotoSans-Bold.ttf", BaseFont.HELVETICA_BOLD);
+    private static final BaseFont SANS_ITALIC = loadFont("NotoSans-Italic.ttf", BaseFont.HELVETICA_OBLIQUE);
+
+    private static BaseFont loadFont(String name, String fallbackBuiltIn) {
+        try (InputStream in =
+                     MenuPrintService.class.getResourceAsStream("/fonts/" + name)) {
+            if (in == null) throw new IllegalStateException("font not on classpath: " + name);
+            byte[] bytes = in.readAllBytes();
+            // Identity-H + embedded = full Unicode coverage in the PDF.
+            return BaseFont.createFont(name, BaseFont.IDENTITY_H, BaseFont.EMBEDDED,
+                    BaseFont.CACHED, bytes, null);
+        } catch (Exception e) {
+            LOG.warn("Failed to load {} ({}). Falling back to built-in font {}. "
+                            + "Azerbaijani characters may not render correctly.",
+                    name, e.getMessage(), fallbackBuiltIn);
+            try {
+                return BaseFont.createFont(fallbackBuiltIn,
+                        BaseFont.WINANSI, BaseFont.NOT_EMBEDDED);
+            } catch (Exception ex) {
+                throw new IllegalStateException("Cannot load any font for menu PDF", ex);
+            }
+        }
+    }
+
+    private static Font font(BaseFont bf, float size, Color color) {
+        Font f = new Font(bf, size);
+        f.setColor(color);
+        return f;
+    }
+
     private static final Color INK = new Color(0x1A, 0x18, 0x14);
     private static final Color INK_SOFT = new Color(0x3A, 0x33, 0x29);
     private static final Color SAFFRON = new Color(0xC9, 0x6A, 0x1A);
     private static final Color SAFFRON_DEEP = new Color(0xA4, 0x52, 0x12);
     private static final Color CREAM = new Color(0xFA, 0xF4, 0xE8);
-    private static final Color CREAM_DEEP = new Color(0xF3, 0xEA, 0xD6);
     private static final Color MUTED = new Color(0x6B, 0x63, 0x57);
     private static final Color HAIRLINE = new Color(0xE2, 0xDD, 0xD2);
 
     private static final DateTimeFormatter MENU_DATE =
             DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
+
+    private static final String EDGE_MOTIF =
+            "ŞİRNİYYAT · PLOV · KABAB · DOLMA · ÇAY";
 
     /** English → Azerbaijani translations used on category dividers. */
     private static final Map<String, String> CATEGORY_TRANSLATIONS = Map.ofEntries(
@@ -165,11 +211,11 @@ public class MenuPrintService {
                     "No active categories with items — add items in /admin/menu before printing.");
         }
 
-        Document doc = new Document(PageSize.A4, 68, 68, 84, 78);
+        Document doc = new Document(PageSize.A4, 68, 68, 84, 84);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
             PdfWriter writer = PdfWriter.getInstance(doc, out);
-            MenuChrome chrome = new MenuChrome(title);
+            MenuChrome chrome = new MenuChrome();
             writer.setPageEvent(chrome);
             doc.open();
 
@@ -177,26 +223,30 @@ public class MenuPrintService {
             drawCover(doc, writer, title, subtitle);
 
             doc.newPage();
+            chrome.setSection("Welcome");
             drawStory(doc, writer, opt);
 
             doc.newPage();
+            chrome.setSection("Heritage");
             drawHeritage(doc);
 
-            int idx = 1;
+            int sectionIdx = 1;
             for (MenuCategory cat : categories) {
                 List<MenuItem> items = itemsByCategory.get(cat.getId());
                 if (items == null || items.isEmpty()) continue;
                 doc.newPage();
-                drawSectionDivider(doc, cat.getName(), idx);
+                chrome.setSection(cat.getName());
+                drawSectionDivider(doc, cat.getName(), sectionIdx);
                 switch (opt.layout()) {
                     case GRID -> drawGrid(doc, items, opt.showPrices(), opt.locale());
                     case LIST -> drawList(doc, items, opt.showPrices(), opt.locale());
                     case COMPACT -> drawCompact(doc, items, opt.showPrices(), opt.locale());
                 }
-                idx++;
+                sectionIdx++;
             }
 
             doc.newPage();
+            chrome.setSection("Advisories");
             drawAllergens(doc);
 
             doc.newPage();
@@ -222,55 +272,64 @@ public class MenuPrintService {
         }
     }
 
-    // ---------- Cover ----------
+    // ---------- Cover (asymmetric, left-aligned) ----------
 
     private void drawCover(Document doc, PdfWriter writer, String title, String subtitle)
             throws DocumentException {
         PdfContentByte cb = writer.getDirectContent();
         Rectangle page = doc.getPageSize();
         float w = page.getWidth(), h = page.getHeight();
-        float cx = w / 2f;
 
-        // Two concentric thin saffron rules — the only decorative element on
-        // the page. The composition then trusts typography to carry weight.
+        // Two concentric saffron rules — the only structural ornament.
         float inset = 36f;
         drawThinFrame(cb, page, inset, SAFFRON, 0.55f);
         drawThinFrame(cb, page, inset + 8, SAFFRON, 0.25f);
 
-        Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9.5f, SAFFRON_DEEP);
-        Font brand = FontFactory.getFont(FontFactory.TIMES_BOLD, 108, INK);
-        Font sub = FontFactory.getFont(FontFactory.TIMES_ITALIC, 18, MUTED);
-        Font cite = FontFactory.getFont(FontFactory.TIMES_ITALIC, 11.5f, SAFFRON_DEEP);
-        Font year = FontFactory.getFont(FontFactory.HELVETICA, 9, MUTED);
-        Font foot = FontFactory.getFont(FontFactory.HELVETICA, 8, MUTED);
+        // Vertical motif strap on the right edge — reads bottom-up like a
+        // book spine. Replaces the centered "Şirniyyat · Plov · …" line.
+        Font motif = font(SANS_BOLD, 8.5f, SAFFRON_DEEP);
+        showRotated(cb, spacedCaps(EDGE_MOTIF), motif, w - inset - 18f, h / 2f, 90);
 
-        showCentered(cb, spacedCaps("La carte · A book of dishes"),
-                eyebrow, cx, h - inset - 52);
+        Font eyebrow = font(SANS_BOLD, 9, SAFFRON_DEEP);
+        Font brand = font(SERIF_BOLD, 110, INK);
+        Font sub = font(SERIF_ITALIC, 18, MUTED);
+        Font year = font(SANS_REG, 8.5f, MUTED);
+        Font cite = font(SERIF_ITALIC, 11, SAFFRON_DEEP);
+        Font foot = font(SANS_REG, 7.5f, MUTED);
 
-        showCentered(cb, title, brand, cx, h * 0.60f);
+        float leftX = inset + 56f;
 
-        diamondRule(cb, cx, h * 0.60f - 38f, 70f);
+        // Eyebrow, top-left.
+        showLeftAligned(cb, spacedCaps("La carte · A book of dishes"), eyebrow,
+                leftX, h - inset - 64);
 
-        showCentered(cb, subtitle, sub, cx, h * 0.60f - 64f);
+        // Brand wordmark, left-aligned, sitting roughly on the upper third.
+        showLeftAligned(cb, title, brand, leftX, h * 0.62f);
 
-        showCentered(cb, "Şirniyyat · Plov · Kabab · Çay",
-                cite, cx, h * 0.42f);
+        // Diamond rule under the wordmark, also left-aligned.
+        diamondRule(cb, leftX, h * 0.62f - 36, 90f);
 
-        showCentered(cb, "EDITION · " + LocalDate.now().format(MENU_DATE).toUpperCase(Locale.ROOT),
-                year, cx, inset + 54);
-        showCentered(cb, "S A F F R O N · W A R S Z A W A · P O L A N D",
-                foot, cx, inset + 38);
+        // Italic subtitle and short attribution sit below the rule, still left.
+        showLeftAligned(cb, subtitle, sub, leftX, h * 0.62f - 62);
+        showLeftAligned(cb, "Recipes from Bakı, Şəki and Lənkəran.", cite,
+                leftX, h * 0.62f - 84);
+
+        // Edition strap, bottom-left.
+        showLeftAligned(cb, "EDITION · " + LocalDate.now().format(MENU_DATE).toUpperCase(Locale.ROOT),
+                year, leftX, inset + 56);
+        showLeftAligned(cb, "S A F F R O N · W A R S Z A W A · P O L A N D",
+                foot, leftX, inset + 40);
     }
 
     // ---------- Story ----------
 
     private void drawStory(Document doc, PdfWriter writer, Options opt) throws DocumentException {
-        Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9.5f, SAFFRON_DEEP);
-        Font head = FontFactory.getFont(FontFactory.TIMES_BOLD, 28, INK);
-        Font dropCap = FontFactory.getFont(FontFactory.TIMES_BOLD, 54, SAFFRON_DEEP);
-        Font body = FontFactory.getFont(FontFactory.TIMES_ROMAN, 12, INK_SOFT);
-        Font quote = FontFactory.getFont(FontFactory.TIMES_ITALIC, 15, SAFFRON_DEEP);
-        Font attribution = FontFactory.getFont(FontFactory.HELVETICA, 8.5f, MUTED);
+        Font eyebrow = font(SANS_BOLD, 9.5f, SAFFRON_DEEP);
+        Font head = font(SERIF_BOLD, 30, INK);
+        Font dropCap = font(SERIF_BOLD, 64, SAFFRON_DEEP);
+        Font body = font(SERIF_REG, 12, INK_SOFT);
+        Font quote = font(SERIF_ITALIC, 16, SAFFRON_DEEP);
+        Font attribution = font(SANS_REG, 8.5f, MUTED);
 
         doc.add(new Paragraph(spacedCaps("Welcome"), eyebrow));
 
@@ -279,7 +338,7 @@ public class MenuPrintService {
         h.setSpacingAfter(2);
         doc.add(h);
 
-        doc.add(saffronRule(48f));
+        doc.add(saffronRule(60f));
 
         String[] paragraphs = blankToDefault(opt.storyBody(), DEFAULT_STORY_BODY).split("\\n\\s*\\n");
         if (paragraphs.length > 0 && !paragraphs[0].isBlank()) {
@@ -289,17 +348,17 @@ public class MenuPrintService {
 
             PdfPTable dc = new PdfPTable(2);
             dc.setWidthPercentage(100);
-            dc.setSpacingBefore(22);
-            try { dc.setWidths(new float[]{0.8f, 10f}); } catch (DocumentException ignored) {}
+            dc.setSpacingBefore(26);
+            try { dc.setWidths(new float[]{0.9f, 10f}); } catch (DocumentException ignored) {}
 
             PdfPCell capCell = new PdfPCell(new Phrase(initial, dropCap));
             capCell.setBorder(Rectangle.NO_BORDER);
-            capCell.setPaddingTop(-4);
-            capCell.setPaddingRight(8);
+            capCell.setPaddingTop(-6);
+            capCell.setPaddingRight(10);
             capCell.setVerticalAlignment(Element.ALIGN_TOP);
 
             Paragraph bodyPara = new Paragraph(rest, body);
-            bodyPara.setLeading(18f);
+            bodyPara.setLeading(18.5f);
             bodyPara.setAlignment(Element.ALIGN_JUSTIFIED);
             PdfPCell bodyCell = new PdfPCell();
             bodyCell.setBorder(Rectangle.NO_BORDER);
@@ -311,19 +370,19 @@ public class MenuPrintService {
         }
         for (int i = 1; i < paragraphs.length; i++) {
             Paragraph p = new Paragraph(paragraphs[i].trim(), body);
-            p.setLeading(18f);
+            p.setLeading(18.5f);
             p.setSpacingBefore(12);
             p.setAlignment(Element.ALIGN_JUSTIFIED);
             doc.add(p);
         }
 
         Paragraph spacer = new Paragraph(" ");
-        spacer.setSpacingBefore(18);
+        spacer.setSpacingBefore(22);
         doc.add(spacer);
         diamondRule(writer.getDirectContent(), doc.getPageSize().getWidth() / 2f,
-                writer.getVerticalPosition(true) - 4, 80f);
+                writer.getVerticalPosition(true) - 4, 90f);
 
-        Paragraph q = new Paragraph("\"A guest is the gift of God.\"", quote);
+        Paragraph q = new Paragraph("\u201CA guest is the gift of God.\u201D", quote);
         q.setAlignment(Element.ALIGN_CENTER);
         q.setSpacingBefore(28);
         doc.add(q);
@@ -333,14 +392,16 @@ public class MenuPrintService {
         doc.add(a);
     }
 
-    // ---------- Heritage ----------
+    // ---------- Heritage (numbered single-column notes) ----------
 
     private void drawHeritage(Document doc) throws DocumentException {
-        Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9.5f, SAFFRON_DEEP);
-        Font head = FontFactory.getFont(FontFactory.TIMES_BOLD, 26, INK);
-        Font noteHead = FontFactory.getFont(FontFactory.TIMES_BOLD, 12, INK);
-        Font noteAz = FontFactory.getFont(FontFactory.TIMES_ITALIC, 9.5f, MUTED);
-        Font noteBody = FontFactory.getFont(FontFactory.TIMES_ROMAN, 10.5f, INK_SOFT);
+        Font eyebrow = font(SANS_BOLD, 9.5f, SAFFRON_DEEP);
+        Font head = font(SERIF_BOLD, 30, INK);
+        Font numFont = font(SERIF_BOLD, 38, SAFFRON_DEEP);
+        Font noNoteFont = font(SANS_BOLD, 7.5f, SAFFRON_DEEP);
+        Font noteHead = font(SERIF_BOLD, 14, INK);
+        Font noteAz = font(SERIF_ITALIC, 10.5f, MUTED);
+        Font noteBody = font(SERIF_REG, 11, INK_SOFT);
 
         doc.add(new Paragraph(spacedCaps("A taste of Azerbaijan"), eyebrow));
 
@@ -348,115 +409,175 @@ public class MenuPrintService {
         h.setSpacingBefore(6);
         h.setSpacingAfter(2);
         doc.add(h);
-        doc.add(saffronRule(48f));
+        doc.add(saffronRule(60f));
 
         String[][] notes = new String[][] {
-                {"Saffron", "Zəfəran",
-                        "More precious than gold by weight. A few strands bloomed in warm milk turn rice the colour of late afternoon sun."},
+                {"Saffron — the colour of late afternoon", "Zəfəran",
+                        "More precious than gold by weight. A few strands bloomed in warm milk turn rice "
+                                + "the colour of late afternoon sun. We grow our own crocuses outside Warsaw."},
                 {"Plov — the table's centrepiece", "Plov",
-                        "Slow-coaxed, region-specific, never the same twice. The qazmaq crust at the bottom of the pot is always the most contested piece."},
+                        "Slow-coaxed, region-specific, never the same twice. The qazmaq crust at the bottom "
+                                + "of the pot is always the most contested piece of the night."},
                 {"Dolma — leaves that hold tradition", "Dolma",
-                        "Vine leaves, cabbage, peppers — sometimes quince — wrapped around lamb, rice and herbs. UNESCO recognises it as Intangible Cultural Heritage."},
+                        "Vine leaves, cabbage, peppers — sometimes quince — wrapped around lamb, rice and herbs. "
+                                + "UNESCO recognises it as Intangible Cultural Heritage of humanity."},
                 {"Çay — the rhythm of hospitality", "Çay",
-                        "Loose-leaf tea poured into pear-shaped armudu glasses. Sweets, rock sugar, a sprig of cardamom — and conversation that doesn't end with the pot."},
+                        "Loose-leaf tea poured into pear-shaped armudu glasses. Sweets, rock sugar, a sprig of "
+                                + "cardamom — and conversation that doesn't end with the pot."},
         };
 
-        PdfPTable grid = new PdfPTable(2);
-        grid.setWidthPercentage(100);
-        grid.setSpacingBefore(28);
-        grid.getDefaultCell().setBorder(Rectangle.NO_BORDER);
-        try { grid.setWidths(new float[]{1, 1}); } catch (DocumentException ignored) {}
+        Paragraph spacer = new Paragraph(" ");
+        spacer.setSpacingAfter(26);
+        doc.add(spacer);
 
-        for (String[] n : notes) {
-            PdfPTable card = new PdfPTable(1);
-            card.setWidthPercentage(100);
+        for (int i = 0; i < notes.length; i++) {
+            String[] n = notes[i];
 
-            PdfPCell titleCell = new PdfPCell(new Phrase(n[0], noteHead));
-            titleCell.setBorder(Rectangle.NO_BORDER);
-            titleCell.setPaddingBottom(2);
-            card.addCell(titleCell);
+            PdfPTable row = new PdfPTable(2);
+            row.setWidthPercentage(100);
+            row.setSpacingBefore(i == 0 ? 0 : 18);
+            try { row.setWidths(new float[]{1.4f, 10f}); } catch (DocumentException ignored) {}
 
-            PdfPCell azCell = new PdfPCell(new Phrase(n[1], noteAz));
-            azCell.setBorder(Rectangle.NO_BORDER);
-            azCell.setPaddingBottom(6);
-            card.addCell(azCell);
+            PdfPTable numStack = new PdfPTable(1);
+            numStack.setWidthPercentage(100);
+
+            PdfPCell labelCell = new PdfPCell(new Phrase(spacedCaps("Note nº " + (i + 1)), noNoteFont));
+            labelCell.setBorder(Rectangle.NO_BORDER);
+            labelCell.setPaddingBottom(2);
+            numStack.addCell(labelCell);
+
+            PdfPCell numCell = new PdfPCell(new Phrase(twoDigit(i + 1), numFont));
+            numCell.setBorder(Rectangle.NO_BORDER);
+            numCell.setPaddingTop(-4);
+            numStack.addCell(numCell);
+
+            PdfPCell numWrap = new PdfPCell(numStack);
+            numWrap.setBorder(Rectangle.NO_BORDER);
+            numWrap.setVerticalAlignment(Element.ALIGN_TOP);
+            row.addCell(numWrap);
+
+            PdfPTable body = new PdfPTable(1);
+            body.setWidthPercentage(100);
+
+            PdfPCell title = new PdfPCell(new Phrase(n[0], noteHead));
+            title.setBorder(Rectangle.NO_BORDER);
+            title.setPaddingBottom(0);
+            body.addCell(title);
+
+            PdfPCell az = new PdfPCell(new Phrase(n[1], noteAz));
+            az.setBorder(Rectangle.NO_BORDER);
+            az.setPaddingBottom(6);
+            body.addCell(az);
 
             PdfPCell hair = new PdfPCell();
             hair.setFixedHeight(0.6f);
             hair.setBackgroundColor(SAFFRON);
             hair.setBorder(Rectangle.NO_BORDER);
-            card.addCell(hair);
+            hair.setColspan(1);
+            // Cap the hairline to a short rule rather than a full-width line.
+            hair.setPaddingBottom(0);
+            body.addCell(hair);
 
-            Paragraph bodyPara = new Paragraph(n[2], noteBody);
-            bodyPara.setLeading(15f);
-            bodyPara.setAlignment(Element.ALIGN_JUSTIFIED);
-            PdfPCell bodyCell = new PdfPCell();
-            bodyCell.setBorder(Rectangle.NO_BORDER);
-            bodyCell.addElement(bodyPara);
-            bodyCell.setPaddingTop(8);
-            card.addCell(bodyCell);
+            Paragraph p = new Paragraph(n[2], noteBody);
+            p.setLeading(15.5f);
+            p.setAlignment(Element.ALIGN_JUSTIFIED);
+            PdfPCell pCell = new PdfPCell();
+            pCell.setBorder(Rectangle.NO_BORDER);
+            pCell.setPaddingTop(8);
+            pCell.addElement(p);
+            body.addCell(pCell);
 
-            PdfPCell wrap = new PdfPCell(card);
-            wrap.setBorder(Rectangle.NO_BORDER);
-            wrap.setPaddingBottom(24);
-            wrap.setPaddingRight(18);
-            wrap.setPaddingLeft(18);
-            grid.addCell(wrap);
+            PdfPCell bodyWrap = new PdfPCell(body);
+            bodyWrap.setBorder(Rectangle.NO_BORDER);
+            bodyWrap.setPaddingLeft(8);
+            row.addCell(bodyWrap);
+
+            doc.add(row);
         }
-        doc.add(grid);
     }
 
-    // ---------- Section divider (replaces chapter opener) ----------
+    // ---------- Section divider (asymmetric, Roman numeral) ----------
 
     /**
-     * Compact section header that sits inline at the top of the items list.
-     * Replaces the previous full-page chapter opener — same information, far
-     * less ink.
+     * Asymmetric divider with a large saffron Roman numeral as a typographic
+     * anchor. The category name itself stays small so the title never
+     * dominates the page.
      */
     private void drawSectionDivider(Document doc, String name, int idx) throws DocumentException {
-        Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9, SAFFRON_DEEP);
-        Font head = FontFactory.getFont(FontFactory.TIMES_BOLD, 22, INK);
-        Font az = FontFactory.getFont(FontFactory.TIMES_ITALIC, 11.5f, MUTED);
-        Font blurb = FontFactory.getFont(FontFactory.TIMES_ITALIC, 10.5f, MUTED);
+        Font numFont = font(SERIF_BOLD, 76, SAFFRON_DEEP);
+        Font eyebrow = font(SANS_BOLD, 8.5f, SAFFRON_DEEP);
+        Font head = font(SERIF_BOLD, 22, INK);
+        Font az = font(SERIF_ITALIC, 12, MUTED);
+        Font blurb = font(SERIF_ITALIC, 11, MUTED);
 
-        Paragraph eb = new Paragraph(spacedCaps("Section " + twoDigit(idx)), eyebrow);
-        eb.setAlignment(Element.ALIGN_CENTER);
-        doc.add(eb);
+        PdfPTable row = new PdfPTable(2);
+        row.setWidthPercentage(100);
+        // Generous column for the Roman numeral — even "VIII"/"XIII" need space
+        // at 76pt without dropping to a second line.
+        try { row.setWidths(new float[]{3f, 8f}); } catch (DocumentException ignored) {}
 
-        Paragraph h = new Paragraph(name, head);
-        h.setSpacingBefore(4);
-        h.setSpacingAfter(0);
-        h.setAlignment(Element.ALIGN_CENTER);
-        doc.add(h);
+        Phrase numPhrase = new Phrase(toRoman(idx), numFont);
+        PdfPCell numCell = new PdfPCell(numPhrase);
+        numCell.setBorder(Rectangle.NO_BORDER);
+        numCell.setPaddingTop(-12);
+        numCell.setPaddingLeft(0);
+        numCell.setPaddingRight(8);
+        numCell.setVerticalAlignment(Element.ALIGN_TOP);
+        numCell.setNoWrap(true);
+        row.addCell(numCell);
 
-        String az_ = azFor(name);
-        if (az_ != null) {
-            Paragraph p = new Paragraph(az_, az);
-            p.setAlignment(Element.ALIGN_CENTER);
-            p.setSpacingBefore(2);
-            doc.add(p);
+        PdfPTable right = new PdfPTable(1);
+        right.setWidthPercentage(100);
+
+        PdfPCell ebCell = new PdfPCell(new Phrase(spacedCaps("Section " + twoDigit(idx)), eyebrow));
+        ebCell.setBorder(Rectangle.NO_BORDER);
+        ebCell.setPaddingTop(10);
+        ebCell.setPaddingBottom(4);
+        right.addCell(ebCell);
+
+        PdfPCell nameCell = new PdfPCell(new Phrase(name, head));
+        nameCell.setBorder(Rectangle.NO_BORDER);
+        nameCell.setPaddingBottom(0);
+        right.addCell(nameCell);
+
+        String azName = azFor(name);
+        if (azName != null) {
+            PdfPCell azCell = new PdfPCell(new Phrase(azName, az));
+            azCell.setBorder(Rectangle.NO_BORDER);
+            azCell.setPaddingTop(2);
+            azCell.setPaddingBottom(0);
+            right.addCell(azCell);
         }
 
-        // Centered thin saffron rule under the title.
-        Paragraph ruleWrap = new Paragraph(" ");
-        ruleWrap.setSpacingBefore(8);
-        doc.add(ruleWrap);
-        LineSeparator sep = new LineSeparator(1.5f, 14, SAFFRON, Element.ALIGN_CENTER, 0);
-        doc.add(new Chunk(sep));
+        PdfPCell ruleCell = new PdfPCell();
+        ruleCell.setFixedHeight(0.6f);
+        ruleCell.setBackgroundColor(SAFFRON);
+        ruleCell.setBorder(Rectangle.NO_BORDER);
+        ruleCell.setPaddingTop(0);
+        right.addCell(ruleCell);
 
         String blurbText = blurbFor(name);
         if (blurbText != null) {
             Paragraph bp = new Paragraph(blurbText, blurb);
-            bp.setAlignment(Element.ALIGN_CENTER);
-            bp.setLeading(15f);
-            bp.setSpacingBefore(12);
-            bp.setIndentationLeft(40f);
-            bp.setIndentationRight(40f);
-            doc.add(bp);
+            bp.setLeading(15.5f);
+            bp.setAlignment(Element.ALIGN_LEFT);
+            PdfPCell bCell = new PdfPCell();
+            bCell.setBorder(Rectangle.NO_BORDER);
+            bCell.setPaddingTop(10);
+            bCell.setPaddingRight(20);
+            bCell.addElement(bp);
+            right.addCell(bCell);
         }
 
+        PdfPCell rightWrap = new PdfPCell(right);
+        rightWrap.setBorder(Rectangle.NO_BORDER);
+        rightWrap.setPaddingLeft(14);
+        row.addCell(rightWrap);
+
+        doc.add(row);
+
         Paragraph after = new Paragraph(" ");
-        after.setSpacingAfter(24);
+        after.setSpacingAfter(26);
         doc.add(after);
     }
 
@@ -470,7 +591,8 @@ public class MenuPrintService {
         table.setSplitLate(false);
         table.getDefaultCell().setBorder(Rectangle.NO_BORDER);
 
-        for (MenuItem item : items) table.addCell(gridCard(item, showPrices, locale));
+        int n = 1;
+        for (MenuItem item : items) table.addCell(gridCard(item, n++, showPrices, locale));
         if (items.size() % 2 == 1) {
             PdfPCell filler = new PdfPCell();
             filler.setBorder(Rectangle.NO_BORDER);
@@ -479,18 +601,17 @@ public class MenuPrintService {
         doc.add(table);
     }
 
-    private PdfPCell gridCard(MenuItem item, boolean showPrices, Locale locale) {
+    private PdfPCell gridCard(MenuItem item, int idx, boolean showPrices, Locale locale) {
         PdfPCell wrap = new PdfPCell();
         wrap.setBorder(Rectangle.NO_BORDER);
         wrap.setPadding(0);
-        wrap.setPaddingBottom(26);
+        wrap.setPaddingBottom(28);
         wrap.setPaddingRight(14);
 
         PdfPTable card = new PdfPTable(1);
         card.setWidthPercentage(100);
 
-        // Photo is included only if the admin has uploaded one for this item.
-        // The placeholder cream tile is intentionally quiet — no ornament.
+        // Photos remain optional — only included when admin uploads one.
         Image img = tryLoadImage(item.getImagePath());
         if (img != null) {
             PdfPCell photo = new PdfPCell();
@@ -510,28 +631,38 @@ public class MenuPrintService {
 
         if (item.isFeatured()) {
             PdfPCell pill = new PdfPCell(new Phrase(spacedCaps("Chef's signature"),
-                    FontFactory.getFont(FontFactory.HELVETICA_BOLD, 7.5f, SAFFRON_DEEP)));
+                    font(SANS_BOLD, 7.5f, SAFFRON_DEEP)));
             pill.setBorder(Rectangle.NO_BORDER);
             pill.setPaddingTop(img != null ? 14 : 0);
             pill.setPaddingBottom(0);
             card.addCell(pill);
         }
 
-        Font nameFont = FontFactory.getFont(FontFactory.TIMES_BOLD, 14, INK);
-        Font priceFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 12.5f, SAFFRON_DEEP);
-        Font descFont = FontFactory.getFont(FontFactory.HELVETICA, 9.5f, MUTED);
-        Font tagsFont = FontFactory.getFont(FontFactory.HELVETICA_OBLIQUE, 8, MUTED);
-        Font allergenFont = FontFactory.getFont(FontFactory.HELVETICA, 7.5f, MUTED);
+        Font numFont = font(SANS_BOLD, 10.5f, SAFFRON_DEEP);
+        Font nameFont = font(SERIF_BOLD, 14, INK);
+        Font priceFont = font(SANS_BOLD, 12.5f, SAFFRON_DEEP);
+        Font descFont = font(SANS_REG, 9.5f, MUTED);
+        Font tagsFont = font(SANS_ITALIC, 8, MUTED);
+        Font allergenFont = font(SANS_REG, 7.5f, MUTED);
 
-        PdfPTable nameRow = new PdfPTable(showPrices ? 2 : 1);
+        // Top row: index · name · price.
+        PdfPTable nameRow = new PdfPTable(showPrices ? 3 : 2);
         nameRow.setWidthPercentage(100);
-        if (showPrices) {
-            try { nameRow.setWidths(new float[]{6, 2}); } catch (DocumentException ignored) {}
-        }
+        try {
+            // Price gets generous space — "168.00 zł" must fit on one line in
+            // a two-up grid cell. nowrap on the price cell catches edge cases.
+            if (showPrices) nameRow.setWidths(new float[]{1.0f, 4.6f, 2.6f});
+            else nameRow.setWidths(new float[]{1.1f, 8f});
+        } catch (DocumentException ignored) {}
+        nameRow.addCell(textCell(new Phrase(twoDigit(idx), numFont), Element.ALIGN_LEFT));
         nameRow.addCell(textCell(new Phrase(item.getName(), nameFont), Element.ALIGN_LEFT));
         if (showPrices) {
-            nameRow.addCell(textCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont),
-                    Element.ALIGN_RIGHT));
+            PdfPCell priceCell = new PdfPCell(
+                    new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+            priceCell.setBorder(Rectangle.NO_BORDER);
+            priceCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+            priceCell.setNoWrap(true);
+            nameRow.addCell(priceCell);
         }
         PdfPCell nameWrap = new PdfPCell(nameRow);
         nameWrap.setBorder(Rectangle.NO_BORDER);
@@ -576,12 +707,13 @@ public class MenuPrintService {
 
     private void drawList(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
             throws DocumentException {
-        Font nameFont = FontFactory.getFont(FontFactory.TIMES_BOLD, 14.5f, INK);
-        Font priceFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 13, SAFFRON_DEEP);
-        Font pillFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 7.5f, SAFFRON_DEEP);
-        Font descFont = FontFactory.getFont(FontFactory.HELVETICA, 10.5f, MUTED);
-        Font tagsFont = FontFactory.getFont(FontFactory.HELVETICA_OBLIQUE, 9, MUTED);
-        Font allergenFont = FontFactory.getFont(FontFactory.HELVETICA, 8, MUTED);
+        Font numFont = font(SANS_BOLD, 11.5f, SAFFRON_DEEP);
+        Font nameFont = font(SERIF_BOLD, 14.5f, INK);
+        Font priceFont = font(SANS_BOLD, 13, SAFFRON_DEEP);
+        Font pillFont = font(SANS_BOLD, 7.5f, SAFFRON_DEEP);
+        Font descFont = font(SANS_REG, 10.5f, MUTED);
+        Font tagsFont = font(SANS_ITALIC, 9, MUTED);
+        Font allergenFont = font(SANS_REG, 8, MUTED);
 
         for (int i = 0; i < items.size(); i++) {
             MenuItem item = items.get(i);
@@ -592,16 +724,21 @@ public class MenuPrintService {
                 doc.add(pill);
             }
 
-            // Name + dotted leader + price row.
-            PdfPTable head = new PdfPTable(showPrices ? 2 : 1);
+            PdfPTable head = new PdfPTable(showPrices ? 3 : 2);
             head.setWidthPercentage(100);
-            if (showPrices) {
-                try { head.setWidths(new float[]{6, 2}); } catch (DocumentException ignored) {}
-            }
+            try {
+                if (showPrices) head.setWidths(new float[]{0.6f, 6.5f, 1.6f});
+                else head.setWidths(new float[]{0.8f, 8f});
+            } catch (DocumentException ignored) {}
+            head.addCell(textCell(new Phrase(twoDigit(i + 1), numFont), Element.ALIGN_LEFT));
             head.addCell(textCell(new Phrase(item.getName(), nameFont), Element.ALIGN_LEFT));
             if (showPrices) {
-                head.addCell(textCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont),
-                        Element.ALIGN_RIGHT));
+                PdfPCell priceCell = new PdfPCell(
+                        new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+                priceCell.setBorder(Rectangle.NO_BORDER);
+                priceCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                priceCell.setNoWrap(true);
+                head.addCell(priceCell);
             }
             head.setSpacingBefore(item.isFeatured() ? 2 : 6);
             doc.add(head);
@@ -611,6 +748,7 @@ public class MenuPrintService {
                 Paragraph d = new Paragraph(desc, descFont);
                 d.setLeading(14.5f);
                 d.setSpacingBefore(3);
+                d.setIndentationLeft(24f);
                 doc.add(d);
             }
 
@@ -618,12 +756,14 @@ public class MenuPrintService {
             if (dietary != null) {
                 Paragraph d = new Paragraph(dietary, tagsFont);
                 d.setSpacingBefore(3);
+                d.setIndentationLeft(24f);
                 doc.add(d);
             }
             String allergen = renderAllergens(item);
             if (allergen != null) {
                 Paragraph d = new Paragraph(allergen, allergenFont);
                 d.setSpacingBefore(2);
+                d.setIndentationLeft(24f);
                 doc.add(d);
             }
 
@@ -645,12 +785,18 @@ public class MenuPrintService {
         List<MenuItem> right = new ArrayList<>();
         for (int i = 0; i < items.size(); i++) (i % 2 == 0 ? left : right).add(items.get(i));
 
+        // Item indices stay sequential across columns so the index reflects
+        // the original menu order, not the column splitter.
+        List<Integer> leftIdx = new ArrayList<>();
+        List<Integer> rightIdx = new ArrayList<>();
+        for (int i = 0; i < items.size(); i++) (i % 2 == 0 ? leftIdx : rightIdx).add(i + 1);
+
         PdfPTable two = new PdfPTable(2);
         two.setWidthPercentage(100);
         try { two.setWidths(new float[]{1, 1}); } catch (DocumentException ignored) {}
 
-        PdfPCell l = new PdfPCell(columnTable(left, showPrices, locale));
-        PdfPCell r = new PdfPCell(columnTable(right, showPrices, locale));
+        PdfPCell l = new PdfPCell(columnTable(left, leftIdx, showPrices, locale));
+        PdfPCell r = new PdfPCell(columnTable(right, rightIdx, showPrices, locale));
         l.setBorder(Rectangle.NO_BORDER);
         l.setPaddingRight(28);
         r.setBorder(Rectangle.NO_BORDER);
@@ -660,18 +806,21 @@ public class MenuPrintService {
         doc.add(two);
     }
 
-    private PdfPTable columnTable(List<MenuItem> items, boolean showPrices, Locale locale) {
+    private PdfPTable columnTable(List<MenuItem> items, List<Integer> indices,
+                                  boolean showPrices, Locale locale) {
         PdfPTable col = new PdfPTable(1);
         col.setWidthPercentage(100);
 
-        Font nameFont = FontFactory.getFont(FontFactory.TIMES_BOLD, 12.5f, INK);
-        Font priceFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 11.5f, SAFFRON_DEEP);
-        Font pillFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 7, SAFFRON_DEEP);
-        Font descFont = FontFactory.getFont(FontFactory.HELVETICA, 9.5f, MUTED);
-        Font tagsFont = FontFactory.getFont(FontFactory.HELVETICA_OBLIQUE, 8, MUTED);
+        Font numFont = font(SANS_BOLD, 9.5f, SAFFRON_DEEP);
+        Font nameFont = font(SERIF_BOLD, 12.5f, INK);
+        Font priceFont = font(SANS_BOLD, 11.5f, SAFFRON_DEEP);
+        Font pillFont = font(SANS_BOLD, 7, SAFFRON_DEEP);
+        Font descFont = font(SANS_REG, 9.5f, MUTED);
+        Font tagsFont = font(SANS_ITALIC, 8, MUTED);
 
         for (int i = 0; i < items.size(); i++) {
             MenuItem item = items.get(i);
+            int idx = indices.get(i);
 
             if (item.isFeatured()) {
                 PdfPCell p = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
@@ -679,15 +828,21 @@ public class MenuPrintService {
                 col.addCell(p);
             }
 
-            PdfPTable head = new PdfPTable(showPrices ? 2 : 1);
+            PdfPTable head = new PdfPTable(showPrices ? 3 : 2);
             head.setWidthPercentage(100);
-            if (showPrices) {
-                try { head.setWidths(new float[]{5, 2}); } catch (DocumentException ignored) {}
-            }
+            try {
+                if (showPrices) head.setWidths(new float[]{0.9f, 4.2f, 2.4f});
+                else head.setWidths(new float[]{0.9f, 7f});
+            } catch (DocumentException ignored) {}
+            head.addCell(textCell(new Phrase(twoDigit(idx), numFont), Element.ALIGN_LEFT));
             head.addCell(textCell(new Phrase(item.getName(), nameFont), Element.ALIGN_LEFT));
             if (showPrices) {
-                head.addCell(textCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont),
-                        Element.ALIGN_RIGHT));
+                PdfPCell priceCell = new PdfPCell(
+                        new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+                priceCell.setBorder(Rectangle.NO_BORDER);
+                priceCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                priceCell.setNoWrap(true);
+                head.addCell(priceCell);
             }
             PdfPCell headWrap = new PdfPCell(head);
             headWrap.setBorder(Rectangle.NO_BORDER);
@@ -697,6 +852,7 @@ public class MenuPrintService {
             if (desc != null) {
                 PdfPCell d = new PdfPCell(new Phrase(desc, descFont));
                 d.setBorder(Rectangle.NO_BORDER);
+                d.setPaddingLeft(24);
                 d.setPaddingBottom(2);
                 col.addCell(d);
             }
@@ -704,6 +860,7 @@ public class MenuPrintService {
             if (dietary != null) {
                 PdfPCell c = new PdfPCell(new Phrase(dietary, tagsFont));
                 c.setBorder(Rectangle.NO_BORDER);
+                c.setPaddingLeft(24);
                 col.addCell(c);
             }
 
@@ -720,11 +877,11 @@ public class MenuPrintService {
     // ---------- Allergens ----------
 
     private void drawAllergens(Document doc) throws DocumentException {
-        Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9.5f, SAFFRON_DEEP);
-        Font head = FontFactory.getFont(FontFactory.TIMES_BOLD, 26, INK);
-        Font key = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10.5f, INK);
-        Font keyDesc = FontFactory.getFont(FontFactory.HELVETICA, 10, MUTED);
-        Font body = FontFactory.getFont(FontFactory.HELVETICA, 10.5f, MUTED);
+        Font eyebrow = font(SANS_BOLD, 9.5f, SAFFRON_DEEP);
+        Font head = font(SERIF_BOLD, 30, INK);
+        Font key = font(SANS_BOLD, 10.5f, INK);
+        Font keyDesc = font(SANS_REG, 10, MUTED);
+        Font body = font(SANS_REG, 10.5f, MUTED);
 
         doc.add(new Paragraph(spacedCaps("How to read this menu"), eyebrow));
 
@@ -732,7 +889,7 @@ public class MenuPrintService {
         h.setSpacingBefore(6);
         h.setSpacingAfter(2);
         doc.add(h);
-        doc.add(saffronRule(48f));
+        doc.add(saffronRule(60f));
 
         String[][] dietKey = new String[][] {
                 {"Chef's signature", "Hand-picked by our chef — try if you haven't before."},
@@ -768,7 +925,7 @@ public class MenuPrintService {
         doc.add(kt);
 
         Paragraph allergenHead = new Paragraph("Allergens & cross-contact",
-                FontFactory.getFont(FontFactory.TIMES_BOLD, 13, INK));
+                font(SERIF_BOLD, 13, INK));
         allergenHead.setSpacingBefore(26);
         allergenHead.setSpacingAfter(6);
         doc.add(allergenHead);
@@ -792,42 +949,48 @@ public class MenuPrintService {
         doc.add(priceP);
     }
 
-    // ---------- Closing ----------
+    // ---------- Closing (asymmetric, mirrors cover) ----------
 
     private void drawClosing(Document doc, PdfWriter writer, Options opt) throws DocumentException {
         PdfContentByte cb = writer.getDirectContent();
         Rectangle page = doc.getPageSize();
-        float cx = page.getWidth() / 2f;
+        float w = page.getWidth(), h = page.getHeight();
 
-        // Same restrained frame as the cover.
         float inset = 36f;
         drawThinFrame(cb, page, inset, SAFFRON, 0.55f);
         drawThinFrame(cb, page, inset + 8, SAFFRON, 0.25f);
 
-        Font eyebrow = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9.5f, SAFFRON_DEEP);
-        Font hero = FontFactory.getFont(FontFactory.TIMES_BOLD, 48, INK);
-        Font az = FontFactory.getFont(FontFactory.TIMES_ITALIC, 16, MUTED);
-        Font addr = FontFactory.getFont(FontFactory.HELVETICA, 9.5f, INK);
-        Font foot = FontFactory.getFont(FontFactory.HELVETICA, 8, MUTED);
+        Font motif = font(SANS_BOLD, 8.5f, SAFFRON_DEEP);
+        showRotated(cb, spacedCaps("SAFFRON · WARSZAWA · POLAND"),
+                motif, w - inset - 18f, h / 2f, 90);
 
-        showCentered(cb, spacedCaps("Until we see you again"), eyebrow,
-                cx, page.getHeight() * 0.72f);
-        showCentered(cb, "Çox sağ olun", hero, cx, page.getHeight() * 0.62f);
-        showCentered(cb, "Thank you for dining with us.", az, cx, page.getHeight() * 0.55f);
+        Font eyebrow = font(SANS_BOLD, 9, SAFFRON_DEEP);
+        Font hero = font(SERIF_BOLD, 60, INK);
+        Font subItalic = font(SERIF_ITALIC, 16, MUTED);
+        Font addr = font(SANS_REG, 9.5f, INK);
+        Font year = font(SANS_REG, 8.5f, MUTED);
 
-        diamondRule(cb, cx, page.getHeight() * 0.46f, 70f);
+        float leftX = inset + 56f;
+
+        showLeftAligned(cb, spacedCaps("Until we see you again"), eyebrow,
+                leftX, h - inset - 64);
+
+        showLeftAligned(cb, "Çox sağ olun", hero, leftX, h * 0.62f);
+        diamondRule(cb, leftX, h * 0.62f - 30, 90f);
+        showLeftAligned(cb, "Thank you for dining with us.", subItalic,
+                leftX, h * 0.62f - 56);
 
         if (opt.contactBlock() != null && !opt.contactBlock().isBlank()) {
             String[] lines = opt.contactBlock().trim().split("\\r?\\n");
-            float y = page.getHeight() * 0.36f;
+            float y = h * 0.45f;
             for (String line : lines) {
-                showCentered(cb, line, addr, cx, y);
+                showLeftAligned(cb, line, addr, leftX, y);
                 y -= 16f;
             }
         }
 
-        showCentered(cb, "EDITION · " + LocalDate.now().format(MENU_DATE).toUpperCase(Locale.ROOT),
-                foot, cx, inset + 38);
+        showLeftAligned(cb, "EDITION · " + LocalDate.now().format(MENU_DATE).toUpperCase(Locale.ROOT),
+                year, leftX, inset + 56);
     }
 
     // ---------- Decorative primitives ----------
@@ -842,29 +1005,42 @@ public class MenuPrintService {
         cb.restoreState();
     }
 
-    /** Two short rules with a small diamond between them — the only ornament
-     *  used in the whole document. Echoes printed-book section breaks. */
-    private void diamondRule(PdfContentByte cb, float cx, float cy, float armLen) {
+    /** Two short rules with a small diamond between them — the only ornament. */
+    private void diamondRule(PdfContentByte cb, float anchorX, float cy, float armLen) {
         cb.saveState();
         cb.setColorStroke(SAFFRON);
         cb.setColorFill(SAFFRON);
         cb.setLineWidth(0.6f);
-        cb.moveTo(cx - armLen, cy);
-        cb.lineTo(cx - 8, cy);
-        cb.moveTo(cx + 8, cy);
-        cb.lineTo(cx + armLen, cy);
+        float startX = anchorX;
+        cb.moveTo(startX, cy);
+        cb.lineTo(startX + armLen / 2f - 8, cy);
+        cb.moveTo(startX + armLen / 2f + 8, cy);
+        cb.lineTo(startX + armLen, cy);
         cb.stroke();
-        cb.moveTo(cx, cy + 3.5f);
-        cb.lineTo(cx + 3.5f, cy);
-        cb.lineTo(cx, cy - 3.5f);
-        cb.lineTo(cx - 3.5f, cy);
+        float mx = startX + armLen / 2f;
+        cb.moveTo(mx, cy + 3.5f);
+        cb.lineTo(mx + 3.5f, cy);
+        cb.lineTo(mx, cy - 3.5f);
+        cb.lineTo(mx - 3.5f, cy);
         cb.closePathFillStroke();
         cb.restoreState();
+    }
+
+    private void showLeftAligned(PdfContentByte cb, String text, Font font, float x, float baselineY) {
+        try {
+            ColumnText.showTextAligned(cb, Element.ALIGN_LEFT, new Phrase(text, font), x, baselineY, 0);
+        } catch (Exception ignored) {}
     }
 
     private void showCentered(PdfContentByte cb, String text, Font font, float cx, float baselineY) {
         try {
             ColumnText.showTextAligned(cb, Element.ALIGN_CENTER, new Phrase(text, font), cx, baselineY, 0);
+        } catch (Exception ignored) {}
+    }
+
+    private void showRotated(PdfContentByte cb, String text, Font font, float x, float y, float rotation) {
+        try {
+            ColumnText.showTextAligned(cb, Element.ALIGN_CENTER, new Phrase(text, font), x, y, rotation);
         } catch (Exception ignored) {}
     }
 
@@ -886,23 +1062,24 @@ public class MenuPrintService {
         String key = name.trim().toLowerCase(Locale.ROOT);
         return switch (key) {
             case "starters", "appetisers", "appetizers" ->
-                    "Small plates to open the meal — eaten slowly, ideally with bread.";
+                    "Small plates to open the meal — eaten slowly, ideally with bread, while the table is being set.";
             case "salads" ->
-                    "Fresh herbs, sumac, walnuts and pomegranate — the everyday Azerbaijani table.";
+                    "Fresh herbs, sumac, walnuts and pomegranate — the everyday Azerbaijani table at its most generous.";
             case "soups" ->
-                    "Slow-cooked broths and yogurt soups — what grandmothers called medicine.";
+                    "Slow-cooked broths and yoghurt soups — what grandmothers in Şəki call medicine and what we call lunch.";
             case "mains", "main courses" ->
                     "Plov, kebabs, slow-braised lamb. Dishes that take their time, and reward yours.";
             case "plov", "plov & rice" ->
-                    "The crown of Azerbaijani cuisine — saffron-stained rice with lamb, chestnuts and herbs.";
+                    "The crown of Azerbaijani cuisine — saffron-stained rice with lamb, chestnuts, dried apricot and herbs.";
             case "kebabs", "kebab", "grill" ->
-                    "Charcoal-grilled lamb, chicken and sturgeon — marinated overnight, served with sumac.";
-            case "sides" -> "Pickles, herbs, breads — the side stage where the main dishes meet.";
+                    "Charcoal-grilled lamb, chicken and sturgeon — marinated overnight, served with sumac and onion.";
+            case "sides" ->
+                    "Pickles, herbs, breads — the side stage where the main dishes meet, and where the table fills up.";
             case "breads" -> "Tandir-baked, torn and shared — never sliced.";
             case "desserts", "sweets" ->
-                    "Pakhlava, şəkərbura, halva — pastries that taste of holidays and patience.";
-            case "drinks", "beverages" -> "Şərbət, ayran, compote, tea — pairings for every season.";
-            case "tea" -> "Loose-leaf in armudu glasses — refilled until you tell us to stop.";
+                    "Pakhlava, şəkərbura, halva — pastries that taste of holidays, weddings and patience.";
+            case "drinks", "beverages" -> "Şərbət, ayran, compote, tea — pairings for every season and every dish.";
+            case "tea" -> "Loose-leaf, in armudu glasses — refilled until you tell us to stop.";
             default -> null;
         };
     }
@@ -924,6 +1101,22 @@ public class MenuPrintService {
 
     private static String twoDigit(int i) {
         return i < 10 ? "0" + i : String.valueOf(i);
+    }
+
+    /** Lightweight 1..3999 Roman numeral converter — plenty for section
+     *  numbers on a restaurant menu. */
+    private static String toRoman(int n) {
+        if (n <= 0) return "";
+        int[] vals = {1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1};
+        String[] syms = {"M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"};
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < vals.length && n > 0; i++) {
+            while (n >= vals[i]) {
+                sb.append(syms[i]);
+                n -= vals[i];
+            }
+        }
+        return sb.toString();
     }
 
     private PdfPCell textCell(Phrase p, int align) {
@@ -992,17 +1185,22 @@ public class MenuPrintService {
     // ---------- Page chrome ----------
 
     /**
-     * The chrome is deliberately quiet — one tiny page numeral bottom-centre,
-     * nothing else. Cover and closing pages opt out via {@link #suppressNext}.
+     * Body pages get two pieces of chrome:
+     * <ol>
+     *   <li>A vertical section label on the right edge — reads bottom-up,
+     *       tracked saffron caps, centred vertically.</li>
+     *   <li>A folio bottom-centre — the page number flanked by two saffron
+     *       dots, e.g. {@code · 5 ·}.</li>
+     * </ol>
+     * Cover and closing pages opt out by calling {@link #suppressNext} before
+     * their first paint.
      */
     private static class MenuChrome extends PdfPageEventHelper {
-        @SuppressWarnings("unused")
-        private final String brand;
         private boolean suppressNext = false;
-
-        MenuChrome(String brand) { this.brand = brand; }
+        private String currentSection = "";
 
         void suppressNext() { this.suppressNext = true; }
+        void setSection(String s) { this.currentSection = s == null ? "" : s; }
 
         @Override
         public void onEndPage(PdfWriter writer, Document doc) {
@@ -1012,13 +1210,27 @@ public class MenuPrintService {
 
             PdfContentByte cb = writer.getDirectContent();
             Rectangle page = doc.getPageSize();
+            float w = page.getWidth();
+            float h = page.getHeight();
+            float inset = 36f;
 
             try {
-                Font fNum = FontFactory.getFont(FontFactory.TIMES_ROMAN, 9, MUTED);
+                if (!currentSection.isBlank()) {
+                    Font edge = font(SANS_BOLD, 7.5f, SAFFRON_DEEP);
+                    ColumnText.showTextAligned(
+                            cb, Element.ALIGN_CENTER,
+                            new Phrase(spacedCaps(currentSection), edge),
+                            w - inset - 14f, h / 2f, 90);
+                }
+
+                Font fNum = font(SERIF_REG, 9.5f, MUTED);
+                Font fDot = font(SANS_BOLD, 9, SAFFRON);
+                Phrase folio = new Phrase();
+                folio.add(new Chunk("· ", fDot));
+                folio.add(new Chunk(String.valueOf(p), fNum));
+                folio.add(new Chunk(" ·", fDot));
                 ColumnText.showTextAligned(
-                        cb, Element.ALIGN_CENTER,
-                        new Phrase(String.valueOf(p), fNum),
-                        page.getWidth() / 2f, 36, 0);
+                        cb, Element.ALIGN_CENTER, folio, w / 2f, 38, 0);
             } catch (Exception ignored) {}
         }
     }
