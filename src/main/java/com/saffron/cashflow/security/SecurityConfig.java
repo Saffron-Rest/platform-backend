@@ -42,9 +42,13 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/pos/webhook/**").permitAll()
                         // POS push endpoint authenticates via per-integration
                         // token embedded in the URL (?token=…) — works for any
-                        // vendor that posts JSON but can't sign requests.
+                        // vendor that posts JSON but can't sign requests. We
+                        // also permit GET so admins can sanity-check the URL
+                        // from a browser (handler still validates the token).
                         .requestMatchers(HttpMethod.POST, "/api/pos/push/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/pos/push/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/pos/dotypos-webhook/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/pos/dotypos-webhook/**").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(mustChangePasswordFilter, JwtAuthFilter.class);
