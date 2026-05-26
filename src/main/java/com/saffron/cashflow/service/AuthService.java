@@ -105,7 +105,28 @@ public class AuthService {
                 user.getEmail(),
                 user.getRole(),
                 user.getName(),
-                user.isMustChangePassword());
+                user.isMustChangePassword(),
+                effectivePermissions(user));
+    }
+
+    /**
+     * Compute the effective permission set for a user:
+     * role defaults union any admin-granted extras stored in the
+     * {@code extra_permissions} column. Admins always get everything —
+     * extras are ignored for them so the audit trail isn't polluted by
+     * pointless toggles on omnipotent accounts.
+     */
+    public static java.util.Set<com.saffron.cashflow.domain.Permission> effectivePermissions(User user) {
+        if (user == null || user.getRole() == null) {
+            return java.util.EnumSet.noneOf(com.saffron.cashflow.domain.Permission.class);
+        }
+        java.util.EnumSet<com.saffron.cashflow.domain.Permission> out =
+                java.util.EnumSet.copyOf(
+                        com.saffron.cashflow.domain.Permission.defaultsFor(user.getRole()));
+        if (user.getRole() != com.saffron.cashflow.domain.Role.ADMIN) {
+            out.addAll(com.saffron.cashflow.domain.Permission.parseCsv(user.getExtraPermissions()));
+        }
+        return out;
     }
 
     public static Map<String, Object> userMap(User user) {

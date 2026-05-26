@@ -46,6 +46,16 @@ public class User {
     @Column(name = "start_date")
     private LocalDate startDate;
 
+    /**
+     * CSV of {@link Permission#name()} values an admin has granted to
+     * this user on top of {@link #role}'s defaults. Nullable — a NULL
+     * column means "no extras". See {@link Permission#parseCsv} for the
+     * encoding contract. Never edited by users themselves; only by an
+     * admin via {@code PermissionService}.
+     */
+    @Column(name = "extra_permissions", columnDefinition = "TEXT")
+    private String extraPermissions;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -87,6 +97,8 @@ public class User {
     public void setPayAmount(BigDecimal payAmount) { this.payAmount = payAmount; }
     public LocalDate getStartDate() { return startDate; }
     public void setStartDate(LocalDate startDate) { this.startDate = startDate; }
+    public String getExtraPermissions() { return extraPermissions; }
+    public void setExtraPermissions(String extraPermissions) { this.extraPermissions = extraPermissions; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
 }

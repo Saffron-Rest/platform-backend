@@ -34,7 +34,22 @@ public class DatabaseMigrationRunner {
             migrateAdminTelegramDispatch(jdbc);
             migrateStockManagement(jdbc);
             migrateOperationsBackbone(jdbc);
+            migrateUserPermissions(jdbc);
         };
+    }
+
+    /**
+     * Per-user permission overlay. Adds a {@code extra_permissions} TEXT
+     * column to {@code app_user} that stores a CSV of
+     * {@link com.saffron.cashflow.domain.Permission} enum names.
+     *
+     * <p>The column is nullable — a NULL or empty string both decode to
+     * "no extras", so the user inherits exactly their role defaults.
+     * Idempotent.</p>
+     */
+    private static void migrateUserPermissions(JdbcTemplate jdbc) {
+        jdbc.execute(
+                "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS extra_permissions TEXT");
     }
 
     /**

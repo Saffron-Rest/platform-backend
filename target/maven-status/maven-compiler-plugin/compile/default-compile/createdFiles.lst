@@ -58,6 +58,7 @@ com/saffron/cashflow/controller/TreasuryController.class
 com/saffron/cashflow/repository/AdminTelegramDispatchRepository.class
 com/saffron/cashflow/service/ExportService$Format.class
 com/saffron/cashflow/dto/TagReplaceRequest.class
+com/saffron/cashflow/domain/Permission.class
 com/saffron/cashflow/dto/ExpenseItemRequest.class
 com/saffron/cashflow/util/EntryCalculator.class
 com/saffron/cashflow/repository/NotificationDispatchRepository.class
@@ -239,6 +240,7 @@ com/saffron/cashflow/service/SearchService$1.class
 com/saffron/cashflow/service/SalaryService.class
 com/saffron/cashflow/dto/TreasurySettingsRequest.class
 com/saffron/cashflow/dto/AssignShiftRequest.class
+com/saffron/cashflow/domain/Permission$1.class
 com/saffron/cashflow/repository/SalaryPaymentRepository.class
 com/saffron/cashflow/service/ManualDeliveryService.class
 com/saffron/cashflow/service/ProfitLossService$Labels.class

@@ -1,5 +1,6 @@
 package com.saffron.cashflow.security;
 
+import com.saffron.cashflow.domain.Permission;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -8,6 +9,9 @@ import org.springframework.stereotype.Service;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.EnumSet;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class JwtService {
@@ -34,6 +38,18 @@ public class JwtService {
         if (user.email() != null) {
             builder.claim("email", user.email());
         }
+        // Encode only the extras (permissions beyond the role default).
+        // Defaults are derived from the role at parse time, so the JWT
+        // stays compact and survives changes to defaultsFor() without a
+        // forced logout.
+        var defaults = Permission.defaultsFor(user.role());
+        var extras = user.permissions().stream()
+                .filter(p -> !defaults.contains(p))
+                .map(Enum::name)
+                .collect(Collectors.toList());
+        if (!extras.isEmpty()) {
+            builder.claim("permExtras", extras);
+        }
         return builder.signWith(key).compact();
     }
 
@@ -44,12 +60,23 @@ public class JwtService {
                 .parseSignedClaims(token)
                 .getPayload();
         Boolean mustChange = claims.get("mustChangePassword", Boolean.class);
+        com.saffron.cashflow.domain.Role role =
+                com.saffron.cashflow.domain.Role.valueOf(claims.get("role", String.class));
+        Set<Permission> permissions = EnumSet.copyOf(Permission.defaultsFor(role));
+        Object rawExtras = claims.get("permExtras");
+        if (rawExtras instanceof java.util.List<?> list) {
+            for (Object o : list) {
+                Permission p = Permission.tryParse(o == null ? null : o.toString());
+                if (p != null) permissions.add(p);
+            }
+        }
         return new AuthUser(
                 claims.getSubject(),
                 claims.get("username", String.class),
                 claims.get("email", String.class),
-                com.saffron.cashflow.domain.Role.valueOf(claims.get("role", String.class)),
+                role,
                 claims.get("name", String.class),
-                Boolean.TRUE.equals(mustChange));
+                Boolean.TRUE.equals(mustChange),
+                permissions);
     }
 }

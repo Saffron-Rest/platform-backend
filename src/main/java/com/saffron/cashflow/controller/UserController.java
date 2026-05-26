@@ -59,6 +59,48 @@ public class UserController {
         return userService.resetPassword(id);
     }
 
+    // ====================================================================
+    // Permission overlay
+    // ====================================================================
+
+    /** Catalog of permissions known to the system. Used by the
+     *  "Manage permissions" modal to render labels/descriptions. */
+    @GetMapping("/permission-catalog")
+    public List<Map<String, Object>> permissionCatalog() {
+        return userService.permissionCatalog();
+    }
+
+    /**
+     * Read the current permission view for a user — role defaults,
+     * admin-granted extras, and the resulting effective set.
+     */
+    @GetMapping("/{id}/permissions")
+    public Map<String, Object> getPermissions(@PathVariable String id) {
+        return userService.getPermissions(id);
+    }
+
+    /**
+     * Replace the user's extra permissions. Body shape:
+     * <pre>{ "permissions": ["STOCK_VIEW", ...], "reason": "optional note" }</pre>
+     * Unknown keys are silently dropped; permissions already implied by
+     * the role are filtered out before storage.
+     */
+    @PutMapping("/{id}/permissions")
+    public Map<String, Object> setPermissions(
+            @PathVariable String id,
+            @RequestBody Map<String, Object> body) {
+        Object raw = body == null ? null : body.get("permissions");
+        List<String> keys = new java.util.ArrayList<>();
+        if (raw instanceof List<?> list) {
+            for (Object o : list) {
+                if (o != null) keys.add(o.toString());
+            }
+        }
+        Object reasonRaw = body == null ? null : body.get("reason");
+        String reason = reasonRaw == null ? null : reasonRaw.toString();
+        return userService.setPermissions(id, keys, reason);
+    }
+
     @GetMapping("/pay-rates")
     public List<Map<String, Object>> allPayRates() {
         return payRateService.listAllHistory();
