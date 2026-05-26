@@ -57,7 +57,8 @@ class PdfReportBuilderSmokeTest {
         AnalyticsReportContext ctx = new AnalyticsReportContext(
                 "daily", d, d, summary, List.of(rows.get(0)),
                 null, null, null,
-                null, null, null, null, null);
+                null, null, null, null, null,
+                null);
         byte[] bytes = PdfReportBuilder.build(ctx);
         assertThat(bytes).isNotEmpty();
         assertThat(new String(bytes, 0, 4)).isEqualTo("%PDF");
@@ -74,7 +75,8 @@ class PdfReportBuilderSmokeTest {
             return new AnalyticsReportContext(
                     "weekly", from, to, summary, rows,
                     null, null, null,
-                    null, null, null, null, null);
+                    null, null, null, null, null,
+                    null);
         }
 
         LocalDate priorTo = from.minusDays(1);
@@ -85,7 +87,21 @@ class PdfReportBuilderSmokeTest {
                 "weekly", from, to, summary, rows,
                 priorSummary, priorFrom, priorTo,
                 samplePnl(), sampleTreasury(),
-                samplePayroll(), sampleMenuAnalytics(), sampleMenuEngineering());
+                samplePayroll(), sampleMenuAnalytics(), sampleMenuEngineering(),
+                sampleStandaloneExpenses());
+    }
+
+    private static List<Map<String, Object>> sampleStandaloneExpenses() {
+        return List.of(
+                Map.of("date", "2026-05-03", "category", "SUPPLIER_PAYMENTS",
+                        "description", "Lamb shoulder · Hala butcher", "amount", 320.0,
+                        "paymentSource", "CARD"),
+                Map.of("date", "2026-05-07", "category", "SUPPLIES",
+                        "description", "Cleaning supplies", "amount", 84.50,
+                        "paymentSource", "CASH"),
+                Map.of("date", "2026-05-12", "category", "PETTY_CASH",
+                        "description", "Taxi to suppliers", "amount", 22.0,
+                        "paymentSource", "CASH"));
     }
 
     private static Map<String, Object> sampleSummary(LocalDate from, LocalDate to) {

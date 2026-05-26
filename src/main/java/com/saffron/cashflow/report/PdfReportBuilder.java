@@ -150,6 +150,9 @@ public final class PdfReportBuilder {
 
             renderCover(doc, title, ctx, totals, priorTotals);
             renderHeadlineKpis(doc, totals, priorTotals);
+            if (!singleShift) {
+                renderHowToRead(doc);
+            }
 
             if (ctx.rows() == null || ctx.rows().isEmpty()) {
                 Paragraph empty = new Paragraph(
@@ -172,6 +175,7 @@ public final class PdfReportBuilder {
                 }
                 renderByCashier(doc, ctx.rows());
                 renderExpenseBreakdown(doc, ctx.rows(), ctx.profitLoss());
+                renderExpenseLedger(doc, ctx.rows(), ctx.standaloneExpenses());
                 renderPayoutsSummary(doc, ctx.rows());
                 if (ctx.menuAnalytics() != null) {
                     renderTopMenuItems(doc, ctx.menuAnalytics());
@@ -308,6 +312,42 @@ public final class PdfReportBuilder {
             cell.addElement(d);
         }
         t.addCell(cell);
+    }
+
+    // ========================================================================
+    // "How to read this report" — short legend so the report is understandable
+    // for someone seeing it for the first time.
+    // ========================================================================
+
+    private static void renderHowToRead(Document doc) throws DocumentException {
+        PdfPTable box = new PdfPTable(1);
+        box.setWidthPercentage(100);
+        box.setSpacingAfter(14f);
+        PdfPCell c = new PdfPCell();
+        c.setBackgroundColor(BRAND_CREAM);
+        c.setBorder(Rectangle.BOX);
+        c.setBorderColor(BRAND_CREAM_DEEP);
+        c.setPadding(12f);
+
+        Paragraph head = new Paragraph("How to read this report",
+                font(SERIF_BOLD, 10, BRAND_INK));
+        head.setSpacingAfter(4f);
+        c.addElement(head);
+
+        String legend =
+                "• Net revenue = gross sales (cash + card + delivery platforms) minus returns.\n" +
+                "• Cash variance is the drawer over/short across all shifts — negative = short.\n" +
+                "• Revenue mix shows where the money came from with share bars per channel.\n" +
+                "• Daily revenue chart stacks cash (green), card (blue), and platforms (cyan) per day.\n" +
+                "• P&L mirrors the same numbers reorganised into Revenue → Costs → Profit.\n" +
+                "• Expenses by category groups every spend line; the ledger below it lists each one.\n" +
+                "• Treasury position is the live cash on hand and card pool right now.\n" +
+                "• Payroll exposure shows accrued labour cost vs. what's already been paid out.";
+        Paragraph body = new Paragraph(legend, font(SANS_REG, 9, BRAND_INK));
+        body.setLeading(13f);
+        c.addElement(body);
+        box.addCell(c);
+        doc.add(box);
     }
 
     private static String deltaLabel(double current, Double prior) {
@@ -970,6 +1010,125 @@ public final class PdfReportBuilder {
         addCell(table, money(grandCard), totalFont, Element.ALIGN_RIGHT, BRAND_CREAM);
         addCell(table, money(grandTotal), totalFont, Element.ALIGN_RIGHT, BRAND_CREAM);
         doc.add(table);
+    }
+
+    // ========================================================================
+    // Detailed expense ledger — every line, every standalone, in date order.
+    // Owner-readable: date, category, what it was, who paid (cash/card),
+    // amount, and whether it was inside a shift report or a standalone entry.
+    // ========================================================================
+
+    @SuppressWarnings("unchecked")
+    private static void renderExpenseLedger(Document doc,
+                                             List<Map<String, Object>> rows,
+                                             List<Map<String, Object>> standalone) throws DocumentException {
+        // Build a flat list of ExpenseLine rows from both sources so they
+        // share the same sort order (by date asc, then by amount desc).
+        List<ExpenseLine> lines = new ArrayList<>();
+        for (Map<String, Object> e : rows) {
+            String date = safeStr(e.get("date"), null);
+            String who = cashierName(e);
+            List<Map<String, Object>> expenses = (List<Map<String, Object>>) e.get("expenses");
+            if (expenses == null) continue;
+            for (Map<String, Object> ex : expenses) {
+                ExpenseLine line = new ExpenseLine();
+                line.date = date;
+                line.who = who;
+                line.standalone = false;
+                line.category = formatCategory(ex.get("category"));
+                line.description = safeStr(ex.get("description"), "");
+                line.amount = num(ex.get("amount"));
+                line.paymentSource = "CARD".equals(String.valueOf(ex.get("paymentSource"))) ? "Card" : "Cash";
+                lines.add(line);
+            }
+        }
+        if (standalone != null) {
+            for (Map<String, Object> ex : standalone) {
+                ExpenseLine line = new ExpenseLine();
+                line.date = safeStr(ex.get("date"), null);
+                line.who = "—";
+                line.standalone = true;
+                line.category = formatCategory(ex.get("category"));
+                line.description = safeStr(ex.get("description"), "");
+                line.amount = num(ex.get("amount"));
+                line.paymentSource = "CARD".equals(String.valueOf(ex.get("paymentSource"))) ? "Card" : "Cash";
+                lines.add(line);
+            }
+        }
+        if (lines.isEmpty()) return;
+
+        lines.sort((a, b) -> {
+            int dateCmp = (a.date == null ? "" : a.date)
+                    .compareTo(b.date == null ? "" : b.date);
+            if (dateCmp != 0) return dateCmp;
+            return Double.compare(b.amount, a.amount);
+        });
+
+        double grandTotal = 0;
+        int standaloneCount = 0;
+        for (ExpenseLine l : lines) {
+            grandTotal += l.amount;
+            if (l.standalone) standaloneCount++;
+        }
+
+        sectionHeader(doc, "Detailed expense ledger",
+                lines.size() + " line" + (lines.size() == 1 ? "" : "s")
+                        + " · " + (lines.size() - standaloneCount) + " in shift"
+                        + (standaloneCount > 0 ? " · " + standaloneCount + " standalone" : ""),
+                money(grandTotal));
+
+        float[] widths = {1.6f, 1.6f, 3.0f, 1.6f, 0.9f, 1.4f};
+        PdfPTable table = new PdfPTable(widths.length);
+        table.setWidthPercentage(100);
+        try { table.setWidths(widths); } catch (DocumentException ignored) {}
+        table.setSpacingAfter(14f);
+        table.setHeaderRows(1);
+
+        addTableHeader(table,
+                List.of("Date", "Category", "Description", "Recorded by", "Paid", "Amount"),
+                new int[]{Element.ALIGN_LEFT, Element.ALIGN_LEFT, Element.ALIGN_LEFT,
+                        Element.ALIGN_LEFT, Element.ALIGN_CENTER, Element.ALIGN_RIGHT});
+
+        int i = 0;
+        for (ExpenseLine l : lines) {
+            Color bg = (i++ & 1) == 1 ? ZEBRA : Color.WHITE;
+            addBodyCell(table, dateShort(l.date), Element.ALIGN_LEFT, bg, BRAND_INK);
+            addBodyCell(table, l.category, Element.ALIGN_LEFT, bg, BRAND_INK);
+            String desc = l.description == null || l.description.isBlank()
+                    ? "(no description)"
+                    : l.description;
+            addBodyCell(table, desc, Element.ALIGN_LEFT, bg,
+                    l.description == null || l.description.isBlank() ? MUTED : BRAND_INK);
+            addBodyCell(table, l.standalone ? l.who + " · standalone" : l.who,
+                    Element.ALIGN_LEFT, bg, l.standalone ? MUTED : BRAND_INK);
+            addBodyCell(table, l.paymentSource, Element.ALIGN_CENTER, bg,
+                    "Card".equals(l.paymentSource) ? PLATFORM_CARD : PLATFORM_CASH);
+            addBodyCell(table, money(l.amount), Element.ALIGN_RIGHT, bg, BRAND_INK);
+        }
+        // Total row
+        Font totalFont = font(SANS_BOLD, 9, BRAND_INK);
+        PdfPCell totalLabel = new PdfPCell(new Phrase("Total", totalFont));
+        totalLabel.setColspan(5);
+        totalLabel.setBackgroundColor(BRAND_CREAM);
+        totalLabel.setBorderColor(GRID_LINE);
+        totalLabel.setBorderWidth(0.5f);
+        totalLabel.setHorizontalAlignment(Element.ALIGN_RIGHT);
+        totalLabel.setPadding(6f);
+        table.addCell(totalLabel);
+        addCell(table, money(grandTotal), totalFont, Element.ALIGN_RIGHT, BRAND_CREAM);
+
+        doc.add(table);
+    }
+
+    /** Flat row used by {@link #renderExpenseLedger}. */
+    private static final class ExpenseLine {
+        String date;
+        String who;
+        String category;
+        String description;
+        String paymentSource;
+        double amount;
+        boolean standalone;
     }
 
     // ========================================================================

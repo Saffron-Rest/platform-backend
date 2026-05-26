@@ -42,7 +42,13 @@ public record AnalyticsReportContext(
         /** Optional: {@code MenuAnalyticsService#compute(from, to)} output. */
         Map<String, Object> menuAnalytics,
         /** Optional: {@code MenuEngineService#compute(from, to)} output. */
-        Map<String, Object> menuEngineering) {
+        Map<String, Object> menuEngineering,
+
+        /** Optional: every standalone expense (no parent shift) in the
+         *  period. Each map carries at minimum {@code date}, {@code category},
+         *  {@code description}, {@code amount}, {@code paymentSource}. When
+         *  null we fall back to the per-shift expense lines for the ledger. */
+        List<Map<String, Object>> standaloneExpenses) {
 
     /** True when this is the per-shift export (single date, single row). */
     public boolean isSingleShift() {

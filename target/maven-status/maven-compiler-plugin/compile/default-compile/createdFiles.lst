@@ -4,6 +4,7 @@ com/saffron/cashflow/controller/AuditController.class
 com/saffron/cashflow/service/PosIngestService.class
 com/saffron/cashflow/service/MenuService.class
 com/saffron/cashflow/controller/CommentController$CreateCommentRequest.class
+com/saffron/cashflow/report/PdfReportBuilder$ExpenseLine.class
 com/saffron/cashflow/controller/FileController.class
 com/saffron/cashflow/service/TreasuryService.class
 com/saffron/cashflow/domain/WorkShift.class

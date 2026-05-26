@@ -319,11 +319,34 @@ public class ReportService {
         Map<String, Object> menuEng = !singleShift ? safeCall("menu engineering", () ->
                 menuEngineService.compute(range.from(), range.to())) : null;
 
+        // Every standalone expense in the period (i.e. expenses not tied to
+        // a shift report). These get rendered as a "Detailed expense ledger"
+        // section so the owner can see every line item — what the previous
+        // PDF was missing.
+        List<Map<String, Object>> standalone = safeCall("standalone expenses", () -> {
+            List<com.saffron.cashflow.domain.ExpenseItem> items =
+                    expenseService.findStandaloneBetween(range.from(), range.to());
+            List<Map<String, Object>> out = new ArrayList<>(items.size());
+            for (var ex : items) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                LocalDate d = ex.getEffectiveDate();
+                m.put("date", d != null ? d.toString() : null);
+                m.put("category", ex.getCategory() != null ? ex.getCategory().name() : null);
+                m.put("description", ex.getDescription());
+                m.put("amount", EntryCalculator.toDouble(ex.getAmount()));
+                m.put("paymentSource", ex.getPaymentSource() != null ? ex.getPaymentSource().name() : null);
+                m.put("standalone", true);
+                out.add(m);
+            }
+            return out;
+        });
+
         AnalyticsReportContext ctx = new AnalyticsReportContext(
                 period, range.from(), range.to(),
                 summary, rows,
                 priorSummary, priorFrom, priorTo,
-                pnl, treasury, payroll, menu, menuEng);
+                pnl, treasury, payroll, menu, menuEng,
+                standalone);
         return PdfReportBuilder.build(ctx);
     }
 
