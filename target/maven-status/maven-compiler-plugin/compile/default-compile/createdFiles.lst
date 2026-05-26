@@ -125,6 +125,7 @@ com/saffron/cashflow/domain/TaggedEntityType.class
 com/saffron/cashflow/util/ShiftHoursUtil.class
 com/saffron/cashflow/service/ManualDeliveryService$1.class
 com/saffron/cashflow/controller/SavedViewController.class
+com/saffron/cashflow/dto/BulkAssignRequest.class
 com/saffron/cashflow/util/SalaryCalculator.class
 com/saffron/cashflow/util/TreasurySettings.class
 com/saffron/cashflow/service/MenuPrintService.class
@@ -223,6 +224,7 @@ com/saffron/cashflow/repository/ChecklistRunRepository.class
 com/saffron/cashflow/service/AuditService.class
 com/saffron/cashflow/service/EntryService.class
 com/saffron/cashflow/service/DashboardService$1.class
+com/saffron/cashflow/dto/CopyWeekRequest.class
 com/saffron/cashflow/service/ChecklistService$2.class
 com/saffron/cashflow/controller/ExpenseController$BulkIdsRequest.class
 com/saffron/cashflow/service/CommentService.class

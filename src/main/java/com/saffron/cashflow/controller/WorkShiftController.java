@@ -1,6 +1,8 @@
 package com.saffron.cashflow.controller;
 
 import com.saffron.cashflow.dto.AssignShiftRequest;
+import com.saffron.cashflow.dto.BulkAssignRequest;
+import com.saffron.cashflow.dto.CopyWeekRequest;
 import com.saffron.cashflow.dto.UpsertScheduleRequest;
 import org.springframework.http.HttpStatus;
 import com.saffron.cashflow.service.WorkShiftService;
@@ -53,5 +55,23 @@ public class WorkShiftController {
     @PutMapping
     public List<Map<String, Object>> upsert(@Valid @RequestBody UpsertScheduleRequest request) {
         return workShiftService.upsertSchedule(request);
+    }
+
+    @PostMapping("/bulk-assign")
+    public Map<String, Object> bulkAssign(@Valid @RequestBody BulkAssignRequest request) {
+        return workShiftService.bulkAssign(request);
+    }
+
+    @PostMapping("/copy-week")
+    public Map<String, Object> copyWeek(@Valid @RequestBody CopyWeekRequest request) {
+        return workShiftService.copyWeek(request);
+    }
+
+    @DeleteMapping("/range")
+    public Map<String, Object> clearRange(
+            @RequestParam String from,
+            @RequestParam String to,
+            @RequestParam(required = false) String userId) {
+        return workShiftService.clearRange(from, to, userId);
     }
 }

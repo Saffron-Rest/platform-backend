@@ -5,6 +5,8 @@ import com.saffron.cashflow.domain.ShiftType;
 import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.domain.WorkShift;
 import com.saffron.cashflow.dto.AssignShiftRequest;
+import com.saffron.cashflow.dto.BulkAssignRequest;
+import com.saffron.cashflow.dto.CopyWeekRequest;
 import com.saffron.cashflow.dto.UpsertScheduleRequest;
 import com.saffron.cashflow.web.NotFoundException;
 import com.saffron.cashflow.repository.UserRepository;
@@ -15,15 +17,20 @@ import com.saffron.cashflow.security.ForbiddenException;
 import com.saffron.cashflow.web.BadRequestException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 
 @Service
@@ -216,6 +223,238 @@ public class WorkShiftService {
         LocalDate date = shift.getDate();
         workShiftRepository.delete(shift);
         reconcileClosingShifts(date);
+    }
+
+    /**
+     * Bulk-schedule one or more cashiers across a date range matching a
+     * weekday pattern.
+     *
+     * <p>Designed for "Maria works Tue/Thu/Sat 10–18 for the next month"
+     * which is otherwise a 12-click ordeal. We deliberately cap the range
+     * at {@value #MAX_BULK_RANGE_DAYS} days so a typo in the date field
+     * can't wipe out a whole year of schedule.</p>
+     *
+     * @return summary with counts of created / updated / skipped rows
+     */
+    @Transactional
+    public Map<String, Object> bulkAssign(BulkAssignRequest req) {
+        AuthHelper.requireOperations();
+        LocalDate from = parseRequiredDate(req.from(), "from");
+        LocalDate to = parseRequiredDate(req.to(), "to");
+        if (to.isBefore(from)) {
+            throw new BadRequestException("'to' must be on or after 'from'");
+        }
+        long span = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
+        if (span > MAX_BULK_RANGE_DAYS) {
+            throw new BadRequestException(
+                    "Bulk range is capped at " + MAX_BULK_RANGE_DAYS + " days — pick a tighter window");
+        }
+        if (req.userIds() == null || req.userIds().isEmpty()) {
+            throw new BadRequestException("Pick at least one cashier");
+        }
+        LocalTime start = parseTime(req.startTime(), "startTime");
+        if (start == null) throw new BadRequestException("startTime is required");
+        LocalTime end = req.tillClose() || req.endTime() == null || req.endTime().isBlank()
+                ? null
+                : parseTime(req.endTime(), "endTime");
+        if (end != null && !end.isAfter(start)) {
+            throw new BadRequestException("End time must be after start time");
+        }
+
+        // Validate users up-front so we either commit the whole range or
+        // reject before touching any rows.
+        Map<String, User> usersById = new HashMap<>();
+        for (String userId : req.userIds()) {
+            User u = userRepository.findById(userId)
+                    .orElseThrow(() -> new BadRequestException("Unknown user: " + userId));
+            if (u.getRole() != Role.CASHIER) {
+                throw new BadRequestException("Only cashiers can be scheduled: " + u.getName());
+            }
+            usersById.put(userId, u);
+        }
+        Set<DayOfWeek> matchDays = parseWeekdays(req.weekdays());
+
+        int created = 0;
+        int updated = 0;
+        int skipped = 0;
+        List<String> skippedDates = new ArrayList<>();
+        Set<LocalDate> affected = new LinkedHashSet<>();
+
+        for (LocalDate cursor = from; !cursor.isAfter(to); cursor = cursor.plusDays(1)) {
+            if (!matchDays.contains(cursor.getDayOfWeek())) continue;
+            // Effectively-final copies for capture in the orElseGet lambda
+            // (the loop variable itself isn't).
+            final LocalDate date = cursor;
+            for (Map.Entry<String, User> e : usersById.entrySet()) {
+                String userId = e.getKey();
+                final User userRef = e.getValue();
+                Optional<WorkShift> existing = workShiftRepository.findByUser_IdAndDateWithUser(userId, date);
+                if (existing.isPresent() && existing.get().isWorking() && req.skipExisting()) {
+                    skipped++;
+                    skippedDates.add(date.toString());
+                    continue;
+                }
+                WorkShift shift = existing.orElseGet(() -> {
+                    WorkShift w = new WorkShift();
+                    w.setUser(userRef);
+                    w.setDate(date);
+                    return w;
+                });
+                boolean isNew = shift.getId() == null;
+                UpsertScheduleRequest.ShiftAssignment a = new UpsertScheduleRequest.ShiftAssignment(
+                        userId, true,
+                        req.startTime(),
+                        req.tillClose() ? null : req.endTime(),
+                        null);
+                applyAssignment(shift, a);
+                workShiftRepository.save(shift);
+                affected.add(date);
+                if (isNew) created++; else updated++;
+            }
+        }
+
+        // Reconcile once per affected day so we don't pay the O(N) cost
+        // for every single insert. The reconcile picks at most one closer
+        // per day and demotes the rest to fixed end times.
+        for (LocalDate d : affected) reconcileClosingShifts(d);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("created", created);
+        out.put("updated", updated);
+        out.put("skipped", skipped);
+        out.put("skippedDates", skippedDates);
+        out.put("affectedDays", affected.size());
+        return out;
+    }
+
+    /**
+     * Copy a 7-day window of shifts onto another 7-day window. Matches
+     * source day-N to target day-N and replicates start, end, till-close
+     * and shift type. The closing flag is reconciled per target day so
+     * the "only one closer per day" invariant holds even when the source
+     * week had been hand-edited.
+     */
+    @Transactional
+    public Map<String, Object> copyWeek(CopyWeekRequest req) {
+        AuthHelper.requireOperations();
+        LocalDate sourceStart = parseRequiredDate(req.sourceWeekStart(), "sourceWeekStart");
+        LocalDate targetStart = parseRequiredDate(req.targetWeekStart(), "targetWeekStart");
+        if (sourceStart.equals(targetStart)) {
+            throw new BadRequestException("Source and target weeks are the same");
+        }
+        LocalDate sourceEnd = sourceStart.plusDays(6);
+        List<WorkShift> source = workShiftRepository.findWorkingBetween(sourceStart, sourceEnd);
+        if (source.isEmpty()) {
+            return Map.of("created", 0, "updated", 0, "skipped", 0, "affectedDays", 0,
+                    "skippedDates", List.of());
+        }
+
+        int created = 0;
+        int updated = 0;
+        int skipped = 0;
+        List<String> skippedDates = new ArrayList<>();
+        Set<LocalDate> affected = new LinkedHashSet<>();
+
+        for (WorkShift src : source) {
+            long offset = java.time.temporal.ChronoUnit.DAYS.between(sourceStart, src.getDate());
+            LocalDate targetDate = targetStart.plusDays(offset);
+            String userId = src.getUserId();
+
+            Optional<WorkShift> existing = workShiftRepository.findByUser_IdAndDateWithUser(userId, targetDate);
+            if (existing.isPresent() && existing.get().isWorking() && !req.overwrite()) {
+                skipped++;
+                skippedDates.add(targetDate + " · " + (src.getUser() != null ? src.getUser().getName() : userId));
+                continue;
+            }
+
+            WorkShift target = existing.orElseGet(() -> {
+                WorkShift w = new WorkShift();
+                w.setUser(src.getUser());
+                w.setDate(targetDate);
+                return w;
+            });
+            boolean isNew = target.getId() == null;
+
+            target.setWorking(true);
+            target.setStartTime(src.getStartTime());
+            target.setEndTime(src.getEndTime());
+            // Re-derive type from times so we don't carry over a stale
+            // CLOSING flag if multiple closers existed in the source.
+            applyShiftTypeFromTimes(target);
+            workShiftRepository.save(target);
+            affected.add(targetDate);
+            if (isNew) created++; else updated++;
+        }
+        for (LocalDate d : affected) reconcileClosingShifts(d);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("created", created);
+        out.put("updated", updated);
+        out.put("skipped", skipped);
+        out.put("skippedDates", skippedDates);
+        out.put("affectedDays", affected.size());
+        return out;
+    }
+
+    /**
+     * Wipe shifts in a date range, optionally narrowed to a single
+     * cashier. Used as an "undo" for bulk mistakes — the audit log keeps
+     * the trail.
+     *
+     * <p>Capped at {@value #MAX_BULK_RANGE_DAYS} days, same reason as
+     * {@link #bulkAssign}.</p>
+     */
+    @Transactional
+    public Map<String, Object> clearRange(String fromStr, String toStr, String userId) {
+        AuthHelper.requireOperations();
+        LocalDate from = parseRequiredDate(fromStr, "from");
+        LocalDate to = parseRequiredDate(toStr, "to");
+        if (to.isBefore(from)) {
+            throw new BadRequestException("'to' must be on or after 'from'");
+        }
+        long span = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
+        if (span > MAX_BULK_RANGE_DAYS) {
+            throw new BadRequestException(
+                    "Clear range is capped at " + MAX_BULK_RANGE_DAYS + " days — pick a tighter window");
+        }
+
+        List<WorkShift> shifts = workShiftRepository.findWorkingBetween(from, to);
+        Set<LocalDate> affected = new LinkedHashSet<>();
+        int deleted = 0;
+        for (WorkShift w : shifts) {
+            if (userId != null && !userId.isBlank() && !userId.equals(w.getUserId())) continue;
+            workShiftRepository.delete(w);
+            affected.add(w.getDate());
+            deleted++;
+        }
+        for (LocalDate d : affected) reconcileClosingShifts(d);
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("deleted", deleted);
+        out.put("affectedDays", affected.size());
+        return out;
+    }
+
+    private static final int MAX_BULK_RANGE_DAYS = 92;
+
+    private static LocalDate parseRequiredDate(String s, String field) {
+        if (s == null || s.isBlank()) throw new BadRequestException(field + " is required");
+        try { return LocalDate.parse(s); }
+        catch (DateTimeParseException e) { throw new BadRequestException("Invalid " + field + " (use YYYY-MM-DD)"); }
+    }
+
+    private static Set<DayOfWeek> parseWeekdays(List<String> raw) {
+        if (raw == null || raw.isEmpty()) return EnumSet.allOf(DayOfWeek.class);
+        Set<DayOfWeek> out = EnumSet.noneOf(DayOfWeek.class);
+        for (String s : raw) {
+            if (s == null || s.isBlank()) continue;
+            try { out.add(DayOfWeek.valueOf(s.trim().toUpperCase())); }
+            catch (IllegalArgumentException e) {
+                throw new BadRequestException("Unknown weekday: " + s + " (use MONDAY..SUNDAY)");
+            }
+        }
+        if (out.isEmpty()) return EnumSet.allOf(DayOfWeek.class);
+        return out;
     }
 
     @Transactional
