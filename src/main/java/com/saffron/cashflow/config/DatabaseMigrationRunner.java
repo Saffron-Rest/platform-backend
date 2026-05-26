@@ -39,17 +39,26 @@ public class DatabaseMigrationRunner {
     }
 
     /**
-     * Per-user permission overlay. Adds a {@code extra_permissions} TEXT
-     * column to {@code app_user} that stores a CSV of
-     * {@link com.saffron.cashflow.domain.Permission} enum names.
-     *
-     * <p>The column is nullable — a NULL or empty string both decode to
-     * "no extras", so the user inherits exactly their role defaults.
-     * Idempotent.</p>
+     * Per-user permission overlay. Adds two TEXT columns to
+     * {@code app_user} that store CSVs of
+     * {@link com.saffron.cashflow.domain.Permission} enum names:
+     * <ul>
+     *   <li>{@code extra_permissions} — keys an admin has granted on top
+     *       of the user's role defaults.</li>
+     *   <li>{@code revoked_permissions} — keys the user would otherwise
+     *       inherit from their role default but that an admin has
+     *       explicitly denied. Enables "manager minus payroll" or
+     *       "cashier plus stock" overrides without inventing new
+     *       roles.</li>
+     * </ul>
+     * Both columns are nullable; NULL and empty string both decode to
+     * "no overrides". Idempotent.
      */
     private static void migrateUserPermissions(JdbcTemplate jdbc) {
         jdbc.execute(
                 "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS extra_permissions TEXT");
+        jdbc.execute(
+                "ALTER TABLE app_user ADD COLUMN IF NOT EXISTS revoked_permissions TEXT");
     }
 
     /**

@@ -111,22 +111,23 @@ public class AuthService {
 
     /**
      * Compute the effective permission set for a user:
-     * role defaults union any admin-granted extras stored in the
-     * {@code extra_permissions} column. Admins always get everything —
-     * extras are ignored for them so the audit trail isn't polluted by
-     * pointless toggles on omnipotent accounts.
+     * {@code (defaultsFor(role) − revokes) ∪ extras}. Admins always get
+     * every permission — both extras and revokes are ignored for them
+     * so the audit trail isn't polluted by pointless toggles on
+     * omnipotent accounts and so an admin can't accidentally lock
+     * themselves out of features they own.
      */
     public static java.util.Set<com.saffron.cashflow.domain.Permission> effectivePermissions(User user) {
         if (user == null || user.getRole() == null) {
             return java.util.EnumSet.noneOf(com.saffron.cashflow.domain.Permission.class);
         }
-        java.util.EnumSet<com.saffron.cashflow.domain.Permission> out =
-                java.util.EnumSet.copyOf(
-                        com.saffron.cashflow.domain.Permission.defaultsFor(user.getRole()));
-        if (user.getRole() != com.saffron.cashflow.domain.Role.ADMIN) {
-            out.addAll(com.saffron.cashflow.domain.Permission.parseCsv(user.getExtraPermissions()));
+        if (user.getRole() == com.saffron.cashflow.domain.Role.ADMIN) {
+            return java.util.EnumSet.allOf(com.saffron.cashflow.domain.Permission.class);
         }
-        return out;
+        return com.saffron.cashflow.domain.Permission.effective(
+                user.getRole(),
+                com.saffron.cashflow.domain.Permission.parseCsv(user.getExtraPermissions()),
+                com.saffron.cashflow.domain.Permission.parseCsv(user.getRevokedPermissions()));
     }
 
     public static Map<String, Object> userMap(User user) {

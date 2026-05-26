@@ -250,17 +250,24 @@ public class UserService {
         m.put("hourlyRate", u.getPayAmount() != null ? u.getPayAmount().doubleValue() : null);
         if (u.getStartDate() != null) m.put("startDate", u.getStartDate().toString());
         if (u.getCreatedAt() != null) m.put("createdAt", u.getCreatedAt().toString());
-        // Permission overlay — defaults from role plus admin-granted
-        // extras. The list endpoint includes these so the AdminTeam page
-        // can show "X extra permissions" badges without a per-user GET.
+        // Permission overlay — role defaults, admin-granted extras, and
+        // admin-revoked defaults. The list endpoint includes these so
+        // the AdminTeam page can show summary badges without a per-user
+        // GET.
         Set<Permission> defaults = Permission.defaultsFor(u.getRole());
-        Set<Permission> extras = u.getRole() == Role.ADMIN
+        boolean isAdmin = u.getRole() == Role.ADMIN;
+        Set<Permission> extras = isAdmin
                 ? EnumSet.noneOf(Permission.class)
                 : Permission.parseCsv(u.getExtraPermissions());
+        Set<Permission> revokes = isAdmin
+                ? EnumSet.noneOf(Permission.class)
+                : Permission.parseCsv(u.getRevokedPermissions());
         m.put("roleDefaultPermissions", toNameList(defaults));
         m.put("extraPermissions", toNameList(extras));
-        Set<Permission> effective = EnumSet.copyOf(defaults);
-        effective.addAll(extras);
+        m.put("revokedPermissions", toNameList(revokes));
+        Set<Permission> effective = isAdmin
+                ? EnumSet.allOf(Permission.class)
+                : Permission.effective(u.getRole(), extras, revokes);
         m.put("effectivePermissions", toNameList(effective));
         return m;
     }
@@ -271,9 +278,10 @@ public class UserService {
 
     /**
      * Build the catalog of every permission the system knows about,
-     * including a human label and description. The frontend uses this
-     * to render the "Manage permissions" modal — it never needs to ship
-     * the labels itself, so the catalog stays single-source-of-truth.
+     * including a human label, description, and category. The frontend
+     * uses this to render the "Manage permissions" modal — it never
+     * needs to ship the labels itself, so the catalog stays
+     * single-source-of-truth.
      */
     public List<Map<String, Object>> permissionCatalog() {
         List<Map<String, Object>> out = new ArrayList<>();
@@ -282,6 +290,8 @@ public class UserService {
             entry.put("key", p.name());
             entry.put("label", p.label());
             entry.put("description", p.description());
+            entry.put("category", p.category().name());
+            entry.put("categoryLabel", p.category().label());
             out.add(entry);
         }
         return out;
@@ -292,48 +302,64 @@ public class UserService {
         AuthHelper.requireAdmin();
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("User not found"));
+        boolean isAdmin = user.getRole() == Role.ADMIN;
         Set<Permission> defaults = Permission.defaultsFor(user.getRole());
-        Set<Permission> extras = user.getRole() == Role.ADMIN
+        Set<Permission> extras = isAdmin
                 ? EnumSet.noneOf(Permission.class)
                 : Permission.parseCsv(user.getExtraPermissions());
-        Set<Permission> effective = EnumSet.copyOf(defaults);
-        effective.addAll(extras);
+        Set<Permission> revokes = isAdmin
+                ? EnumSet.noneOf(Permission.class)
+                : Permission.parseCsv(user.getRevokedPermissions());
+        Set<Permission> effective = isAdmin
+                ? EnumSet.allOf(Permission.class)
+                : Permission.effective(user.getRole(), extras, revokes);
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("userId", user.getId());
         out.put("username", user.getUsername());
         out.put("name", user.getName());
         out.put("role", user.getRole().name());
-        out.put("isAdmin", user.getRole() == Role.ADMIN);
+        out.put("isAdmin", isAdmin);
         out.put("roleDefaultPermissions", toNameList(defaults));
         out.put("extraPermissions", toNameList(extras));
+        out.put("revokedPermissions", toNameList(revokes));
         out.put("effectivePermissions", toNameList(effective));
         out.put("catalog", permissionCatalog());
         return out;
     }
 
     /**
-     * Replace the user's extra (above-role) permissions with the
-     * supplied set. Idempotent — if nothing actually changes the audit
-     * row is skipped.
+     * Replace the user's full effective permission set. The client
+     * sends the desired final state (the union of every permission the
+     * user should have) and the server splits it into:
+     *
+     * <ul>
+     *   <li><b>extras</b> = desired − roleDefaults — keys granted on top
+     *       of the role baseline.</li>
+     *   <li><b>revokes</b> = roleDefaults − desired — role-default keys
+     *       explicitly denied.</li>
+     * </ul>
+     *
+     * <p>This lets the modal use a single "what the user can do" mental
+     * model instead of asking admins to think in deltas. Idempotent —
+     * if nothing actually changes the audit row is skipped.</p>
      *
      * <p>Safety rules:
      * <ul>
-     *   <li>Admin-only. Managers cannot grant any permissions.</li>
+     *   <li>Admin-only. Managers cannot grant or revoke any
+     *       permissions.</li>
      *   <li>Cannot target an admin: their effective set is "everything"
-     *       by definition and tracking extras for them would only
-     *       confuse the audit trail.</li>
-     *   <li>Cannot target yourself — admins already have everything, and
-     *       this avoids the "I just locked myself out" foot-gun in case
-     *       the role model is ever extended.</li>
+     *       by definition and tracking overrides for them would only
+     *       confuse the audit trail. Change their role first if you
+     *       need to limit them.</li>
+     *   <li>Cannot target yourself.</li>
      *   <li>Unknown permission keys in the payload are ignored
      *       (forward/backward-compatible with future enum additions).</li>
-     *   <li>Permissions already implied by the role default are dropped
-     *       on save — storing them would create misleading "extras".</li>
      * </ul>
-     * The audit log records the resulting extras set as before/after
+     *
+     * <p>The audit log records both columns before/after as sorted
      * arrays of enum names so a reviewer can answer "what did Joe gain
-     * on 5 May?" by diffing two rows.</p>
+     * — or lose — on 5 May?" by diffing two rows.</p>
      */
     @Transactional
     public Map<String, Object> setPermissions(String userId, Collection<String> requestedKeys, String reason) {
@@ -349,35 +375,47 @@ public class UserService {
                     "Admin users already hold every permission. Change their role first if you need to limit them.");
         }
 
-        Set<Permission> requested = EnumSet.noneOf(Permission.class);
+        // Parse the desired set tolerantly: ignore unknown enum names so
+        // forward/backward-compat with future enum changes is automatic.
+        Set<Permission> desired = EnumSet.noneOf(Permission.class);
         if (requestedKeys != null) {
             for (String key : requestedKeys) {
                 Permission p = Permission.tryParse(key);
-                if (p != null) requested.add(p);
+                if (p != null) desired.add(p);
             }
         }
-        // Drop anything the role already grants — keeps the column tidy
-        // and the audit trail honest.
-        Set<Permission> defaults = Permission.defaultsFor(user.getRole());
-        requested.removeAll(defaults);
 
-        Set<Permission> previous = Permission.parseCsv(user.getExtraPermissions());
-        if (previous.equals(requested)) {
+        Set<Permission> defaults = Permission.defaultsFor(user.getRole());
+        EnumSet<Permission> newExtras = EnumSet.copyOf(desired);
+        newExtras.removeAll(defaults);
+        EnumSet<Permission> newRevokes = EnumSet.copyOf(defaults);
+        newRevokes.removeAll(desired);
+
+        Set<Permission> prevExtras = Permission.parseCsv(user.getExtraPermissions());
+        Set<Permission> prevRevokes = Permission.parseCsv(user.getRevokedPermissions());
+        if (prevExtras.equals(newExtras) && prevRevokes.equals(newRevokes)) {
             // No-op — return current state, skip the audit write.
             return getPermissions(userId);
         }
-        user.setExtraPermissions(requested.isEmpty() ? null : Permission.toCsv(requested));
+        user.setExtraPermissions(newExtras.isEmpty() ? null : Permission.toCsv(newExtras));
+        user.setRevokedPermissions(newRevokes.isEmpty() ? null : Permission.toCsv(newRevokes));
         userRepository.save(user);
 
         Map<String, Object> extra = new LinkedHashMap<>();
         if (reason != null && !reason.isBlank()) extra.put("reason", reason.trim());
+        Map<String, Object> before = new LinkedHashMap<>();
+        before.put("extraPermissions", toNameList(prevExtras));
+        before.put("revokedPermissions", toNameList(prevRevokes));
+        Map<String, Object> after = new LinkedHashMap<>();
+        after.put("extraPermissions", toNameList(newExtras));
+        after.put("revokedPermissions", toNameList(newRevokes));
         auditService.logChange(
                 currentId,
                 AuditAction.UPDATE,
                 "User",
                 user.getId(),
-                Map.of("extraPermissions", toNameList(previous)),
-                Map.of("extraPermissions", toNameList(requested)),
+                before,
+                after,
                 extra);
         return getPermissions(userId);
     }

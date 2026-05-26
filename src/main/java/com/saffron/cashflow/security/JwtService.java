@@ -38,10 +38,10 @@ public class JwtService {
         if (user.email() != null) {
             builder.claim("email", user.email());
         }
-        // Encode only the extras (permissions beyond the role default).
-        // Defaults are derived from the role at parse time, so the JWT
-        // stays compact and survives changes to defaultsFor() without a
-        // forced logout.
+        // Encode the deltas vs role default — extras granted above, and
+        // role-default keys explicitly revoked. Defaults are derived
+        // from the role at parse time, so the JWT stays compact and
+        // survives changes to defaultsFor() without a forced logout.
         var defaults = Permission.defaultsFor(user.role());
         var extras = user.permissions().stream()
                 .filter(p -> !defaults.contains(p))
@@ -49,6 +49,13 @@ public class JwtService {
                 .collect(Collectors.toList());
         if (!extras.isEmpty()) {
             builder.claim("permExtras", extras);
+        }
+        var revokes = defaults.stream()
+                .filter(p -> !user.permissions().contains(p))
+                .map(Enum::name)
+                .collect(Collectors.toList());
+        if (!revokes.isEmpty()) {
+            builder.claim("permRevokes", revokes);
         }
         return builder.signWith(key).compact();
     }
@@ -62,12 +69,28 @@ public class JwtService {
         Boolean mustChange = claims.get("mustChangePassword", Boolean.class);
         com.saffron.cashflow.domain.Role role =
                 com.saffron.cashflow.domain.Role.valueOf(claims.get("role", String.class));
-        Set<Permission> permissions = EnumSet.copyOf(Permission.defaultsFor(role));
-        Object rawExtras = claims.get("permExtras");
-        if (rawExtras instanceof java.util.List<?> list) {
-            for (Object o : list) {
-                Permission p = Permission.tryParse(o == null ? null : o.toString());
-                if (p != null) permissions.add(p);
+        Set<Permission> permissions;
+        if (role == com.saffron.cashflow.domain.Role.ADMIN) {
+            // Admins always hold every permission — never trust the JWT
+            // claims to whittle that down, both to honor the policy
+            // documented on Permission and to avoid accidental
+            // self-lockout if defaults change.
+            permissions = EnumSet.allOf(Permission.class);
+        } else {
+            permissions = EnumSet.copyOf(Permission.defaultsFor(role));
+            Object rawExtras = claims.get("permExtras");
+            if (rawExtras instanceof java.util.List<?> list) {
+                for (Object o : list) {
+                    Permission p = Permission.tryParse(o == null ? null : o.toString());
+                    if (p != null) permissions.add(p);
+                }
+            }
+            Object rawRevokes = claims.get("permRevokes");
+            if (rawRevokes instanceof java.util.List<?> list) {
+                for (Object o : list) {
+                    Permission p = Permission.tryParse(o == null ? null : o.toString());
+                    if (p != null) permissions.remove(p);
+                }
             }
         }
         return new AuthUser(
