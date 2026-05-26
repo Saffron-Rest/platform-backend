@@ -75,6 +75,13 @@ public class DatabaseMigrationRunner {
                 """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS ix_menu_recipe_menu_item ON menu_recipe (menu_item_id)");
         jdbc.execute("CREATE INDEX IF NOT EXISTS ix_menu_recipe_active ON menu_recipe (active)");
+        // ─── v2 columns: labor, packaging, overhead, alt targets ────
+        jdbc.execute("ALTER TABLE menu_recipe ADD COLUMN IF NOT EXISTS labor_minutes_per_unit NUMERIC(8,2)");
+        jdbc.execute("ALTER TABLE menu_recipe ADD COLUMN IF NOT EXISTS labor_rate_per_hour NUMERIC(12,2)");
+        jdbc.execute("ALTER TABLE menu_recipe ADD COLUMN IF NOT EXISTS packaging_cost_per_unit NUMERIC(12,4)");
+        jdbc.execute("ALTER TABLE menu_recipe ADD COLUMN IF NOT EXISTS overhead_pct NUMERIC(5,2)");
+        jdbc.execute("ALTER TABLE menu_recipe ADD COLUMN IF NOT EXISTS target_prime_cost_pct NUMERIC(5,2)");
+        jdbc.execute("ALTER TABLE menu_recipe ADD COLUMN IF NOT EXISTS min_margin_pct NUMERIC(5,2)");
 
         jdbc.execute(
                 """
@@ -91,6 +98,31 @@ public class DatabaseMigrationRunner {
                 """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS ix_recipe_ingredient_recipe ON menu_recipe_ingredient (recipe_id)");
         jdbc.execute("CREATE INDEX IF NOT EXISTS ix_recipe_ingredient_stock ON menu_recipe_ingredient (stock_item_id)");
+        // ─── v2: sub-recipes (relax NOT NULL on stock_item_id) ──────
+        jdbc.execute("ALTER TABLE menu_recipe_ingredient ALTER COLUMN stock_item_id DROP NOT NULL");
+        jdbc.execute("ALTER TABLE menu_recipe_ingredient ADD COLUMN IF NOT EXISTS sub_recipe_id VARCHAR(36)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_recipe_ingredient_sub ON menu_recipe_ingredient (sub_recipe_id)");
+
+        // ─── v2: cost snapshots (append-only history) ───────────────
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS menu_recipe_cost_snapshot (
+                  id VARCHAR(36) PRIMARY KEY,
+                  recipe_id VARCHAR(36) NOT NULL REFERENCES menu_recipe(id) ON DELETE CASCADE,
+                  food_cost NUMERIC(14,4),
+                  prime_cost NUMERIC(14,4),
+                  fully_loaded_cost NUMERIC(14,4),
+                  cost_per_unit NUMERIC(14,4),
+                  suggested_price NUMERIC(14,4),
+                  achieved_food_cost_pct NUMERIC(6,2),
+                  margin_pct NUMERIC(6,2),
+                  source VARCHAR(16) NOT NULL DEFAULT 'SAVE',
+                  note VARCHAR(240),
+                  taken_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_recipe_snapshot_recipe ON menu_recipe_cost_snapshot (recipe_id, taken_at DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_recipe_snapshot_source ON menu_recipe_cost_snapshot (source)");
     }
 
     /**

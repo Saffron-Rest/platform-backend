@@ -78,6 +78,45 @@ public class MenuRecipe {
     @Column(name = "waste_pct", precision = 5, scale = 2)
     private BigDecimal wastePct;
 
+    // ─── Optional sales-pricing inputs beyond raw ingredients ────────
+
+    /** Labor minutes per yield unit (e.g. 4 minutes per portion). When
+     *  combined with {@link #laborRatePerHour} the costing service
+     *  produces a labor contribution that joins food cost in the
+     *  "prime cost" total. Null = "no labor model captured". */
+    @Column(name = "labor_minutes_per_unit", precision = 8, scale = 2)
+    private BigDecimal laborMinutesPerUnit;
+
+    /** Hourly labor rate used to value {@link #laborMinutesPerUnit}.
+     *  Stored per-recipe so different stations (line cook vs sous
+     *  chef) can carry different rates without a global setting. */
+    @Column(name = "labor_rate_per_hour", precision = 12, scale = 2)
+    private BigDecimal laborRatePerHour;
+
+    /** Fixed packaging / disposable cost per yield unit. Goes into
+     *  prime cost. Useful for take-away, delivery, drinks. */
+    @Column(name = "packaging_cost_per_unit", precision = 12, scale = 4)
+    private BigDecimal packagingCostPerUnit;
+
+    /** Overhead percentage applied on top of prime cost (e.g. 10 %
+     *  for rent + utilities). Becomes "fully-loaded cost". */
+    @Column(name = "overhead_pct", precision = 5, scale = 2)
+    private BigDecimal overheadPct;
+
+    // ─── Optional alternate targets / guardrails ────────────────────
+
+    /** Alternate target: aim for a prime-cost % (food + labor +
+     *  packaging) of the gross sales price. Some operators steer by
+     *  prime cost rather than food cost alone. */
+    @Column(name = "target_prime_cost_pct", precision = 5, scale = 2)
+    private BigDecimal targetPrimeCostPct;
+
+    /** Minimum acceptable margin %. Recipes whose suggested margin
+     *  falls below this are flagged in the health badge. Null = use
+     *  a sensible default (60 %). */
+    @Column(name = "min_margin_pct", precision = 5, scale = 2)
+    private BigDecimal minMarginPct;
+
     /** Optional notes — prep instructions, allergen call-outs, etc. */
     @Column(columnDefinition = "text")
     private String notes;
@@ -119,6 +158,18 @@ public class MenuRecipe {
     public void setVatRatePct(BigDecimal vatRatePct) { this.vatRatePct = vatRatePct; }
     public BigDecimal getWastePct() { return wastePct; }
     public void setWastePct(BigDecimal wastePct) { this.wastePct = wastePct; }
+    public BigDecimal getLaborMinutesPerUnit() { return laborMinutesPerUnit; }
+    public void setLaborMinutesPerUnit(BigDecimal laborMinutesPerUnit) { this.laborMinutesPerUnit = laborMinutesPerUnit; }
+    public BigDecimal getLaborRatePerHour() { return laborRatePerHour; }
+    public void setLaborRatePerHour(BigDecimal laborRatePerHour) { this.laborRatePerHour = laborRatePerHour; }
+    public BigDecimal getPackagingCostPerUnit() { return packagingCostPerUnit; }
+    public void setPackagingCostPerUnit(BigDecimal packagingCostPerUnit) { this.packagingCostPerUnit = packagingCostPerUnit; }
+    public BigDecimal getOverheadPct() { return overheadPct; }
+    public void setOverheadPct(BigDecimal overheadPct) { this.overheadPct = overheadPct; }
+    public BigDecimal getTargetPrimeCostPct() { return targetPrimeCostPct; }
+    public void setTargetPrimeCostPct(BigDecimal targetPrimeCostPct) { this.targetPrimeCostPct = targetPrimeCostPct; }
+    public BigDecimal getMinMarginPct() { return minMarginPct; }
+    public void setMinMarginPct(BigDecimal minMarginPct) { this.minMarginPct = minMarginPct; }
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
     public boolean isActive() { return active; }

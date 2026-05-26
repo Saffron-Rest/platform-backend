@@ -14,5 +14,10 @@ public interface MenuRecipeIngredientRepository extends JpaRepository<MenuRecipe
      *  change. */
     List<MenuRecipeIngredient> findByStockItemId(String stockItemId);
 
+    /** Find every recipe that includes another recipe as a
+     *  sub-recipe. Used both for the "what depends on this prep"
+     *  cross-reference and the cycle detector. */
+    List<MenuRecipeIngredient> findBySubRecipeId(String subRecipeId);
+
     void deleteByRecipeId(String recipeId);
 }

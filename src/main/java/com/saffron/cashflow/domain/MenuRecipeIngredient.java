@@ -11,18 +11,19 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 /**
- * A single line on a {@link MenuRecipe}: how much of a given
- * {@link StockItem} the recipe consumes.
+ * A single line on a {@link MenuRecipe}.
  *
- * <p>We capture {@link #quantity} in the recipe's chosen
- * {@link #unit}. If the unit matches the underlying stock item's
- * unit (the common case), cost computation is a straight multiply by
- * {@link StockItem#getUnitCost()}. If they differ, the costing
- * service still multiplies — admins are responsible for keeping the
- * units consistent. (A future iteration could add a small conversion
- * registry, but for the day-to-day case where ingredients ship in the
- * units they're consumed, plain math is enough and avoids subtle
- * conversion-factor bugs.)</p>
+ * <p>An ingredient line consumes <i>either</i> a {@link StockItem} or
+ * another {@link MenuRecipe} (a "sub-recipe" — e.g. a dough or a
+ * sauce whose cost is itself computed from ingredients). Exactly one
+ * of {@link #stockItemId} / {@link #subRecipeId} must be set; the
+ * service layer enforces this and detects cycles before persisting.</p>
+ *
+ * <p>{@link #quantity} is captured in the recipe-author's chosen
+ * {@link #unit}. The costing service uses
+ * {@code UnitConverter} to translate to the source's native unit
+ * (stock item unit, or sub-recipe yield unit) and surfaces a warning
+ * when conversion isn't possible.</p>
  *
  * <p>{@link #wastePct} lets an admin model trimming/evaporation on a
  * per-ingredient basis. A 5 % waste on a 0.500 kg line costs as if
@@ -31,7 +32,8 @@ import java.util.UUID;
 @Entity
 @Table(name = "menu_recipe_ingredient", indexes = {
         @Index(name = "ix_recipe_ingredient_recipe", columnList = "recipe_id"),
-        @Index(name = "ix_recipe_ingredient_stock", columnList = "stock_item_id")
+        @Index(name = "ix_recipe_ingredient_stock", columnList = "stock_item_id"),
+        @Index(name = "ix_recipe_ingredient_sub", columnList = "sub_recipe_id")
 })
 public class MenuRecipeIngredient {
 
@@ -41,8 +43,16 @@ public class MenuRecipeIngredient {
     @Column(name = "recipe_id", nullable = false, length = 36)
     private String recipeId;
 
-    @Column(name = "stock_item_id", nullable = false, length = 36)
+    /** Stock-item-backed ingredient. Nullable — when set,
+     *  {@link #subRecipeId} must be null. */
+    @Column(name = "stock_item_id", length = 36)
     private String stockItemId;
+
+    /** Sub-recipe-backed ingredient (e.g. "dough" as a reused prep).
+     *  Nullable — when set, {@link #stockItemId} must be null. The
+     *  service builds a DAG and rejects cycles. */
+    @Column(name = "sub_recipe_id", length = 36)
+    private String subRecipeId;
 
     @Column(nullable = false, precision = 14, scale = 4)
     private BigDecimal quantity = BigDecimal.ZERO;
@@ -77,6 +87,8 @@ public class MenuRecipeIngredient {
     public void setRecipeId(String recipeId) { this.recipeId = recipeId; }
     public String getStockItemId() { return stockItemId; }
     public void setStockItemId(String stockItemId) { this.stockItemId = stockItemId; }
+    public String getSubRecipeId() { return subRecipeId; }
+    public void setSubRecipeId(String subRecipeId) { this.subRecipeId = subRecipeId; }
     public BigDecimal getQuantity() { return quantity; }
     public void setQuantity(BigDecimal quantity) { this.quantity = quantity; }
     public String getUnit() { return unit; }
