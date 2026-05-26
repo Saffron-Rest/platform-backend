@@ -58,6 +58,21 @@ public class StockController {
         return Map.of("archived", id);
     }
 
+    /**
+     * Permanently remove an archived stock item and its movement ledger.
+     * Admin-only; the item must already be archived (see
+     * {@link StockService#deletePermanently}). Pass an optional
+     * {@code reason} in the body to annotate the audit log.
+     */
+    @DeleteMapping("/{id}/permanent")
+    public Map<String, Object> deletePermanent(
+            @PathVariable String id,
+            @RequestBody(required = false) Map<String, Object> body) {
+        String reason = body == null ? null : asString(body.get("reason"));
+        stockService.deletePermanently(id, reason);
+        return Map.of("deleted", id);
+    }
+
     @GetMapping("/{id}/movements")
     public List<Map<String, Object>> movements(
             @PathVariable String id,

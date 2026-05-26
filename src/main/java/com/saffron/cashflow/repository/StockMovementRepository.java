@@ -15,4 +15,9 @@ public interface StockMovementRepository extends JpaRepository<StockMovement, St
      *  by (referenceType = "POS_SALE", referenceId = posSale.id). The
      *  partial unique index on the table guarantees at most one row. */
     Optional<StockMovement> findFirstByReferenceTypeAndReferenceId(String referenceType, String referenceId);
+
+    /** Count of ledger rows for an item — used by audit when a stock
+     *  item is permanently deleted (so the trail records how many
+     *  movements got cascaded). */
+    long countByStockItemId(String stockItemId);
 }

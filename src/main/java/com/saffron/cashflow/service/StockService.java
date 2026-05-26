@@ -150,6 +150,49 @@ public class StockService {
                 before, snapshot(item), null);
     }
 
+    /**
+     * Permanently remove a stock item and its movement ledger.
+     *
+     * <p>This is the only path that truly deletes data — the regular
+     * {@link #archive} path keeps the row around with {@code active=false}
+     * so movement history (and any reports drawn from it) stays intact.
+     * Two safety gates protect against accidents:
+     * <ol>
+     *   <li>Admin role required. Managers/cashiers can archive but cannot
+     *       hard-delete.</li>
+     *   <li>The item must already be archived. Forcing the two-step
+     *       "Archive → Delete" workflow means a mis-click in the row UI
+     *       can't nuke an active product.</li>
+     * </ol>
+     * The {@code stock_movement.stock_item_id} foreign key has
+     * {@code ON DELETE CASCADE}, so the database removes the ledger rows
+     * atomically alongside the parent. We snapshot the item into the
+     * audit log so the trail survives the row itself.</p>
+     */
+    @Transactional
+    public void deletePermanently(String id, String reason) {
+        AuthHelper.requireAdmin();
+        AuthUser user = AuthHelper.currentUser();
+        StockItem item = require(id);
+        if (item.isActive()) {
+            throw new BadRequestException(
+                    "Archive the item first. Permanent delete is only allowed on archived items.");
+        }
+        Map<String, Object> before = snapshot(item);
+        // Capture the movement count for the audit trail so reviewers
+        // can see how much ledger data was wiped at the same time.
+        long movementCount = movementRepository.countByStockItemId(id);
+        Map<String, Object> after = Map.of(
+                "deleted", true,
+                "movementsRemoved", movementCount);
+        itemRepository.delete(item);
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("permanent", true);
+        if (reason != null && !reason.isBlank()) extra.put("reason", reason.trim());
+        auditService.logChange(user.id(), AuditAction.DELETE, "StockItem", id,
+                before, after, extra);
+    }
+
     // ========================================================================
     // Movement entry points
     // ========================================================================
