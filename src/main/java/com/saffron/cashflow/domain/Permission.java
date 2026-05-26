@@ -120,6 +120,13 @@ public enum Permission {
             "Add, edit, and renew employee certifications."),
 
     // ───── Audit & integrations ─────
+    MENU_VIEW(Category.OPERATIONS, "View menu",
+            "Open the menu and see prices, food costs, and recipes."),
+    MENU_MANAGE(Category.OPERATIONS, "Manage menu",
+            "Edit menu items, prices, VAT, and dietary tags."),
+    MENU_RECIPES_MANAGE(Category.OPERATIONS, "Manage recipes",
+            "Build cost cards: list ingredients, get suggested sales prices, push to the menu."),
+
     AUDIT_VIEW(Category.ADMIN, "View audit log",
             "Open the audit log with raw before/after diffs for every change."),
     POS_INTEGRATION_VIEW(Category.ADMIN, "View POS integration",
@@ -196,6 +203,7 @@ public enum Permission {
                     CHECKLISTS_RUN, CHECKLISTS_CONFIGURE,
                     HACCP_LOG, HACCP_EXPORT,
                     CERTIFICATIONS_VIEW,
+                    MENU_VIEW,
                     SETTINGS_VIEW);
             case CASHIER -> EnumSet.of(
                     // Cashiers can see their own work and file incidents.

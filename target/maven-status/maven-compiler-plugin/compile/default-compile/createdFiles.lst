@@ -1,5 +1,6 @@
 com/saffron/cashflow/util/AuditDiff$1.class
 com/saffron/cashflow/controller/PosIntegrationController$IntegrationRequest.class
+com/saffron/cashflow/service/RecipeService.class
 com/saffron/cashflow/controller/AuditController.class
 com/saffron/cashflow/service/PosIngestService.class
 com/saffron/cashflow/service/MenuService.class
@@ -19,6 +20,7 @@ com/saffron/cashflow/domain/UserTotp.class
 com/saffron/cashflow/service/AuditSpecification.class
 com/saffron/cashflow/service/AnalyticsService$DayTotals.class
 com/saffron/cashflow/service/CommentService$1.class
+com/saffron/cashflow/domain/MenuRecipe.class
 com/saffron/cashflow/domain/IncidentSeverity.class
 com/saffron/cashflow/controller/AnalyticsController.class
 com/saffron/cashflow/service/TotpCodec.class
@@ -89,6 +91,7 @@ com/saffron/cashflow/service/MenuAnalyticsService$ItemAgg.class
 com/saffron/cashflow/controller/ExpenseController.class
 com/saffron/cashflow/report/PdfReportBuilder.class
 com/saffron/cashflow/service/MenuPrintService$Layout.class
+com/saffron/cashflow/repository/MenuRecipeIngredientRepository.class
 com/saffron/cashflow/service/PushNotificationService.class
 com/saffron/cashflow/repository/SystemSettingRepository.class
 com/saffron/cashflow/service/ProfitLossService.class
@@ -100,6 +103,7 @@ com/saffron/cashflow/domain/Incident.class
 com/saffron/cashflow/service/SearchService$Hit.class
 com/saffron/cashflow/domain/MenuItem.class
 com/saffron/cashflow/service/SalaryService$1.class
+com/saffron/cashflow/repository/MenuRecipeRepository.class
 com/saffron/cashflow/service/DataHealthService.class
 com/saffron/cashflow/domain/StockMovement.class
 com/saffron/cashflow/service/ExportService$Kpi.class
@@ -170,6 +174,7 @@ com/saffron/cashflow/service/HaccpService.class
 com/saffron/cashflow/repository/IncidentRepository.class
 com/saffron/cashflow/repository/ChecklistTemplateRepository.class
 com/saffron/cashflow/repository/AlertRepository.class
+com/saffron/cashflow/service/RecipeService$CostBreakdown.class
 com/saffron/cashflow/domain/ReceiptFile.class
 com/saffron/cashflow/dto/UpsertScheduleRequest$ShiftAssignment.class
 com/saffron/cashflow/security/ForbiddenException.class
@@ -195,6 +200,7 @@ com/saffron/cashflow/controller/BankDepositController.class
 com/saffron/cashflow/domain/ManualDeliveryIncome.class
 com/saffron/cashflow/dto/TagRequest.class
 com/saffron/cashflow/service/PayRateService.class
+com/saffron/cashflow/service/RecipeCosting.class
 com/saffron/cashflow/repository/TagAssignmentRepository.class
 com/saffron/cashflow/domain/PaymentSource.class
 com/saffron/cashflow/dto/PayRateEntryRequest.class
@@ -258,12 +264,14 @@ com/saffron/cashflow/domain/ChecklistType.class
 com/saffron/cashflow/service/FileStorageService.class
 com/saffron/cashflow/domain/SalaryPayment.class
 com/saffron/cashflow/controller/MenuController.class
+com/saffron/cashflow/controller/RecipeController.class
 com/saffron/cashflow/dto/PayrollSettingsRequest.class
 com/saffron/cashflow/domain/Permission$Category.class
 com/saffron/cashflow/web/ApiExceptionHandler.class
 com/saffron/cashflow/service/MenuPrintService$Options.class
 com/saffron/cashflow/controller/SavedViewController$UpdateSavedViewRequest.class
 com/saffron/cashflow/service/StockService.class
+com/saffron/cashflow/domain/MenuRecipeIngredient.class
 com/saffron/cashflow/service/TagService.class
 com/saffron/cashflow/service/PayRateService$ResolvedPay.class
 com/saffron/cashflow/domain/SavedView.class

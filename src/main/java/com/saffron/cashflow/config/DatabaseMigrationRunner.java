@@ -35,7 +35,62 @@ public class DatabaseMigrationRunner {
             migrateStockManagement(jdbc);
             migrateOperationsBackbone(jdbc);
             migrateUserPermissions(jdbc);
+            migrateMenuRecipes(jdbc);
         };
+    }
+
+    /**
+     * Recipe / cost-card storage. Two tables:
+     * <ul>
+     *   <li>{@code menu_recipe} — the cost card itself (yield, target
+     *       food-cost %, VAT, optional waste %, optional link to a
+     *       {@code menu_item}).</li>
+     *   <li>{@code menu_recipe_ingredient} — line items pointing at
+     *       {@code stock_item} rows with quantity, unit, and an
+     *       optional waste override.</li>
+     * </ul>
+     * The ingredient table has {@code ON DELETE CASCADE} so wiping a
+     * recipe takes its lines with it. We keep the foreign key to
+     * {@code stock_item} loose (no SQL FK) so archiving a stock item
+     * doesn't cascade — orphaned ingredient rows are detected at read
+     * time and flagged in the UI. Idempotent.
+     */
+    private static void migrateMenuRecipes(JdbcTemplate jdbc) {
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS menu_recipe (
+                  id VARCHAR(36) PRIMARY KEY,
+                  name VARCHAR(160) NOT NULL,
+                  menu_item_id VARCHAR(36),
+                  yield_quantity NUMERIC(12,3) NOT NULL DEFAULT 1,
+                  yield_unit VARCHAR(24) NOT NULL DEFAULT 'piece',
+                  target_food_cost_pct NUMERIC(5,2) DEFAULT 30.00,
+                  vat_rate_pct NUMERIC(5,2) NOT NULL DEFAULT 8.00,
+                  waste_pct NUMERIC(5,2),
+                  notes TEXT,
+                  active BOOLEAN NOT NULL DEFAULT true,
+                  created_at TIMESTAMPTZ NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_menu_recipe_menu_item ON menu_recipe (menu_item_id)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_menu_recipe_active ON menu_recipe (active)");
+
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS menu_recipe_ingredient (
+                  id VARCHAR(36) PRIMARY KEY,
+                  recipe_id VARCHAR(36) NOT NULL REFERENCES menu_recipe(id) ON DELETE CASCADE,
+                  stock_item_id VARCHAR(36) NOT NULL,
+                  quantity NUMERIC(14,4) NOT NULL DEFAULT 0,
+                  unit VARCHAR(16) NOT NULL DEFAULT 'pcs',
+                  waste_pct NUMERIC(5,2),
+                  sort_order INTEGER NOT NULL DEFAULT 0,
+                  note VARCHAR(240)
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_recipe_ingredient_recipe ON menu_recipe_ingredient (recipe_id)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_recipe_ingredient_stock ON menu_recipe_ingredient (stock_item_id)");
     }
 
     /**
