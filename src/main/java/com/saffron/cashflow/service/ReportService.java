@@ -1,6 +1,7 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.DailyEntry;
+import com.saffron.cashflow.report.AnalyticsReportContext;
 import com.saffron.cashflow.report.PdfReportBuilder;
 import com.saffron.cashflow.domain.EntryStatus;
 import com.saffron.cashflow.domain.SystemSetting;
@@ -10,6 +11,9 @@ import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.util.EntryCalculator;
 import com.saffron.cashflow.util.EntryMapper;
 import com.saffron.cashflow.util.TreasurySettings;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -26,23 +30,48 @@ import java.util.*;
 @Service
 public class ReportService {
 
+    private static final Logger LOG = LoggerFactory.getLogger(ReportService.class);
+
     private final DailyEntryRepository entryRepository;
     private final AuditService auditService;
     private final ManualDeliveryService manualDeliveryService;
     private final ExpenseService expenseService;
     private final SystemSettingRepository settingRepository;
+    // The analytics PDF aggregates data from many other services. We inject
+    // them lazily because some of them ({@link ProfitLossService},
+    // {@link TreasuryService}) also depend on {@code ReportService} transitively
+    // through shared utilities; lazy injection avoids the circular-dependency
+    // pitfall while still letting us call them at export time.
+    private final ProfitLossService profitLossService;
+    private final TreasuryService treasuryService;
+    private final SalaryService salaryService;
+    private final MenuAnalyticsService menuAnalyticsService;
+    private final MenuEngineService menuEngineService;
+    private final AnalyticsService analyticsService;
 
     public ReportService(
             DailyEntryRepository entryRepository,
             AuditService auditService,
             ManualDeliveryService manualDeliveryService,
             ExpenseService expenseService,
-            SystemSettingRepository settingRepository) {
+            SystemSettingRepository settingRepository,
+            @Lazy ProfitLossService profitLossService,
+            @Lazy TreasuryService treasuryService,
+            @Lazy SalaryService salaryService,
+            @Lazy MenuAnalyticsService menuAnalyticsService,
+            @Lazy MenuEngineService menuEngineService,
+            @Lazy AnalyticsService analyticsService) {
         this.entryRepository = entryRepository;
         this.auditService = auditService;
         this.manualDeliveryService = manualDeliveryService;
         this.expenseService = expenseService;
         this.settingRepository = settingRepository;
+        this.profitLossService = profitLossService;
+        this.treasuryService = treasuryService;
+        this.salaryService = salaryService;
+        this.menuAnalyticsService = menuAnalyticsService;
+        this.menuEngineService = menuEngineService;
+        this.analyticsService = analyticsService;
     }
 
     public Map<String, Object> summary(
@@ -249,10 +278,67 @@ public class ReportService {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private byte[] exportPdf(List<DailyEntry> entries, DateRange range, String period, Map<String, Object> summary) {
-        @SuppressWarnings("unchecked")
         List<Map<String, Object>> rows = (List<Map<String, Object>>) summary.get("rows");
-        return PdfReportBuilder.build(period, range.from(), range.to(), summary, rows);
+
+        // Build a prior-period summary of equal length so the cover KPIs can
+        // show vs-prior deltas. Single-shift exports don't get this — there's
+        // no meaningful "prior" for a one-day window of one cashier.
+        Map<String, Object> priorSummary = null;
+        LocalDate priorFrom = null, priorTo = null;
+        boolean singleShift = entries.size() == 1 && range.from().equals(range.to());
+        if (!singleShift) {
+            long days = java.time.temporal.ChronoUnit.DAYS.between(range.from(), range.to()) + 1;
+            priorTo = range.from().minusDays(1);
+            priorFrom = priorTo.minusDays(days - 1);
+            try {
+                List<DailyEntry> priorEntries = fetchEntries(
+                        new DateRange(priorFrom, priorTo), null, EntryStatus.LOCKED);
+                priorSummary = buildSummary(period, new DateRange(priorFrom, priorTo), priorEntries);
+            } catch (Exception ex) {
+                LOG.warn("Prior-period summary skipped: {}", ex.getMessage());
+            }
+        }
+
+        // Each of the optional sections may legitimately fail (insufficient
+        // permissions, no menu data, no POS integration). We swallow per-
+        // section failures so a single missing piece doesn't blow up the
+        // whole export.
+        Map<String, Object> pnl = safeCall("profit & loss", () ->
+                profitLossService.profitAndLoss(
+                        range.from().toString(), range.to().toString(),
+                        "PL", "LOCKED", true));
+        Map<String, Object> treasury = safeCall("treasury overview", treasuryService::overview);
+        // Payroll requires admin; managers can't see it. Skip silently in
+        // that case so the rest of the PDF still renders.
+        Map<String, Object> payroll = !singleShift ? safeCall("payroll", () ->
+                salaryService.calculate(range.from().toString(), range.to().toString())) : null;
+        Map<String, Object> menu = !singleShift ? safeCall("menu analytics", () ->
+                menuAnalyticsService.compute(range.from(), range.to())) : null;
+        Map<String, Object> menuEng = !singleShift ? safeCall("menu engineering", () ->
+                menuEngineService.compute(range.from(), range.to())) : null;
+
+        AnalyticsReportContext ctx = new AnalyticsReportContext(
+                period, range.from(), range.to(),
+                summary, rows,
+                priorSummary, priorFrom, priorTo,
+                pnl, treasury, payroll, menu, menuEng);
+        return PdfReportBuilder.build(ctx);
+    }
+
+    /**
+     * Run an optional aggregator and log-and-swallow any error so a missing
+     * section never blocks the rest of the export. Returns {@code null} on
+     * failure — {@link PdfReportBuilder} treats null sections as "skip".
+     */
+    private static <T> T safeCall(String label, java.util.function.Supplier<T> fn) {
+        try {
+            return fn.get();
+        } catch (Exception ex) {
+            LOG.info("PDF export: skipping {} section ({})", label, ex.getMessage());
+            return null;
+        }
     }
 
     private static String cashierName(Map<String, Object> e) {
