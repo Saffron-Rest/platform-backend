@@ -21,6 +21,14 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid credentials"));
     }
 
+    @ExceptionHandler(com.saffron.cashflow.service.AuthService.TwoFactorRequiredException.class)
+    public ResponseEntity<Map<String, Object>> twoFactor(
+            com.saffron.cashflow.service.AuthService.TwoFactorRequiredException ex) {
+        // 401 + a sentinel body the FE detects to prompt for a TOTP code.
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("requires2fa", true, "error", "Two-factor authentication required"));
+    }
+
     @ExceptionHandler(ForbiddenException.class)
     public ResponseEntity<Map<String, String>> forbidden(ForbiddenException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", ex.getMessage()));

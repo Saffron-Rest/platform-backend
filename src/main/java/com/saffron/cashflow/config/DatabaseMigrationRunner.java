@@ -33,7 +33,145 @@ public class DatabaseMigrationRunner {
             migrateStandaloneExpenses(jdbc);
             migrateAdminTelegramDispatch(jdbc);
             migrateStockManagement(jdbc);
+            migrateOperationsBackbone(jdbc);
         };
+    }
+
+    /**
+     * Operations & compliance backbone (Section E of the roadmap):
+     * incidents, employee certifications, checklists, HACCP, and 2FA.
+     * Idempotent — every CREATE uses {@code IF NOT EXISTS}.
+     */
+    private static void migrateOperationsBackbone(JdbcTemplate jdbc) {
+        // -------- E4: Incident log --------
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS incident (
+                  id VARCHAR(36) PRIMARY KEY,
+                  title VARCHAR(200) NOT NULL,
+                  category VARCHAR(60),
+                  occurred_on DATE NOT NULL,
+                  severity VARCHAR(16) NOT NULL DEFAULT 'MEDIUM',
+                  status VARCHAR(16) NOT NULL DEFAULT 'OPEN',
+                  description TEXT,
+                  estimated_cost NUMERIC(12,2),
+                  photo_path VARCHAR(255),
+                  reported_by_id VARCHAR(36) NOT NULL,
+                  assignee_id VARCHAR(36),
+                  resolved_at TIMESTAMPTZ,
+                  resolved_by_id VARCHAR(36),
+                  resolution_notes TEXT,
+                  created_at TIMESTAMPTZ NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_incident_status ON incident (status)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_incident_occurred ON incident (occurred_on DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_incident_assignee ON incident (assignee_id)");
+
+        // -------- E3: Employee certifications --------
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS employee_cert (
+                  id VARCHAR(36) PRIMARY KEY,
+                  user_id VARCHAR(36) NOT NULL,
+                  type VARCHAR(60) NOT NULL,
+                  number VARCHAR(120),
+                  issuer VARCHAR(160),
+                  issued_on DATE,
+                  expires_on DATE,
+                  notes TEXT,
+                  file_path VARCHAR(255),
+                  last_warning_at TIMESTAMPTZ,
+                  created_at TIMESTAMPTZ NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_employee_cert_user ON employee_cert (user_id)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_employee_cert_expires ON employee_cert (expires_on)");
+
+        // -------- E2: Checklist templates + runs --------
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS checklist_template (
+                  id VARCHAR(36) PRIMARY KEY,
+                  name VARCHAR(160) NOT NULL,
+                  type VARCHAR(16) NOT NULL,
+                  role VARCHAR(40),
+                  description TEXT,
+                  items TEXT NOT NULL,
+                  active BOOLEAN NOT NULL DEFAULT true,
+                  created_at TIMESTAMPTZ NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_checklist_template_type ON checklist_template (type)");
+
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS checklist_run (
+                  id VARCHAR(36) PRIMARY KEY,
+                  template_id VARCHAR(36) NOT NULL REFERENCES checklist_template(id) ON DELETE CASCADE,
+                  run_date DATE NOT NULL,
+                  completed_by_id VARCHAR(36),
+                  responses TEXT NOT NULL,
+                  total_items INT NOT NULL DEFAULT 0,
+                  completed_items INT NOT NULL DEFAULT 0,
+                  notes TEXT,
+                  created_at TIMESTAMPTZ NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_checklist_run_date ON checklist_run (run_date DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_checklist_run_template ON checklist_run (template_id)");
+
+        // -------- E1: HACCP logs --------
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS haccp_log (
+                  id VARCHAR(36) PRIMARY KEY,
+                  kind VARCHAR(40) NOT NULL,
+                  recorded_on DATE NOT NULL,
+                  recorded_at TIMESTAMPTZ NOT NULL,
+                  recorded_by_id VARCHAR(36) NOT NULL,
+                  location VARCHAR(120),
+                  temperature_c NUMERIC(5,2),
+                  status VARCHAR(16) NOT NULL DEFAULT 'OK',
+                  notes TEXT,
+                  photo_path VARCHAR(255),
+                  data TEXT,
+                  created_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_haccp_log_kind ON haccp_log (kind, recorded_on DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_haccp_log_date ON haccp_log (recorded_on DESC)");
+
+        // -------- E5: 2FA --------
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_totp (
+                  user_id VARCHAR(36) PRIMARY KEY,
+                  secret_b32 VARCHAR(64) NOT NULL,
+                  enabled BOOLEAN NOT NULL DEFAULT false,
+                  enabled_at TIMESTAMPTZ,
+                  last_used_at TIMESTAMPTZ,
+                  backup_codes_hash VARCHAR(2000)
+                )
+                """);
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_session (
+                  id VARCHAR(36) PRIMARY KEY,
+                  user_id VARCHAR(36) NOT NULL,
+                  token_hash VARCHAR(128) NOT NULL UNIQUE,
+                  user_agent VARCHAR(255),
+                  ip VARCHAR(64),
+                  created_at TIMESTAMPTZ NOT NULL,
+                  last_seen_at TIMESTAMPTZ NOT NULL,
+                  revoked_at TIMESTAMPTZ
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_user_session_user ON user_session (user_id, created_at DESC)");
     }
 
     /**

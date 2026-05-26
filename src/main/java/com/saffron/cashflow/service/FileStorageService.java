@@ -176,6 +176,46 @@ public class FileStorageService {
         return stored;
     }
 
+    /**
+     * Generic uploader used by the operations features (incidents, HACCP,
+     * checklists). Files are stored under {@code <uploadDir>/<prefix>/}.
+     * Returns the relative path so callers can persist it in their own
+     * entities.
+     */
+    public String storeUnderPrefix(MultipartFile file, String prefix) throws IOException {
+        AuthHelper.requireOperations();
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File is empty");
+        }
+        if (prefix == null || prefix.isBlank() || prefix.contains("..") || prefix.contains("/")) {
+            throw new IllegalArgumentException("Invalid prefix");
+        }
+        String original = file.getOriginalFilename();
+        if (original == null || original.isBlank()) original = "file";
+        String lower = original.toLowerCase();
+        if (lower.endsWith(".heic") || lower.endsWith(".heif")) {
+            throw new IllegalArgumentException(
+                    "HEIC photos are not supported. On iPhone, set Camera → Formats → Most Compatible, "
+                            + "or share the photo as JPG before uploading.");
+        }
+        if (!lower.matches(".+\\.(jpg|jpeg|png|webp|pdf)$")) {
+            throw new IllegalArgumentException("Only JPG, PNG, WEBP or PDF allowed");
+        }
+        Path dir = uploadDir.resolve(prefix);
+        Files.createDirectories(dir);
+        String stored = prefix + "/" + System.currentTimeMillis() + "-" + UUID.randomUUID()
+                + getExtension(original).toLowerCase();
+        Files.copy(file.getInputStream(), uploadDir.resolve(stored));
+        return stored;
+    }
+
+    /** Resolve a file under any operations prefix for download/serving. */
+    public Path resolveOperationsFile(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) return null;
+        if (relativePath.contains("..") || relativePath.startsWith("/")) return null;
+        return uploadDir.resolve(relativePath).normalize();
+    }
+
     public Path resolveMenuImage(String relativePath) {
         if (relativePath == null || relativePath.isBlank()) return null;
         // Defence against path traversal.

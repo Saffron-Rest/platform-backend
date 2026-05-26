@@ -24,12 +24,15 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuditService auditService;
+    private final TotpService totpService;
 
-    public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService, AuditService auditService) {
+    public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder,
+                       JwtService jwtService, AuditService auditService, TotpService totpService) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.auditService = auditService;
+        this.totpService = totpService;
     }
 
     @Transactional(readOnly = true)
@@ -45,10 +48,35 @@ public class AuthService {
             auditService.logFailedLogin(username, "invalid password");
             throw new org.springframework.security.authentication.BadCredentialsException("Invalid credentials");
         }
+        // 2FA gate: if the user has TOTP enabled the FE must include the
+        // 6-digit code. We deliberately keep this AFTER password verification
+        // so a 2FA prompt only appears once we know the password was right —
+        // otherwise the prompt would itself leak whether the password was
+        // correct, defeating the purpose.
+        if (totpService.isEnabledFor(user.getId())) {
+            String code = req.totpCode();
+            if (code == null || code.isBlank()) {
+                auditService.logFailedLogin(username, "missing 2FA code");
+                throw new TwoFactorRequiredException();
+            }
+            if (!totpService.verifyAtLogin(user.getId(), code)) {
+                auditService.logFailedLogin(username, "invalid 2FA code");
+                throw new org.springframework.security.authentication.BadCredentialsException("Invalid 2FA code");
+            }
+        }
         AuthUser authUser = toAuthUser(user);
         auditService.log(user.getId(), AuditAction.LOGIN, "User", user.getId(),
                 Map.of("username", user.getUsername()), "Signed in");
         return authResponse(user, authUser);
+    }
+
+    /**
+     * Signals that the password was correct but the account requires a
+     * TOTP code that wasn't provided. Mapped to HTTP 401 with body
+     * {@code { requires2fa: true }} by {@link com.saffron.cashflow.web.GlobalExceptionHandler}.
+     */
+    public static final class TwoFactorRequiredException extends RuntimeException {
+        public TwoFactorRequiredException() { super("Two-factor authentication required"); }
     }
 
     @Transactional
