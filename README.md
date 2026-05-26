@@ -41,3 +41,4 @@ See [deploy/README.md](deploy/README.md).
 |-------|----------|------|
 | admin@saffron.local | admin123 | Admin |
 | cashier@saffron.local | cashier123 | Cashier |
+
