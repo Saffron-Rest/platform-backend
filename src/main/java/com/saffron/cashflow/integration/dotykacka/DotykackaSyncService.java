@@ -7,6 +7,7 @@ import com.saffron.cashflow.domain.PosSale;
 import com.saffron.cashflow.repository.PosIntegrationRepository;
 import com.saffron.cashflow.repository.PosSaleRepository;
 import com.saffron.cashflow.service.MenuService;
+import com.saffron.cashflow.service.PosSalePostHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -52,6 +53,7 @@ public class DotykackaSyncService {
     private final PosSaleRepository saleRepository;
     private final MenuService menuService;
     private final DotykackaClient client;
+    private final PosSalePostHandler postHandler;
     private final ZoneId zoneId;
 
     public DotykackaSyncService(
@@ -59,11 +61,13 @@ public class DotykackaSyncService {
             PosSaleRepository saleRepository,
             MenuService menuService,
             DotykackaClient client,
+            PosSalePostHandler postHandler,
             @Value("${app.timezone:Europe/Warsaw}") String timezone) {
         this.integrationRepository = integrationRepository;
         this.saleRepository = saleRepository;
         this.menuService = menuService;
         this.client = client;
+        this.postHandler = postHandler;
         this.zoneId = ZoneId.of(timezone);
     }
 
@@ -297,7 +301,8 @@ public class DotykackaSyncService {
                 if (sale.getItemName() == null) sale.setItemName(mi.getName());
             });
             if (sale.getMenuItemId() == null) stats.unmatched++;
-            saleRepository.save(sale);
+            PosSale persisted = saleRepository.save(sale);
+            postHandler.afterSaleSaved(persisted);
             stats.inserted++;
         }
         return stats;

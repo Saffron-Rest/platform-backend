@@ -32,7 +32,66 @@ public class DatabaseMigrationRunner {
             migrateManualDeliveryIncome(jdbc);
             migrateStandaloneExpenses(jdbc);
             migrateAdminTelegramDispatch(jdbc);
+            migrateStockManagement(jdbc);
         };
+    }
+
+    /**
+     * Stock management: tracks on-hand inventory for menu items / raw
+     * ingredients, with a movement log that records every change (sales,
+     * manual adjustments, deliveries, waste). Idempotent — safe to run
+     * on every boot.
+     */
+    private static void migrateStockManagement(JdbcTemplate jdbc) {
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS stock_item (
+                  id VARCHAR(36) PRIMARY KEY,
+                  name VARCHAR(160) NOT NULL,
+                  sku VARCHAR(64),
+                  unit VARCHAR(16) NOT NULL DEFAULT 'pcs',
+                  menu_item_id VARCHAR(36),
+                  category VARCHAR(40),
+                  on_hand NUMERIC(14,3) NOT NULL DEFAULT 0,
+                  low_stock_threshold NUMERIC(14,3),
+                  par_level NUMERIC(14,3),
+                  unit_cost NUMERIC(12,2),
+                  notes TEXT,
+                  active BOOLEAN NOT NULL DEFAULT true,
+                  last_movement_at TIMESTAMPTZ,
+                  created_at TIMESTAMPTZ NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_stock_item_active ON stock_item (active)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_stock_item_menu ON stock_item (menu_item_id)");
+        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_stock_item_sku ON stock_item (LOWER(sku)) WHERE sku IS NOT NULL");
+
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS stock_movement (
+                  id VARCHAR(36) PRIMARY KEY,
+                  stock_item_id VARCHAR(36) NOT NULL REFERENCES stock_item(id) ON DELETE CASCADE,
+                  type VARCHAR(24) NOT NULL,
+                  delta NUMERIC(14,3) NOT NULL,
+                  balance_after NUMERIC(14,3) NOT NULL,
+                  reference_type VARCHAR(40),
+                  reference_id VARCHAR(64),
+                  reason VARCHAR(500),
+                  user_id VARCHAR(36),
+                  reverted BOOLEAN NOT NULL DEFAULT false,
+                  reverted_by_id VARCHAR(36),
+                  reverted_at TIMESTAMPTZ,
+                  created_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_stock_movement_item ON stock_movement (stock_item_id, created_at DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_stock_movement_ref ON stock_movement (reference_type, reference_id)");
+        // Idempotency for POS-driven decrements: one movement per (pos sale id).
+        jdbc.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_stock_movement_pos_sale "
+                        + "ON stock_movement (reference_id) "
+                        + "WHERE reference_type = 'POS_SALE'");
     }
 
     private static void migrateAdminTelegramDispatch(JdbcTemplate jdbc) {

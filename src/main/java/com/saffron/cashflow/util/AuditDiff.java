@@ -42,6 +42,8 @@ public final class AuditDiff {
             case LOGIN_FAILED -> "Failed sign-in";
             case EXPORT -> "Exported";
             case SYNC -> "Synced";
+            case STOCK_ADJUST -> "Adjusted stock";
+            case STOCK_REVERT -> "Reverted stock change";
         };
         if (changes == null || changes.isEmpty()) {
             return verb + " " + entityType;

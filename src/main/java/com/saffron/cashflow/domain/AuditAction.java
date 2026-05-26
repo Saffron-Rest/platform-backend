@@ -10,5 +10,7 @@ public enum AuditAction {
     LOGIN,
     LOGIN_FAILED,
     EXPORT,
-    SYNC
+    SYNC,
+    STOCK_ADJUST,
+    STOCK_REVERT
 }

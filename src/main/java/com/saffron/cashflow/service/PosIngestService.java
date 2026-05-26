@@ -65,6 +65,7 @@ public class PosIngestService {
     private final PosSaleRepository saleRepository;
     private final PosIntegrationService integrationService;
     private final MenuService menuService;
+    private final PosSalePostHandler postHandler;
     private final ZoneId zoneId;
 
     public PosIngestService(
@@ -72,11 +73,13 @@ public class PosIngestService {
             PosSaleRepository saleRepository,
             PosIntegrationService integrationService,
             MenuService menuService,
+            PosSalePostHandler postHandler,
             @Value("${app.timezone:Europe/Warsaw}") String timezone) {
         this.integrationRepository = integrationRepository;
         this.saleRepository = saleRepository;
         this.integrationService = integrationService;
         this.menuService = menuService;
+        this.postHandler = postHandler;
         this.zoneId = ZoneId.of(timezone);
     }
 
@@ -161,7 +164,8 @@ public class PosIngestService {
                 if (sale.getItemName() == null) sale.setItemName(item.getName());
             }, () -> { /* leave null — surface as Unmatched */ });
 
-            saleRepository.save(sale);
+            PosSale persisted = saleRepository.save(sale);
+            postHandler.afterSaleSaved(persisted);
             inserted++;
             if (sale.getMenuItemId() == null) unmatched++;
         }
