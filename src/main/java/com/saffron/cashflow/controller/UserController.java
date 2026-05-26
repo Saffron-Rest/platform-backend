@@ -45,6 +45,20 @@ public class UserController {
         return userService.deactivate(id);
     }
 
+    /**
+     * Admin-initiated password reset.
+     *
+     * <p>Generates a one-time temporary password, persists its hash, and
+     * forces the target user into the change-password flow on next sign-
+     * in. The plaintext temp password is returned in this response
+     * exactly once — callers must surface it to the admin immediately
+     * and never persist it client-side.</p>
+     */
+    @PostMapping("/{id}/reset-password")
+    public Map<String, Object> resetPassword(@PathVariable String id) {
+        return userService.resetPassword(id);
+    }
+
     @GetMapping("/pay-rates")
     public List<Map<String, Object>> allPayRates() {
         return payRateService.listAllHistory();

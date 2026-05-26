@@ -216,6 +216,7 @@
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/util/EntryCalculator.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/util/EntryMapper.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/util/ManualDeliverySettlement.java
+/Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/util/PasswordGenerator.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/util/PlatformSettlement.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/util/SalaryCalculator.java
 /Users/ihakhverdiyev/Desktop/saffron-app/platform-backend/src/main/java/com/saffron/cashflow/util/SalaryPaymentPeriod.java

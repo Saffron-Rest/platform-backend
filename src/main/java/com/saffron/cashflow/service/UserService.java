@@ -11,6 +11,7 @@ import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.ConflictException;
 import com.saffron.cashflow.util.AuditSnapshots;
+import com.saffron.cashflow.util.PasswordGenerator;
 import com.saffron.cashflow.util.UserCredentials;
 import com.saffron.cashflow.web.NotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -152,6 +153,61 @@ public class UserService {
         }
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "User", user.getId(), before, after, null);
         return toMap(user);
+    }
+
+    /**
+     * Generate a one-time temporary password for {@code id}, save its
+     * hash, and force the user into the change-password flow on their
+     * next login.
+     *
+     * <p>The plaintext is returned in the response <em>once</em> so the
+     * admin can copy/share it. It is deliberately never logged or
+     * audited — only the fact that a reset happened is recorded. If the
+     * admin loses the temp password between the API response and
+     * handing it off, they need to reset again.</p>
+     *
+     * <p>An admin cannot reset their own password through this endpoint;
+     * the regular self-service change-password flow is the correct path
+     * for that and avoids a foot-gun where an admin could lock themselves
+     * out without knowing the freshly minted password (e.g. browser
+     * crash mid-modal).</p>
+     */
+    @Transactional
+    public Map<String, Object> resetPassword(String id) {
+        AuthHelper.requireAdmin();
+        String currentId = AuthHelper.currentUser().id();
+        if (currentId.equals(id)) {
+            throw new BadRequestException(
+                    "Use Change password from your account menu to rotate your own password");
+        }
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("User not found"));
+        if (user.getRole() == Role.ADMIN) {
+            throw new BadRequestException("Cannot reset another admin's password");
+        }
+        String temp = PasswordGenerator.generate();
+        user.setPasswordHash(passwordEncoder.encode(temp));
+        user.setMustChangePassword(true);
+        userRepository.save(user);
+        // Audit records the fact only — never the plaintext. The "after"
+        // map is intentionally minimal so a JSON dump of the audit log
+        // can never leak the credential.
+        auditService.logChange(
+                currentId,
+                AuditAction.UPDATE,
+                "User",
+                user.getId(),
+                Map.of("passwordReset", false),
+                Map.of("passwordReset", true, "mustChangePassword", true),
+                Map.of("reason", "Admin-issued one-time password"));
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("userId", user.getId());
+        out.put("username", user.getUsername());
+        out.put("name", user.getName());
+        out.put("tempPassword", temp);
+        out.put("mustChangePassword", true);
+        return out;
     }
 
     @Transactional

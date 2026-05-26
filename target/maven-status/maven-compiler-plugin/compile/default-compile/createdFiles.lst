@@ -280,6 +280,7 @@ com/saffron/cashflow/dto/RecordSalaryPaymentRequest.class
 com/saffron/cashflow/repository/StockMovementRepository.class
 com/saffron/cashflow/controller/MenuAnalyticsController.class
 com/saffron/cashflow/service/ExportService$ExportResult.class
+com/saffron/cashflow/util/PasswordGenerator.class
 com/saffron/cashflow/domain/PosSale.class
 com/saffron/cashflow/repository/WorkShiftRepository.class
 com/saffron/cashflow/repository/CommentMentionRepository.class
