@@ -89,4 +89,22 @@ public class RecipeController {
                 && Boolean.parseBoolean(String.valueOf(body.getOrDefault("applySuggestedPrice", "false")));
         return recipeService.applyToMenu(id, applyPrice);
     }
+
+    /**
+     * Append-only history of cost snapshots for a recipe. Used by the
+     * editor's "price drift" pane.
+     */
+    @GetMapping("/{id}/history")
+    public List<Map<String, Object>> history(@PathVariable String id) {
+        return recipeService.history(id);
+    }
+
+    /**
+     * Recipes that consume a given stock item. Used by the stock page
+     * to warn that changing a unit cost will reprice N dishes.
+     */
+    @GetMapping("/affected-by-stock/{stockItemId}")
+    public List<Map<String, Object>> affectedByStock(@PathVariable String stockItemId) {
+        return recipeService.affectedByStockItem(stockItemId);
+    }
 }

@@ -126,4 +126,44 @@ public final class RecipeCosting {
         return value.divide(step, 0, RoundingMode.CEILING).multiply(step)
                 .setScale(2, RoundingMode.HALF_UP);
     }
+
+    // ─── v2: labor / packaging / overhead helpers ─────────────────
+
+    /** Labor cost per yield unit, from a "minutes per portion" model.
+     *  Returns ZERO when either input is missing or non-positive. */
+    public static BigDecimal laborCostPerUnit(
+            BigDecimal minutesPerUnit, BigDecimal ratePerHour) {
+        if (minutesPerUnit == null || ratePerHour == null) return BigDecimal.ZERO;
+        if (minutesPerUnit.signum() <= 0 || ratePerHour.signum() <= 0) return BigDecimal.ZERO;
+        // (minutes / 60) * rate
+        return minutesPerUnit
+                .divide(new BigDecimal("60"), SCALE, RoundingMode.HALF_UP)
+                .multiply(ratePerHour)
+                .setScale(SCALE, RoundingMode.HALF_UP);
+    }
+
+    /** Apply an overhead percentage on top of a base cost ({@code base
+     *  * (1 + pct/100)}). Tolerates null/non-positive pct (returns
+     *  base unchanged). */
+    public static BigDecimal applyOverhead(BigDecimal base, BigDecimal overheadPct) {
+        if (base == null) return null;
+        if (overheadPct == null || overheadPct.signum() <= 0) return base;
+        BigDecimal factor = BigDecimal.ONE.add(
+                overheadPct.divide(HUNDRED, SCALE, RoundingMode.HALF_UP));
+        return base.multiply(factor).setScale(SCALE, RoundingMode.HALF_UP);
+    }
+
+    /** Achieved prime-cost % (food + labor + packaging) for a given
+     *  sell price. */
+    public static BigDecimal achievedPrimeCostPct(BigDecimal primeCostPerUnit, BigDecimal sellPrice) {
+        return achievedFoodCostPct(primeCostPerUnit, sellPrice);
+    }
+
+    /** Break-even price: the minimum gross price that recovers the
+     *  fully-loaded cost (food + labor + packaging + overhead). Used
+     *  to flag suggested prices that don't even cover overhead. */
+    public static BigDecimal breakEvenPrice(BigDecimal fullyLoadedCostPerUnit) {
+        if (fullyLoadedCostPerUnit == null || fullyLoadedCostPerUnit.signum() <= 0) return null;
+        return roundUpToNearest(fullyLoadedCostPerUnit, new BigDecimal("0.10"));
+    }
 }

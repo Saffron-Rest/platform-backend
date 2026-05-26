@@ -71,11 +71,19 @@ public final class UnitConverter {
         register(m, cup, "cup", "cups");
         register(m, flOz, "floz", "fl oz", "fluid ounce", "fluid ounces");
 
-        // ─── Count (no cross-conversion, family-only) ─────────────
+        // ─── Count units (mutually non-convertible) ───────────────
+        // Each count "kind" has its own canonical so that pcs ≠ portion
+        // ≠ serving ≠ unit. They all share the COUNT family, but
+        // {@link #convert} refuses to cross between distinct canonicals
+        // because a portion of soup is not the same as a piece of soup.
         UnitInfo piece = new UnitInfo("pcs", Family.COUNT, BigDecimal.ONE);
-        register(m, piece,
-                "pcs", "pc", "piece", "pieces", "unit", "units",
-                "portion", "portions", "serving", "servings");
+        UnitInfo portion = new UnitInfo("portion", Family.COUNT, BigDecimal.ONE);
+        UnitInfo serving = new UnitInfo("serving", Family.COUNT, BigDecimal.ONE);
+        UnitInfo unit = new UnitInfo("unit", Family.COUNT, BigDecimal.ONE);
+        register(m, piece, "pcs", "pc", "piece", "pieces");
+        register(m, portion, "portion", "portions");
+        register(m, serving, "serving", "servings");
+        register(m, unit, "unit", "units");
 
         return java.util.Collections.unmodifiableMap(m);
     }

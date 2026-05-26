@@ -63,6 +63,7 @@ com/saffron/cashflow/dto/TagReplaceRequest.class
 com/saffron/cashflow/domain/Permission.class
 com/saffron/cashflow/dto/ExpenseItemRequest.class
 com/saffron/cashflow/util/EntryCalculator.class
+com/saffron/cashflow/domain/MenuRecipeCostSnapshot$Source.class
 com/saffron/cashflow/repository/NotificationDispatchRepository.class
 com/saffron/cashflow/service/ChecklistService.class
 com/saffron/cashflow/service/TotpService.class
@@ -168,6 +169,7 @@ com/saffron/cashflow/controller/NotificationController.class
 com/saffron/cashflow/controller/CommentController.class
 com/saffron/cashflow/repository/PushTokenRepository.class
 com/saffron/cashflow/dto/StandaloneExpenseRequest.class
+com/saffron/cashflow/repository/MenuRecipeCostSnapshotRepository.class
 com/saffron/cashflow/repository/CardSettlementRepository.class
 com/saffron/cashflow/service/MenuAnalyticsService.class
 com/saffron/cashflow/service/HaccpService.class
@@ -191,9 +193,11 @@ com/saffron/cashflow/repository/CommentRepository.class
 com/saffron/cashflow/service/CardSettlementService.class
 com/saffron/cashflow/service/DashboardService.class
 com/saffron/cashflow/controller/ChecklistController.class
+com/saffron/cashflow/service/UnitConverter.class
 com/saffron/cashflow/domain/NotificationDispatch.class
 com/saffron/cashflow/controller/PosIntegrationController$RegisterWebhookRequest.class
 com/saffron/cashflow/controller/HaccpController.class
+com/saffron/cashflow/service/UnitConverter$UnitInfo.class
 com/saffron/cashflow/domain/Comment.class
 com/saffron/cashflow/report/PdfReportBuilder$CashierAgg.class
 com/saffron/cashflow/controller/BankDepositController.class
@@ -215,6 +219,7 @@ com/saffron/cashflow/domain/BankDeposit.class
 com/saffron/cashflow/service/SavedViewService.class
 com/saffron/cashflow/domain/ChecklistTemplate.class
 com/saffron/cashflow/controller/StockController.class
+com/saffron/cashflow/service/RecipeService$CostOfLine.class
 com/saffron/cashflow/repository/EmployeeCertRepository.class
 com/saffron/cashflow/service/MenuService$MenuItemRequest.class
 com/saffron/cashflow/domain/AlertType.class
@@ -271,6 +276,7 @@ com/saffron/cashflow/web/ApiExceptionHandler.class
 com/saffron/cashflow/service/MenuPrintService$Options.class
 com/saffron/cashflow/controller/SavedViewController$UpdateSavedViewRequest.class
 com/saffron/cashflow/service/StockService.class
+com/saffron/cashflow/service/UnitConverter$Family.class
 com/saffron/cashflow/domain/MenuRecipeIngredient.class
 com/saffron/cashflow/service/TagService.class
 com/saffron/cashflow/service/PayRateService$ResolvedPay.class
@@ -298,3 +304,4 @@ com/saffron/cashflow/repository/CommentMentionRepository.class
 com/saffron/cashflow/repository/PosSaleRepository.class
 com/saffron/cashflow/CashflowApplication.class
 com/saffron/cashflow/service/IncidentService.class
+com/saffron/cashflow/domain/MenuRecipeCostSnapshot.class

@@ -175,4 +175,73 @@ class RecipeCostingTest {
         assertNotNull(c);
         assertEquals(0, c.compareTo(new BigDecimal("3.326670")));
     }
+
+    // ─── v2 helpers ──────────────────────────────────────────────
+
+    @Test
+    void labor_cost_per_unit_for_4_minutes_at_30_per_hour() {
+        // 4 min * (30 / 60) PLN/min = 4 * 0.5 = 2.00 PLN/unit
+        BigDecimal c = RecipeCosting.laborCostPerUnit(
+                new BigDecimal("4"), new BigDecimal("30"));
+        assertEquals(0, c.setScale(2, java.math.RoundingMode.HALF_UP)
+                .compareTo(new BigDecimal("2.00")));
+    }
+
+    @Test
+    void labor_cost_zero_when_either_input_missing_or_nonpositive() {
+        assertEquals(0, RecipeCosting.laborCostPerUnit(null, new BigDecimal("30"))
+                .compareTo(BigDecimal.ZERO));
+        assertEquals(0, RecipeCosting.laborCostPerUnit(new BigDecimal("4"), null)
+                .compareTo(BigDecimal.ZERO));
+        assertEquals(0, RecipeCosting.laborCostPerUnit(BigDecimal.ZERO, new BigDecimal("30"))
+                .compareTo(BigDecimal.ZERO));
+        assertEquals(0, RecipeCosting.laborCostPerUnit(new BigDecimal("-1"), new BigDecimal("30"))
+                .compareTo(BigDecimal.ZERO));
+    }
+
+    @Test
+    void apply_overhead_scales_base_cost() {
+        // 10 PLN base with 12 % overhead = 11.20 PLN.
+        BigDecimal v = RecipeCosting.applyOverhead(
+                new BigDecimal("10.00"), new BigDecimal("12"));
+        assertEquals(0, v.setScale(2, java.math.RoundingMode.HALF_UP)
+                .compareTo(new BigDecimal("11.20")));
+    }
+
+    @Test
+    void apply_overhead_is_identity_when_pct_missing_or_zero() {
+        BigDecimal base = new BigDecimal("7.50");
+        assertEquals(0, RecipeCosting.applyOverhead(base, null).compareTo(base));
+        assertEquals(0, RecipeCosting.applyOverhead(base, BigDecimal.ZERO).compareTo(base));
+    }
+
+    @Test
+    void break_even_price_rounds_up_to_currency_step() {
+        // 4.31 fully loaded → break-even price is 4.40 (next 0.10 step up)
+        BigDecimal be = RecipeCosting.breakEvenPrice(new BigDecimal("4.31"));
+        assertEquals(0, be.compareTo(new BigDecimal("4.40")));
+    }
+
+    @Test
+    void full_cost_stack_meat_dough_with_labor_and_overhead() {
+        // 1 kg meat at 80 + 1 kg dough at 12 = 92 PLN total / 71 = 1.296/piece
+        // Labor: 0.5 min/piece at 36 PLN/h = 0.30/piece
+        // Packaging: 0.05/piece
+        // Prime: 1.296 + 0.30 + 0.05 = 1.646
+        // Overhead 10 % → fully loaded ≈ 1.81
+        // Suggested at 30 % FC: ceil(1.296 / 0.30) → 4.50 (still based on food cost)
+        BigDecimal food = new BigDecimal("92.00").divide(
+                new BigDecimal("71"), 6, java.math.RoundingMode.HALF_UP);
+        BigDecimal labor = RecipeCosting.laborCostPerUnit(
+                new BigDecimal("0.5"), new BigDecimal("36"));
+        BigDecimal packaging = new BigDecimal("0.05");
+        BigDecimal prime = food.add(labor).add(packaging);
+        BigDecimal loaded = RecipeCosting.applyOverhead(prime, new BigDecimal("10"));
+        assertTrue(loaded.compareTo(prime) > 0, "overhead must increase cost");
+        BigDecimal suggested = RecipeCosting.suggestedSellPrice(food, new BigDecimal("30"));
+        assertEquals(0, suggested.compareTo(new BigDecimal("4.50")));
+        // Break-even respects the fully loaded number, never the food cost alone.
+        BigDecimal be = RecipeCosting.breakEvenPrice(loaded);
+        assertTrue(be.compareTo(loaded) >= 0);
+    }
 }
