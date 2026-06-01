@@ -6,11 +6,13 @@ import com.saffron.cashflow.domain.OwnerExpense;
 import com.saffron.cashflow.domain.OwnerExpenseReimbursement;
 import com.saffron.cashflow.domain.OwnerExpenseStatus;
 import com.saffron.cashflow.domain.Permission;
+import com.saffron.cashflow.domain.ReceiptFile;
 import com.saffron.cashflow.domain.Role;
 import com.saffron.cashflow.domain.SupplierInvoicePayment;
 import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.repository.OwnerExpenseReimbursementRepository;
 import com.saffron.cashflow.repository.OwnerExpenseRepository;
+import com.saffron.cashflow.repository.ReceiptFileRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.security.AuthUser;
@@ -18,11 +20,16 @@ import com.saffron.cashflow.web.BadRequestException;
 import com.saffron.cashflow.web.ConflictException;
 import com.saffron.cashflow.web.NotFoundException;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -30,6 +37,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Owner-paid expense / reimbursement business logic.
@@ -69,18 +77,25 @@ public class OwnerExpenseService {
 
     private final OwnerExpenseRepository expenseRepository;
     private final OwnerExpenseReimbursementRepository reimbursementRepository;
+    private final ReceiptFileRepository receiptFileRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
+    private final Path uploadDir;
 
     public OwnerExpenseService(
             OwnerExpenseRepository expenseRepository,
             OwnerExpenseReimbursementRepository reimbursementRepository,
+            ReceiptFileRepository receiptFileRepository,
             UserRepository userRepository,
-            AuditService auditService) {
+            AuditService auditService,
+            @Value("${app.upload-dir}") String uploadDir) throws IOException {
         this.expenseRepository = expenseRepository;
         this.reimbursementRepository = reimbursementRepository;
+        this.receiptFileRepository = receiptFileRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
+        this.uploadDir = Path.of(uploadDir).toAbsolutePath().normalize();
+        Files.createDirectories(this.uploadDir);
     }
 
     // ========================================================================
@@ -376,6 +391,84 @@ public class OwnerExpenseService {
         return toDetailMap(e, ownerNameMap(List.of(e)));
     }
 
+    // ========================================================================
+    // Receipt files
+    // ========================================================================
+
+    /**
+     * Attach a receipt photo / PDF to an owner expense. Anyone who can
+     * file an expense can also attach receipts to one — the owner of
+     * the expense is most often the same person who has the proof on
+     * their phone. Filing a receipt onto a voided expense is refused
+     * (those entries are sealed).
+     */
+    @Transactional
+    public Map<String, Object> uploadReceipt(String expenseId, MultipartFile file) throws IOException {
+        AuthHelper.requireAdminOr(
+                Permission.OWNER_EXPENSES_FILE,
+                Permission.OWNER_EXPENSES_MANAGE);
+        AuthUser actor = AuthHelper.currentUser();
+        OwnerExpense e = require(expenseId);
+        if (e.getStatus() == OwnerExpenseStatus.VOID) {
+            throw new ConflictException("Cannot attach receipts to a cancelled expense");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BadRequestException("No file uploaded");
+        }
+        String original = file.getOriginalFilename();
+        if (original == null || !original.matches("(?i).+\\.(jpg|jpeg|png|pdf|webp|heic)$")) {
+            throw new BadRequestException("Only images and PDF allowed");
+        }
+        String stored = System.currentTimeMillis() + "-" + UUID.randomUUID() + extension(original);
+        Files.copy(file.getInputStream(), uploadDir.resolve(stored));
+
+        ReceiptFile rf = new ReceiptFile();
+        rf.setFilename(original);
+        rf.setPath(stored);
+        rf.setCategory("owner-expense-receipt");
+        e.addReceipt(rf);
+        expenseRepository.save(e);
+
+        auditService.log(actor.id(), AuditAction.UPDATE, "OwnerExpense", e.getId(),
+                Map.of("receiptUploaded", original, "receiptCount", e.getReceipts().size()));
+        return toDetailMap(e, ownerNameMap(List.of(e)));
+    }
+
+    @Transactional
+    public Map<String, Object> deleteReceipt(String expenseId, String fileId) {
+        // Anyone who could attach can detach — the typical "I uploaded
+        // the wrong photo" recovery path. Voided expenses keep their
+        // receipts (audit trail).
+        AuthHelper.requireAdminOr(
+                Permission.OWNER_EXPENSES_FILE,
+                Permission.OWNER_EXPENSES_MANAGE);
+        AuthUser actor = AuthHelper.currentUser();
+        OwnerExpense e = require(expenseId);
+        if (e.getStatus() == OwnerExpenseStatus.VOID) {
+            throw new ConflictException("Cannot delete receipts from a cancelled expense");
+        }
+        ReceiptFile target = e.getReceipts().stream()
+                .filter(rf -> rf.getId().equals(fileId))
+                .findFirst()
+                .orElseThrow(() -> new NotFoundException("Receipt not found"));
+        e.getReceipts().remove(target);
+        try {
+            Files.deleteIfExists(uploadDir.resolve(target.getPath()));
+        } catch (IOException ignored) {
+            // file may already be gone; finish DB cleanup either way
+        }
+        receiptFileRepository.delete(target);
+        expenseRepository.save(e);
+        auditService.log(actor.id(), AuditAction.UPDATE, "OwnerExpense", e.getId(),
+                Map.of("receiptDeleted", target.getFilename(), "receiptCount", e.getReceipts().size()));
+        return toDetailMap(e, ownerNameMap(List.of(e)));
+    }
+
+    private static String extension(String name) {
+        int i = name.lastIndexOf('.');
+        return i >= 0 ? name.substring(i) : "";
+    }
+
     @Transactional
     public Map<String, Object> deleteReimbursement(String expenseId, String reimbursementId) {
         AuthHelper.requireAdminOr(Permission.OWNER_EXPENSES_MANAGE);
@@ -504,6 +597,9 @@ public class OwnerExpenseService {
         m.put("outstanding", e.outstanding());
         m.put("status", e.getStatus().name());
         if (e.getReference() != null) m.put("reference", e.getReference());
+        // Cheap "has proof?" hint for the list view; the full receipt
+        // list is fetched on demand by the detail endpoint.
+        m.put("receiptCount", e.getReceipts() == null ? 0 : e.getReceipts().size());
         return m;
     }
 
@@ -530,6 +626,18 @@ public class OwnerExpenseService {
             }
         }
         m.put("reimbursements", reimbs);
+
+        List<Map<String, Object>> files = new ArrayList<>();
+        if (e.getReceipts() != null) {
+            for (ReceiptFile rf : e.getReceipts()) {
+                Map<String, Object> rm = new LinkedHashMap<>();
+                rm.put("id", rf.getId());
+                rm.put("filename", rf.getFilename());
+                rm.put("createdAt", rf.getCreatedAt() != null ? rf.getCreatedAt().toString() : null);
+                files.add(rm);
+            }
+        }
+        m.put("receipts", files);
         return m;
     }
 }

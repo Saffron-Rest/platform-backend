@@ -6,6 +6,8 @@ import com.saffron.cashflow.dto.ExpenseItemRequest;
 import com.saffron.cashflow.dto.StandaloneExpenseRequest;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.ExpenseItemRepository;
+import com.saffron.cashflow.repository.OwnerExpenseRepository;
+import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.security.AuthUser;
 import com.saffron.cashflow.security.ForbiddenException;
@@ -38,6 +40,12 @@ public class ExpenseService {
     private final AuditService auditService;
     private final TagService tagService;
     private final CommentService commentService;
+    // Owner-paid expenses share the Finance ledger so the user has one
+    // pane of glass for "what did the restaurant spend?". They're
+    // surfaced read-only here; mutation goes through OwnerExpenseService
+    // so the reimbursement lifecycle stays intact.
+    private final OwnerExpenseRepository ownerExpenseRepository;
+    private final UserRepository userRepository;
 
     public ExpenseService(
             @Value("${app.upload-dir}") String uploadDir,
@@ -47,7 +55,9 @@ public class ExpenseService {
             WorkShiftService workShiftService,
             AuditService auditService,
             @Lazy TagService tagService,
-            @Lazy CommentService commentService) throws IOException {
+            @Lazy CommentService commentService,
+            OwnerExpenseRepository ownerExpenseRepository,
+            UserRepository userRepository) throws IOException {
         this.uploadDir = Path.of(uploadDir).toAbsolutePath().normalize();
         Files.createDirectories(this.uploadDir);
         this.expenseRepository = expenseRepository;
@@ -57,6 +67,8 @@ public class ExpenseService {
         this.auditService = auditService;
         this.tagService = tagService;
         this.commentService = commentService;
+        this.ownerExpenseRepository = ownerExpenseRepository;
+        this.userRepository = userRepository;
     }
 
     public List<Map<String, Object>> listForEntry(String entryId) {
@@ -82,20 +94,82 @@ public class ExpenseService {
                             com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, tagIds));
             rows = rows.stream().filter(e -> allowed.contains(e.getId())).toList();
         }
-        if (rows.isEmpty()) return List.of();
-        List<String> ids = rows.stream().map(ExpenseItem::getId).toList();
-        Map<String, List<Map<String, Object>>> tagsByExpense = tagService.tagsForBulk(
-                com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, ids);
-        Map<String, Long> commentsByExpense = commentService.countByEntities(
-                com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, ids);
-        return rows.stream()
-                .map(e -> {
-                    Map<String, Object> m = new java.util.LinkedHashMap<>(EntryMapper.expenseToMap(e));
-                    m.put("tags", tagsByExpense.getOrDefault(e.getId(), List.of()));
-                    m.put("commentCount", commentsByExpense.getOrDefault(e.getId(), 0L));
-                    return m;
-                })
-                .collect(Collectors.toList());
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (!rows.isEmpty()) {
+            List<String> ids = rows.stream().map(ExpenseItem::getId).toList();
+            Map<String, List<Map<String, Object>>> tagsByExpense = tagService.tagsForBulk(
+                    com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, ids);
+            Map<String, Long> commentsByExpense = commentService.countByEntities(
+                    com.saffron.cashflow.domain.TaggedEntityType.EXPENSE, ids);
+            for (ExpenseItem e : rows) {
+                Map<String, Object> m = new LinkedHashMap<>(EntryMapper.expenseToMap(e));
+                m.put("tags", tagsByExpense.getOrDefault(e.getId(), List.of()));
+                m.put("commentCount", commentsByExpense.getOrDefault(e.getId(), 0L));
+                m.put("source", "EXPENSE_ITEM");
+                m.put("editable", true);
+                result.add(m);
+            }
+        }
+        // Owner-paid expenses: even though the cash came from the
+        // owner's pocket, the restaurant incurred the cost — surface
+        // them here as a unified list. Tag-filtered view skips them
+        // (owner expenses are not yet taggable; would silently look
+        // empty otherwise).
+        if (tagIds == null || tagIds.isEmpty()) {
+            List<OwnerExpense> ownerRows = ownerExpenseRepository.findAllOrdered().stream()
+                    .filter(o -> o.getStatus() != OwnerExpenseStatus.VOID)
+                    .filter(o -> !o.getExpenseDate().isBefore(from) && !o.getExpenseDate().isAfter(to))
+                    .toList();
+            if (!ownerRows.isEmpty()) {
+                Map<String, String> ownerNames = new HashMap<>();
+                Set<String> uids = new HashSet<>();
+                for (OwnerExpense o : ownerRows) uids.add(o.getOwnerUserId());
+                for (User u : userRepository.findAllById(uids)) {
+                    ownerNames.put(u.getId(), u.getName());
+                }
+                for (OwnerExpense o : ownerRows) {
+                    result.add(toLedgerRow(o, ownerNames));
+                }
+            }
+        }
+        // Most-recent first by effective / expense date for the unified
+        // list. Stable secondary on id to keep the order deterministic.
+        result.sort((a, b) -> {
+            String da = String.valueOf(a.getOrDefault("effectiveDate", ""));
+            String db = String.valueOf(b.getOrDefault("effectiveDate", ""));
+            int cmp = db.compareTo(da);
+            if (cmp != 0) return cmp;
+            return String.valueOf(b.getOrDefault("id", ""))
+                    .compareTo(String.valueOf(a.getOrDefault("id", "")));
+        });
+        return result;
+    }
+
+    private Map<String, Object> toLedgerRow(OwnerExpense o, Map<String, String> ownerNames) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", o.getId());
+        m.put("source", "OWNER_EXPENSE");
+        m.put("editable", false);
+        m.put("category", o.getCategory().name());
+        m.put("description", o.getDescription());
+        m.put("amount", EntryCalculator.toDouble(o.getTotal()));
+        // Payment source on this row is informational — the cash came
+        // from the owner, so we surface a synthetic value the UI can
+        // recognise and label specially.
+        m.put("paymentSource", "OWNER_PAID");
+        m.put("effectiveDate", o.getExpenseDate().toString());
+        m.put("standalone", true);
+        m.put("ownerExpenseId", o.getId());
+        m.put("ownerUserId", o.getOwnerUserId());
+        m.put("ownerName", ownerNames.getOrDefault(o.getOwnerUserId(), "Owner"));
+        m.put("ownerExpenseStatus", o.getStatus().name());
+        m.put("amountReimbursed", EntryCalculator.toDouble(
+                o.getAmountReimbursed() == null ? BigDecimal.ZERO : o.getAmountReimbursed()));
+        m.put("outstanding", EntryCalculator.toDouble(o.outstanding()));
+        if (o.getReference() != null) m.put("reference", o.getReference());
+        m.put("tags", List.of());
+        m.put("commentCount", 0L);
+        return m;
     }
 
     @Transactional(readOnly = true)

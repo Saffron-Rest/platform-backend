@@ -11,7 +11,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.util.Map;
 
 /**
@@ -84,5 +86,20 @@ public class OwnerExpenseController {
             @PathVariable String id,
             @PathVariable String reimbursementId) {
         return service.deleteReimbursement(id, reimbursementId);
+    }
+
+    /** Attach a receipt photo / PDF as proof of the expense. */
+    @PostMapping("/{id}/receipts")
+    public Map<String, Object> uploadReceipt(
+            @PathVariable String id,
+            @RequestParam("receipt") MultipartFile file) throws IOException {
+        return service.uploadReceipt(id, file);
+    }
+
+    @DeleteMapping("/{id}/receipts/{fileId}")
+    public Map<String, Object> deleteReceipt(
+            @PathVariable String id,
+            @PathVariable String fileId) {
+        return service.deleteReceipt(id, fileId);
     }
 }

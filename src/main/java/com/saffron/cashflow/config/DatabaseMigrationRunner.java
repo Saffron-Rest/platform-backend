@@ -98,6 +98,15 @@ public class DatabaseMigrationRunner {
                 """);
         jdbc.execute("CREATE INDEX IF NOT EXISTS ix_owner_expense_reimb_expense ON owner_expense_reimbursement (owner_expense_id, paid_date DESC)");
         jdbc.execute("CREATE INDEX IF NOT EXISTS ix_owner_expense_reimb_date ON owner_expense_reimbursement (paid_date)");
+
+        // Receipt files (photos / PDFs of the receipt the owner is
+        // claiming) reuse the existing receipt_file table — same
+        // storage path, same auth helpers, same audit story. We just
+        // add a third foreign key alongside entry_id and
+        // expense_item_id. Idempotent: ALTER ... ADD COLUMN IF NOT
+        // EXISTS keeps the migration replayable.
+        jdbc.execute("ALTER TABLE receipt_file ADD COLUMN IF NOT EXISTS owner_expense_id VARCHAR(36)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_receipt_file_owner_expense ON receipt_file (owner_expense_id)");
     }
 
     /**

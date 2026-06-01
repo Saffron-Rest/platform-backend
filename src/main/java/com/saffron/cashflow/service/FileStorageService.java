@@ -116,6 +116,16 @@ public class FileStorageService {
 
     public ReceiptFile resolveReceiptFile(String fileId) {
         ReceiptFile file = fileRepository.findById(fileId).orElseThrow(() -> new NotFoundException("Not found"));
+        if (file.getOwnerExpenseId() != null) {
+            // Owner-expense receipts: anyone who can view owner
+            // expenses can also see their proof. Same gate the
+            // OwnerExpenseService uses on the read path.
+            AuthHelper.requireAdminOr(
+                    com.saffron.cashflow.domain.Permission.OWNER_EXPENSES_VIEW,
+                    com.saffron.cashflow.domain.Permission.OWNER_EXPENSES_MANAGE,
+                    com.saffron.cashflow.domain.Permission.OWNER_EXPENSES_FILE);
+            return file;
+        }
         String entryId = file.getEntryId();
         if (entryId == null) {
             // Standalone (post-close) expense invoice — not tied to any shift.

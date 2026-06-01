@@ -19,6 +19,13 @@ public class ReceiptFile {
     @JoinColumn(name = "expense_item_id")
     private ExpenseItem expenseItem;
 
+    /** Owner-paid expense the receipt belongs to (when applicable). At
+     *  most one of {@link #entry}, {@link #expenseItem}, or this is set
+     *  — the file storage layer treats them as alternative parents. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_expense_id")
+    private OwnerExpense ownerExpense;
+
     @Column(nullable = false)
     private String filename;
 
@@ -41,6 +48,9 @@ public class ReceiptFile {
     public void setEntry(DailyEntry entry) { this.entry = entry; }
     public ExpenseItem getExpenseItem() { return expenseItem; }
     public void setExpenseItem(ExpenseItem expenseItem) { this.expenseItem = expenseItem; }
+    public OwnerExpense getOwnerExpense() { return ownerExpense; }
+    public String getOwnerExpenseId() { return ownerExpense != null ? ownerExpense.getId() : null; }
+    public void setOwnerExpense(OwnerExpense ownerExpense) { this.ownerExpense = ownerExpense; }
     public String getFilename() { return filename; }
     public void setFilename(String filename) { this.filename = filename; }
     public String getPath() { return path; }

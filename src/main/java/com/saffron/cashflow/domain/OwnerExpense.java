@@ -90,6 +90,18 @@ public class OwnerExpense {
     @OrderBy("paidDate DESC, createdAt DESC")
     private List<OwnerExpenseReimbursement> reimbursements = new ArrayList<>();
 
+    /** Receipt photos / PDFs proving the expense. Cascade-removed when
+     *  the expense is deleted permanently (rare); voiding keeps them
+     *  for audit. */
+    @OneToMany(mappedBy = "ownerExpense", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @OrderBy("createdAt ASC")
+    private List<ReceiptFile> receipts = new ArrayList<>();
+
+    public void addReceipt(ReceiptFile rf) {
+        rf.setOwnerExpense(this);
+        receipts.add(rf);
+    }
+
     @Column(name = "created_by", length = 36)
     private String createdBy;
 
@@ -146,6 +158,7 @@ public class OwnerExpense {
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
     public List<OwnerExpenseReimbursement> getReimbursements() { return reimbursements; }
+    public List<ReceiptFile> getReceipts() { return receipts; }
     public String getCreatedBy() { return createdBy; }
     public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public Instant getCreatedAt() { return createdAt; }
