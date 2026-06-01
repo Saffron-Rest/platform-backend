@@ -105,4 +105,16 @@ public class EntryController {
         entryService.delete(id, body.reason());
         return Map.of("ok", true);
     }
+
+    /**
+     * Reassign a shift report to a different calendar date. Admin only —
+     * see {@link EntryService#move(String, String, String)} for the
+     * conflict / future-date rules.
+     */
+    @PostMapping("/{id}/move")
+    public Map<String, Object> move(@PathVariable String id, @RequestBody MoveEntryRequest body) {
+        return entryService.move(id, body.newDate(), body.reason());
+    }
+
+    public record MoveEntryRequest(String newDate, String reason) {}
 }

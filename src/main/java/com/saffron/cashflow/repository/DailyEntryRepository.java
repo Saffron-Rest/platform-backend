@@ -55,6 +55,20 @@ public interface DailyEntryRepository extends JpaRepository<DailyEntry, String>,
     Optional<DailyEntry> findTop1ByCashier_IdAndDateLessThanAndDeletedAtIsNullAndStatusOrderByDateDesc(
             String cashierId, LocalDate date, EntryStatus status);
 
+    /**
+     * All non-deleted reports by this cashier inside the inclusive range,
+     * newest first. Used by the shift-create gap check to find the most
+     * recent prior shift while skipping over closure days.
+     */
+    @Query("""
+            SELECT e FROM DailyEntry e
+            WHERE e.cashier.id = :cashierId
+              AND e.date BETWEEN :from AND :to
+              AND e.deletedAt IS NULL
+            ORDER BY e.date DESC
+            """)
+    List<DailyEntry> findActiveByCashierBetweenDesc(String cashierId, LocalDate from, LocalDate to);
+
     /** Most recent calendar day before {@code before} with a locked actual cash count (any cashier). */
     @Query("""
             SELECT MAX(e.date) FROM DailyEntry e

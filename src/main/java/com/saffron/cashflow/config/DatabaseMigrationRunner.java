@@ -36,7 +36,29 @@ public class DatabaseMigrationRunner {
             migrateOperationsBackbone(jdbc);
             migrateUserPermissions(jdbc);
             migrateMenuRecipes(jdbc);
+            migrateRestaurantClosures(jdbc);
         };
+    }
+
+    /**
+     * Calendar of explicitly-closed days (holidays, renovations, etc.).
+     *
+     * <p>Consulted by the shift-create gap check to bypass the "previous
+     * shift must be submitted" rule: closure days don't need a report.</p>
+     *
+     * <p>Idempotent — safe to run on every boot.</p>
+     */
+    private static void migrateRestaurantClosures(JdbcTemplate jdbc) {
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS restaurant_closure (
+                  closure_date DATE PRIMARY KEY,
+                  reason VARCHAR(200) NOT NULL,
+                  created_by VARCHAR(36),
+                  created_at TIMESTAMPTZ NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL
+                )
+                """);
     }
 
     /**

@@ -7,13 +7,16 @@ import com.saffron.cashflow.integration.dotykacka.DotykackaSyncService;
 import com.saffron.cashflow.repository.PosIntegrationRepository;
 import com.saffron.cashflow.repository.PosSaleRepository;
 import com.saffron.cashflow.security.AuthHelper;
+import com.saffron.cashflow.service.PosIngestService;
 import com.saffron.cashflow.service.PosIntegrationService;
 import com.saffron.cashflow.web.NotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,16 +32,19 @@ public class PosIntegrationController {
     private final DotykackaSyncService dotykackaSync;
     private final PosSaleRepository saleRepository;
     private final PosIntegrationRepository integrationRepository;
+    private final PosIngestService ingestService;
 
     public PosIntegrationController(
             PosIntegrationService service,
             DotykackaSyncService dotykackaSync,
             PosSaleRepository saleRepository,
-            PosIntegrationRepository integrationRepository) {
+            PosIntegrationRepository integrationRepository,
+            PosIngestService ingestService) {
         this.service = service;
         this.dotykackaSync = dotykackaSync;
         this.saleRepository = saleRepository;
         this.integrationRepository = integrationRepository;
+        this.ingestService = ingestService;
     }
 
     @GetMapping
@@ -189,6 +195,46 @@ public class PosIntegrationController {
         }
     }
 
+    /**
+     * Admin-only POS sale simulator. Builds a fake receipt from the request
+     * body and runs it through the same ingest path the live webhook uses,
+     * including the stock-decrement post-handler. Set {@code dryRun} to true
+     * to roll back every mutation just before returning — handy for verifying
+     * that menu→stock mappings produce the expected on-hand delta without
+     * actually moving inventory.
+     *
+     * <p>Returns the raw ingest summary (inserted / skipped / unmatched) plus
+     * a {@code stockImpact} array showing before/after on-hand for every
+     * stock item the simulated lines would have touched.</p>
+     */
+    @PostMapping("/{id}/simulate-sale")
+    public Map<String, Object> simulateSale(
+            @PathVariable String id,
+            @RequestBody SimulateSaleRequest req) {
+        List<PosIngestService.SimulationLine> lines = new ArrayList<>();
+        if (req.items() != null) {
+            for (SimulateSaleLine raw : req.items()) {
+                lines.add(new PosIngestService.SimulationLine(
+                        raw.menuItemId(),
+                        raw.sku(),
+                        raw.name(),
+                        raw.quantity(),
+                        raw.unitPrice()));
+            }
+        }
+        Instant occurredAt = null;
+        if (req.occurredAt() != null && !req.occurredAt().isBlank()) {
+            try { occurredAt = Instant.parse(req.occurredAt()); }
+            catch (Exception ignored) { /* keep null — service defaults to now */ }
+        }
+        PosIngestService.SimulationRequest simReq = new PosIngestService.SimulationRequest(
+                lines,
+                req.paymentMethod(),
+                occurredAt,
+                req.dryRun() != null && req.dryRun());
+        return ingestService.simulate(id, simReq);
+    }
+
     public record IntegrationRequest(String name, String vendor) {}
     public record DotykackaConfigRequest(
             String cloudId,
@@ -196,4 +242,17 @@ public class PosIntegrationController {
             String clientSecret,
             String refreshToken) {}
     public record RegisterWebhookRequest(String baseUrl) {}
+
+    public record SimulateSaleRequest(
+            List<SimulateSaleLine> items,
+            String paymentMethod,
+            String occurredAt,
+            Boolean dryRun) {}
+
+    public record SimulateSaleLine(
+            String menuItemId,
+            String sku,
+            String name,
+            BigDecimal quantity,
+            BigDecimal unitPrice) {}
 }

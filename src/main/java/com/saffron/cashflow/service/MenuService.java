@@ -384,6 +384,12 @@ public class MenuService {
     }
 
     @Transactional(readOnly = true)
+    public Optional<MenuItem> findById(String id) {
+        if (id == null || id.isBlank()) return Optional.empty();
+        return itemRepository.findById(id);
+    }
+
+    @Transactional(readOnly = true)
     public Map<String, MenuItem> mapByIds(List<String> ids) {
         Map<String, MenuItem> map = new HashMap<>();
         if (ids == null || ids.isEmpty()) return map;

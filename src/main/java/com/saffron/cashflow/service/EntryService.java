@@ -16,6 +16,7 @@ import com.saffron.cashflow.repository.AuditLogRepository;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.ExpenseItemRepository;
 import com.saffron.cashflow.repository.ReceiptFileRepository;
+import com.saffron.cashflow.repository.RestaurantClosureRepository;
 import com.saffron.cashflow.repository.SalaryPaymentRepository;
 import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
@@ -62,6 +63,7 @@ public class EntryService {
     private final TagService tagService;
     private final CommentService commentService;
     private final AuditLogRepository auditLogRepository;
+    private final RestaurantClosureRepository closureRepository;
 
     /** File category for POS card sales report uploads attached to a shift entry. */
     public static final String POS_REPORT_CATEGORY = "pos-report";
@@ -79,7 +81,8 @@ public class EntryService {
             SalaryPaymentRepository salaryPaymentRepository,
             @Lazy TagService tagService,
             @Lazy CommentService commentService,
-            AuditLogRepository auditLogRepository) {
+            AuditLogRepository auditLogRepository,
+            RestaurantClosureRepository closureRepository) {
         this.entryRepository = entryRepository;
         this.expenseRepository = expenseRepository;
         this.receiptFileRepository = receiptFileRepository;
@@ -93,6 +96,7 @@ public class EntryService {
         this.tagService = tagService;
         this.commentService = commentService;
         this.auditLogRepository = auditLogRepository;
+        this.closureRepository = closureRepository;
     }
 
     @Transactional(readOnly = true)
@@ -219,6 +223,7 @@ public class EntryService {
         if (!AuthHelper.isCashier() && (cashierId == null || cashierId.isBlank())) {
             throw new BadRequestException("cashierId is required");
         }
+        enforcePreviousShiftClosed(cashierId, date);
         Optional<DailyEntry> active = entryRepository.findByCashierIdAndDateAndDeletedAtIsNull(cashierId, date);
         if (active.isPresent()) {
             throw new ConflictException(Map.of(
@@ -346,6 +351,128 @@ public class EntryService {
         tagService.clearForEntity(com.saffron.cashflow.domain.TaggedEntityType.ENTRY, id);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE, "DailyEntry", entry.getId(), before, Map.of(),
                 Map.of("reason", reason));
+    }
+
+    /**
+     * Reassign a shift report to a different calendar date. Admin only —
+     * this changes the cashier's payroll-day attribution and the shift's
+     * position in the restaurant-handover chain, so it's strictly more
+     * sensitive than a normal field edit.
+     *
+     * <p>Rejects when:</p>
+     * <ul>
+     *   <li>The new date is in the future (same rule as {@link #create}).</li>
+     *   <li>An <i>active</i> report already exists on the target date for
+     *       the same cashier — admin must resolve the conflict first.</li>
+     *   <li>A <i>soft-deleted</i> report exists on the target date for
+     *       the same cashier — would violate the unique constraint on
+     *       {@code (cashier_id, entry_date)}.</li>
+     * </ul>
+     *
+     * <p>The audit row is tagged with {@code movedFromDate} /
+     * {@code movedToDate} so the move shows up cleanly in the entry's
+     * history drawer.</p>
+     */
+    @Transactional
+    public Map<String, Object> move(String id, String newDateStr, String reason) {
+        AuthHelper.requireAdmin();
+        if (newDateStr == null || newDateStr.isBlank()) {
+            throw new BadRequestException("New date is required");
+        }
+        LocalDate newDate;
+        try {
+            newDate = LocalDate.parse(newDateStr.trim());
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new BadRequestException("New date must be in YYYY-MM-DD format");
+        }
+        rejectFutureReportDate(newDate);
+
+        DailyEntry entry = load(id);
+        LocalDate oldDate = entry.getDate();
+        if (oldDate.equals(newDate)) {
+            return mapEntry(entry);
+        }
+
+        String cashierId = entry.getCashierId();
+        Optional<DailyEntry> activeConflict =
+                entryRepository.findByCashierIdAndDateAndDeletedAtIsNull(cashierId, newDate);
+        if (activeConflict.isPresent()) {
+            throw new ConflictException(Map.of(
+                    "error", "A shift report already exists for this cashier on " + newDate,
+                    "id", activeConflict.get().getId(),
+                    "newDate", newDate.toString()));
+        }
+        Optional<DailyEntry> deletedConflict = entryRepository.findByCashier_IdAndDate(cashierId, newDate)
+                .filter(e -> e.getDeletedAt() != null);
+        if (deletedConflict.isPresent()) {
+            throw new ConflictException(Map.of(
+                    "error", "A soft-deleted shift report blocks moving to " + newDate
+                            + ". Restore or hard-delete it before moving.",
+                    "id", deletedConflict.get().getId(),
+                    "newDate", newDate.toString()));
+        }
+
+        Map<String, Object> beforeForAudit = AuditSnapshots.entry(entry);
+        entry.setDate(newDate);
+        entryRepository.save(entry);
+        recalculateEntry(entry.getId());
+
+        DailyEntry saved = load(entry.getId());
+        Map<String, Object> afterForAudit = AuditSnapshots.entry(saved);
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("movedFromDate", oldDate.toString());
+        details.put("movedToDate", newDate.toString());
+        if (reason != null && !reason.isBlank()) {
+            details.put("reason", reason.trim());
+        }
+        auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "DailyEntry",
+                entry.getId(), beforeForAudit, afterForAudit, details);
+        return mapEntry(saved);
+    }
+
+    /**
+     * Block a cashier from creating a fresh shift report when their most
+     * recent prior shift is still in DRAFT — that is, "the existing shift
+     * was not fulfilled". Admins / managers always bypass.
+     *
+     * <p>The walk-back skips over <i>restaurant closure</i> days entirely:
+     * if Tuesday was a marked holiday, a forgotten draft on Monday will
+     * still block creating Wednesday's report (the holiday only fills
+     * its own date, not earlier ones). When a cashier was off on a day
+     * with no entry at all, that day is treated as a no-op — the chain
+     * keeps walking until it finds a real entry or runs out of lookback.</p>
+     *
+     * <p>Lookback is capped at 30 days so a single ancient forgotten
+     * draft doesn't permanently lock a returning cashier out of the
+     * system. After 30 days the gate falls open and the admin should
+     * clean up the orphaned draft via the audit / move tools.</p>
+     */
+    private void enforcePreviousShiftClosed(String cashierId, LocalDate requestedDate) {
+        if (!AuthHelper.isCashier()) return;
+        if (cashierId == null || cashierId.isBlank()) return;
+        LocalDate dayBefore = requestedDate.minusDays(1);
+        LocalDate lookback = requestedDate.minusDays(30);
+        Set<LocalDate> closures = closureRepository.dateSetBetween(lookback, dayBefore);
+
+        List<DailyEntry> recent =
+                entryRepository.findActiveByCashierBetweenDesc(cashierId, lookback, dayBefore);
+        for (DailyEntry prior : recent) {
+            if (closures.contains(prior.getDate())) continue;
+            if (prior.getStatus() == EntryStatus.LOCKED) return;
+            String detailedMessage =
+                    "Your shift on " + prior.getDate() + " is still a draft. "
+                            + "Submit it before filing a report for " + requestedDate
+                            + ", or ask an admin to mark " + prior.getDate()
+                            + " as a closure on the calendar.";
+            Map<String, Object> err = new LinkedHashMap<>();
+            err.put("error", detailedMessage);
+            err.put("message", detailedMessage);
+            err.put("blockingDate", prior.getDate().toString());
+            err.put("blockingEntryId", prior.getId());
+            err.put("requestedDate", requestedDate.toString());
+            err.put("reason", "PREVIOUS_SHIFT_OPEN");
+            throw new ConflictException(err);
+        }
     }
 
     /**
