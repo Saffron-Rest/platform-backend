@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.saffron.cashflow.domain.MenuItem;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.PosIntegration;
 import com.saffron.cashflow.domain.PosSale;
 import com.saffron.cashflow.domain.StockItem;
@@ -228,7 +229,7 @@ public class PosIngestService {
      */
     @Transactional
     public Map<String, Object> simulate(String integrationId, SimulationRequest req) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.POS_INTEGRATION_MANAGE);
         if (req == null || req.items() == null || req.items().isEmpty()) {
             throw new BadRequestException("At least one line item is required");
         }

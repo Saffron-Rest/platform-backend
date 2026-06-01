@@ -4,6 +4,7 @@ import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.AuditLog;
 import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.EntryStatus;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.Role;
 import com.saffron.cashflow.domain.ShiftType;
 import com.saffron.cashflow.dto.EntryRequest;
@@ -375,7 +376,7 @@ public class EntryService {
      */
     @Transactional
     public Map<String, Object> move(String id, String newDateStr, String reason) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.REPORTS_EDIT_OTHERS);
         if (newDateStr == null || newDateStr.isBlank()) {
             throw new BadRequestException("New date is required");
         }

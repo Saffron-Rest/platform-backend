@@ -1,6 +1,7 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.AuditAction;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.PosIntegration;
 import com.saffron.cashflow.integration.dotykacka.DotykackaClient;
 import com.saffron.cashflow.repository.PosIntegrationRepository;
@@ -55,7 +56,7 @@ public class PosIntegrationService {
 
     @Transactional
     public Map<String, Object> create(String name, String vendor) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.POS_INTEGRATION_MANAGE);
         String clean = requireName(name);
         repository.findFirstByNameIgnoreCase(clean).ifPresent(existing -> {
             throw new BadRequestException("Integration \"" + existing.getName() + "\" already exists");
@@ -82,7 +83,7 @@ public class PosIntegrationService {
             String clientId,
             String clientSecret,
             String refreshToken) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.POS_INTEGRATION_MANAGE);
         PosIntegration p = repository.findById(id).orElseThrow(() -> new NotFoundException("Integration not found"));
         p.setVendor("dotykacka");
         if (cloudId != null) p.setDotykackaCloudId(trimToNull(cloudId, 64));
@@ -103,7 +104,7 @@ public class PosIntegrationService {
 
     @Transactional
     public Map<String, Object> rotateSecret(String id) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.POS_INTEGRATION_MANAGE);
         PosIntegration p = repository.findById(id).orElseThrow(() -> new NotFoundException("Integration not found"));
         p.setWebhookSecret(generateSecret());
         p = repository.save(p);
@@ -114,7 +115,7 @@ public class PosIntegrationService {
 
     @Transactional
     public Map<String, Object> setActive(String id, boolean active) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.POS_INTEGRATION_MANAGE);
         PosIntegration p = repository.findById(id).orElseThrow(() -> new NotFoundException("Integration not found"));
         p.setActive(active);
         p = repository.save(p);
@@ -125,7 +126,7 @@ public class PosIntegrationService {
 
     @Transactional
     public void delete(String id) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.POS_INTEGRATION_MANAGE);
         PosIntegration p = repository.findById(id).orElseThrow(() -> new NotFoundException("Integration not found"));
         repository.delete(p);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE, "PosIntegration", id,
@@ -151,7 +152,7 @@ public class PosIntegrationService {
      */
     @Transactional
     public Map<String, Object> registerDotyposWebhook(String id, String overrideBaseUrl) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.POS_INTEGRATION_MANAGE);
         PosIntegration p = repository.findById(id).orElseThrow(() -> new NotFoundException("Integration not found"));
         if (!"dotykacka".equalsIgnoreCase(p.getVendor())) {
             throw new BadRequestException("Not a Dotykačka integration");
@@ -189,7 +190,7 @@ public class PosIntegrationService {
 
     @Transactional
     public Map<String, Object> unregisterDotyposWebhook(String id) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.POS_INTEGRATION_MANAGE);
         PosIntegration p = repository.findById(id).orElseThrow(() -> new NotFoundException("Integration not found"));
         if (p.getDotykackaWebhookId() != null
                 && p.getDotykackaRefreshToken() != null

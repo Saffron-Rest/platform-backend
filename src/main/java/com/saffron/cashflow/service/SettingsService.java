@@ -1,6 +1,7 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.AuditAction;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.util.AuditSnapshots;
 import com.saffron.cashflow.repository.SystemSettingRepository;
@@ -33,7 +34,7 @@ public class SettingsService {
     }
 
     public Map<String, Object> getPayrollSettings() {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SETTINGS_VIEW, Permission.SETTINGS_MANAGE);
         WeeklyOperatingHours weekly = loadWeeklyHours();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("weeklyHours", weekly.toApiMap());
@@ -70,7 +71,7 @@ public class SettingsService {
 
     @Transactional
     public Map<String, Object> updatePayrollSettings(Map<String, Object> body) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SETTINGS_MANAGE);
         Map<String, Object> before = settingRepository.findById(PAYROLL_KEY)
                 .map(s -> AuditSnapshots.sanitize(s.getValue()))
                 .orElse(Map.of());
@@ -105,7 +106,7 @@ public class SettingsService {
 
     @Transactional
     public Map<String, Object> updatePlatforms(Map<String, Boolean> platforms) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SETTINGS_MANAGE);
         Map<String, Object> before = new LinkedHashMap<>();
         loadPlatforms().forEach(before::put);
         SystemSetting setting = settingRepository.findById(PLATFORMS_KEY).orElse(new SystemSetting());

@@ -6,6 +6,7 @@ import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.ChecklistRun;
 import com.saffron.cashflow.domain.ChecklistTemplate;
 import com.saffron.cashflow.domain.ChecklistType;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.repository.ChecklistRunRepository;
 import com.saffron.cashflow.repository.ChecklistTemplateRepository;
@@ -110,7 +111,7 @@ public class ChecklistService {
 
     @Transactional
     public void deleteTemplate(String id) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.CHECKLISTS_CONFIGURE);
         AuthUser user = AuthHelper.currentUser();
         ChecklistTemplate t = requireTemplate(id);
         // Soft-delete by archiving — runs reference this row so a hard

@@ -76,4 +76,30 @@ public final class AuthHelper {
                             : "Missing permission: " + permission.name());
         }
     }
+
+    /**
+     * Allow access when the principal is admin <em>or</em> holds at
+     * least one of the listed permissions. Use this on operations that
+     * historically used {@link #requireAdmin()} but which an admin can
+     * delegate to a manager / cashier through the per-user permission
+     * overlay (e.g. {@code TEAM_MANAGE}, {@code SALARIES_MANAGE}).
+     *
+     * <p>Admins always pass — they implicitly hold every permission per
+     * the policy documented on {@link Permission}.</p>
+     */
+    public static void requireAdminOr(Permission... permissions) {
+        if (isAdmin()) return;
+        if (permissions != null) {
+            for (Permission p : permissions) {
+                if (hasPermission(p)) return;
+            }
+        }
+        if (permissions == null || permissions.length == 0) {
+            throw new ForbiddenException("Admin only");
+        }
+        throw new ForbiddenException(
+                "Admin only or missing permission "
+                        + permissions[0].name()
+                        + (permissions.length > 1 ? " (or equivalent)" : ""));
+    }
 }

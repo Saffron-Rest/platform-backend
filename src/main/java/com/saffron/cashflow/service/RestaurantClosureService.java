@@ -1,6 +1,7 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.AuditAction;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.RestaurantClosure;
 import com.saffron.cashflow.repository.RestaurantClosureRepository;
 import com.saffron.cashflow.security.AuthHelper;
@@ -43,7 +44,7 @@ public class RestaurantClosureService {
 
     @Transactional
     public Map<String, Object> create(String dateStr, String reason) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SETTINGS_MANAGE);
         LocalDate date = parseDate(dateStr);
         String cleanReason = requireReason(reason);
         if (repository.existsById(date)) {
@@ -66,7 +67,7 @@ public class RestaurantClosureService {
 
     @Transactional
     public Map<String, Object> update(String dateStr, String reason) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SETTINGS_MANAGE);
         LocalDate date = parseDate(dateStr);
         RestaurantClosure c = repository.findById(date)
                 .orElseThrow(() -> new NotFoundException("Closure not found"));
@@ -82,7 +83,7 @@ public class RestaurantClosureService {
 
     @Transactional
     public void delete(String dateStr) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SETTINGS_MANAGE);
         LocalDate date = parseDate(dateStr);
         RestaurantClosure c = repository.findById(date)
                 .orElseThrow(() -> new NotFoundException("Closure not found"));

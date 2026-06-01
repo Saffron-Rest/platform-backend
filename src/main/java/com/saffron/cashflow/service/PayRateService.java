@@ -3,6 +3,7 @@ package com.saffron.cashflow.service;
 import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.PayRateChange;
 import com.saffron.cashflow.domain.PayType;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.repository.PayRateChangeRepository;
 import com.saffron.cashflow.repository.UserRepository;
@@ -51,7 +52,7 @@ public class PayRateService {
 
     @Transactional(readOnly = true)
     public List<Map<String, Object>> listHistory(String userId) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SALARIES_VIEW, Permission.SALARIES_MANAGE, Permission.PAY_RATES_MANAGE);
         return payRateChangeRepository.findByUserIdOrderByEffectiveFromDescCreatedAtDesc(userId).stream()
                 .map(this::toMap)
                 .toList();
@@ -90,7 +91,7 @@ public class PayRateService {
     @Transactional
     public List<Map<String, Object>> addEntry(
             String userId, PayType payType, BigDecimal payAmount, LocalDate effectiveFrom, String notes) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.PAY_RATES_MANAGE);
         if (payAmount == null || payAmount.compareTo(BigDecimal.ZERO) < 0) {
             throw new BadRequestException("Pay amount cannot be negative");
         }
@@ -116,7 +117,7 @@ public class PayRateService {
             BigDecimal payAmount,
             LocalDate effectiveFrom,
             String notes) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.PAY_RATES_MANAGE);
         User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("User not found"));
         PayRateChange row = payRateChangeRepository.findById(entryId)
                 .orElseThrow(() -> new NotFoundException("Pay rate entry not found"));
@@ -142,7 +143,7 @@ public class PayRateService {
     /** Flat list of all pay-rate entries across every cashier (for the unified payroll page). */
     @Transactional(readOnly = true)
     public List<Map<String, Object>> listAllHistory() {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SALARIES_VIEW, Permission.SALARIES_MANAGE, Permission.PAY_RATES_MANAGE);
         Map<String, String> nameByUser = new LinkedHashMap<>();
         userRepository.findAll().forEach(u -> nameByUser.put(u.getId(), u.getName()));
         return payRateChangeRepository.findAll().stream()
@@ -163,7 +164,7 @@ public class PayRateService {
     /** Admin-driven: remove a single pay history entry and re-sync the user's current pay. */
     @Transactional
     public List<Map<String, Object>> deleteEntry(String userId, String entryId) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.PAY_RATES_MANAGE);
         User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("User not found"));
         PayRateChange row = payRateChangeRepository.findById(entryId)
                 .orElseThrow(() -> new NotFoundException("Pay rate entry not found"));

@@ -60,7 +60,7 @@ public class UserService {
 
     @Transactional
     public Map<String, Object> create(CreateUserRequest req) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.TEAM_MANAGE);
         String username = UserCredentials.normalizeUsername(req.username());
         if (userRepository.findByUsername(username).isPresent()) {
             throw new ConflictException("Username already exists");
@@ -92,9 +92,32 @@ public class UserService {
 
     @Transactional
     public Map<String, Object> update(String id, UpdateUserRequest req) {
-        AuthHelper.requireAdmin();
+        // Admins always pass; managers with TEAM_MANAGE can edit non-pay
+        // team fields. Pay-rate edits and password resets get an
+        // additional gate inside this method so a TEAM_MANAGE-only
+        // delegate can't sneak past their narrower mandate.
+        AuthHelper.requireAdminOr(Permission.TEAM_MANAGE, Permission.PAY_RATES_MANAGE, Permission.TEAM_RESET_PASSWORD);
         User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
         Map<String, Object> before = AuditSnapshots.user(user);
+
+        // Decide which scopes the request actually touches and gate
+        // each on its own permission. This keeps a TEAM_MANAGE delegate
+        // from sneaking in pay-rate or password-reset edits.
+        boolean touchesTeamFields =
+                req.name() != null
+                        || (req.username() != null && !req.username().isBlank())
+                        || req.email() != null
+                        || req.active() != null
+                        || req.role() != null
+                        || req.startDate() != null;
+        boolean touchesPassword = req.password() != null && !req.password().isBlank();
+        if (touchesTeamFields) {
+            AuthHelper.requireAdminOr(Permission.TEAM_MANAGE);
+        }
+        if (touchesPassword) {
+            AuthHelper.requireAdminOr(Permission.TEAM_RESET_PASSWORD);
+        }
+
         if (req.name() != null) user.setName(req.name());
         if (req.username() != null && !req.username().isBlank()) {
             String username = UserCredentials.normalizeUsername(req.username());
@@ -121,7 +144,7 @@ public class UserService {
             }
             user.setRole(req.role());
         }
-        if (req.password() != null && !req.password().isBlank()) {
+        if (touchesPassword) {
             user.setPasswordHash(passwordEncoder.encode(req.password()));
             user.setMustChangePassword(true);
         }
@@ -138,6 +161,7 @@ public class UserService {
             }
         }
         if (payChanged) {
+            AuthHelper.requireAdminOr(Permission.PAY_RATES_MANAGE);
             BigDecimal newAmount = amount != null ? amount : previousPayAmount;
             if (newAmount == null) {
                 throw new BadRequestException("Pay amount is required when changing pay");
@@ -180,7 +204,7 @@ public class UserService {
      */
     @Transactional
     public Map<String, Object> resetPassword(String id) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.TEAM_RESET_PASSWORD);
         String currentId = AuthHelper.currentUser().id();
         if (currentId.equals(id)) {
             throw new BadRequestException(
@@ -218,7 +242,7 @@ public class UserService {
 
     @Transactional
     public Map<String, Object> deactivate(String id) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.TEAM_MANAGE);
         if (id.equals(AuthHelper.currentUser().id())) {
             throw new BadRequestException("Cannot delete yourself");
         }

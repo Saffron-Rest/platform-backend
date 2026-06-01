@@ -138,6 +138,16 @@ public class AuthService {
         m.put("role", user.getRole().name());
         m.put("name", user.getName());
         m.put("mustChangePassword", user.isMustChangePassword());
+        // Ship the effective permission set so the frontend can gate UI
+        // (buttons, nav items, etc.) without a separate fetch and
+        // without going stale between admin grants and the next login.
+        java.util.Set<com.saffron.cashflow.domain.Permission> effective = effectivePermissions(user);
+        java.util.List<String> sorted = new java.util.ArrayList<>();
+        effective.stream()
+                .map(Enum::name)
+                .sorted()
+                .forEach(sorted::add);
+        m.put("effectivePermissions", sorted);
         return m;
     }
 

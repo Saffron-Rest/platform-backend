@@ -6,6 +6,7 @@ import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.HaccpKind;
 import com.saffron.cashflow.domain.HaccpLog;
 import com.saffron.cashflow.domain.HaccpStatus;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.repository.HaccpLogRepository;
 import com.saffron.cashflow.repository.UserRepository;
@@ -101,7 +102,7 @@ public class HaccpService {
 
     @Transactional
     public void delete(String id) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.HACCP_CONFIGURE);
         AuthUser user = AuthHelper.currentUser();
         HaccpLog h = require(id);
         Map<String, Object> before = snapshot(h);

@@ -1,6 +1,7 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.PayType;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.Role;
 import com.saffron.cashflow.domain.SalaryPayment;
 import com.saffron.cashflow.domain.User;
@@ -56,7 +57,7 @@ public class SalaryService {
 
     @Transactional(readOnly = true)
     public Map<String, Object> calculate(String fromParam, String toParam) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SALARIES_VIEW, Permission.SALARIES_MANAGE);
         LocalDate from = LocalDate.parse(fromParam);
         LocalDate to = LocalDate.parse(toParam);
         if (to.isBefore(from)) {

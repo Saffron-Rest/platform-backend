@@ -9,6 +9,7 @@ import com.saffron.cashflow.domain.EntryStatus;
 import com.saffron.cashflow.domain.ExpenseItem;
 import com.saffron.cashflow.domain.ManualDeliveryIncome;
 import com.saffron.cashflow.domain.PaymentSource;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.SalaryPayment;
 import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.domain.User;
@@ -712,7 +713,7 @@ public class TreasuryService {
 
     @Transactional
     public Map<String, Object> updateSettings(TreasurySettingsRequest req) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.TREASURY_MANAGE);
         validateRates(req.cardSalesSettlementRate(), req.platformSettlementRates());
 
         TreasurySettings settings = new TreasurySettings();
@@ -735,7 +736,7 @@ public class TreasuryService {
     @Transactional(readOnly = true)
     public List<Map<String, Object>> listSalaryPayments(
             String fromParam, String toParam, String userId, String source, String matchPeriod) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SALARIES_VIEW, Permission.SALARIES_MANAGE);
         List<SalaryPayment> payments;
         if (fromParam != null && toParam != null) {
             LocalDate from = LocalDate.parse(fromParam);
@@ -766,7 +767,7 @@ public class TreasuryService {
 
     @Transactional
     public Map<String, Object> recordSalaryPayment(RecordSalaryPaymentRequest req) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SALARIES_MANAGE);
         User employee = userRepository.findById(req.userId())
                 .orElseThrow(() -> new NotFoundException("Employee not found"));
 
@@ -807,7 +808,7 @@ public class TreasuryService {
 
     @Transactional
     public Map<String, Object> updateSalaryPayment(String id, UpdateSalaryPaymentRequest req) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SALARIES_MANAGE);
         SalaryPayment payment = salaryPaymentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Salary payment not found"));
         Map<String, Object> before = paymentToMap(payment);
@@ -869,7 +870,7 @@ public class TreasuryService {
 
     @Transactional
     public Map<String, Object> deleteSalaryPayment(String id) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.SALARIES_MANAGE);
         SalaryPayment payment = salaryPaymentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Salary payment not found"));
         Map<String, Object> before = paymentToMap(payment);

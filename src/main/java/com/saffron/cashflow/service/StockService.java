@@ -2,6 +2,7 @@ package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.MenuItem;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.StockItem;
 import com.saffron.cashflow.domain.StockMovement;
 import com.saffron.cashflow.domain.StockMovementType;
@@ -171,7 +172,7 @@ public class StockService {
      */
     @Transactional
     public void deletePermanently(String id, String reason) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.STOCK_DELETE);
         AuthUser user = AuthHelper.currentUser();
         StockItem item = require(id);
         if (item.isActive()) {

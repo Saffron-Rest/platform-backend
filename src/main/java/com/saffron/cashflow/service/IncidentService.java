@@ -4,6 +4,7 @@ import com.saffron.cashflow.domain.AuditAction;
 import com.saffron.cashflow.domain.Incident;
 import com.saffron.cashflow.domain.IncidentSeverity;
 import com.saffron.cashflow.domain.IncidentStatus;
+import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.repository.IncidentRepository;
 import com.saffron.cashflow.repository.UserRepository;
@@ -167,7 +168,7 @@ public class IncidentService {
 
     @Transactional
     public void delete(String id) {
-        AuthHelper.requireAdmin();
+        AuthHelper.requireAdminOr(Permission.INCIDENTS_RESOLVE);
         AuthUser user = AuthHelper.currentUser();
         Incident i = require(id);
         Map<String, Object> before = snapshot(i);
