@@ -38,7 +38,66 @@ public class DatabaseMigrationRunner {
             migrateMenuRecipes(jdbc);
             migrateRestaurantClosures(jdbc);
             migrateSupplierPayables(jdbc);
+            migrateOwnerExpenses(jdbc);
         };
+    }
+
+    /**
+     * Owner-paid expenses awaiting reimbursement.
+     *
+     * <p>When the owner uses personal cash to cover a restaurant
+     * expense (cleaning supplies, an emergency repair, a Friday food
+     * delivery the cashier couldn't pay for), they record it here.
+     * The expense hits the P&amp;L on {@code expense_date} and the
+     * restaurant carries a liability until it pays the owner back.</p>
+     *
+     * <p>Two tables, mirrored on the supplier-payables design so the
+     * lifecycle (PENDING → PARTIAL → REIMBURSED → VOID), the partial
+     * settlement story, and the audit trail all behave identically.</p>
+     *
+     * <p>Idempotent — safe to run on every boot.</p>
+     */
+    private static void migrateOwnerExpenses(JdbcTemplate jdbc) {
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS owner_expense (
+                  id VARCHAR(36) PRIMARY KEY,
+                  owner_user_id VARCHAR(36) NOT NULL,
+                  expense_date DATE NOT NULL,
+                  category VARCHAR(40) NOT NULL DEFAULT 'OTHER',
+                  description VARCHAR(300) NOT NULL,
+                  total NUMERIC(12,2) NOT NULL,
+                  amount_reimbursed NUMERIC(12,2) NOT NULL DEFAULT 0,
+                  status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                  reference VARCHAR(120),
+                  notes TEXT,
+                  created_by VARCHAR(36),
+                  created_at TIMESTAMPTZ NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL,
+                  voided_at TIMESTAMPTZ,
+                  voided_by VARCHAR(36)
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_owner_expense_owner ON owner_expense (owner_user_id, expense_date DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_owner_expense_status ON owner_expense (status, expense_date)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_owner_expense_category ON owner_expense (category, expense_date)");
+
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS owner_expense_reimbursement (
+                  id VARCHAR(36) PRIMARY KEY,
+                  owner_expense_id VARCHAR(36) NOT NULL REFERENCES owner_expense(id) ON DELETE CASCADE,
+                  paid_date DATE NOT NULL,
+                  amount NUMERIC(12,2) NOT NULL,
+                  method VARCHAR(20) NOT NULL DEFAULT 'CASH',
+                  reference VARCHAR(120),
+                  notes TEXT,
+                  created_by VARCHAR(36),
+                  created_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_owner_expense_reimb_expense ON owner_expense_reimbursement (owner_expense_id, paid_date DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_owner_expense_reimb_date ON owner_expense_reimbursement (paid_date)");
     }
 
     /**

@@ -12,6 +12,7 @@ import com.saffron.cashflow.domain.WorkShift;
 import com.saffron.cashflow.report.ProfitLossTemplate;
 import com.saffron.cashflow.domain.SalaryPayment;
 import com.saffron.cashflow.repository.DailyEntryRepository;
+import com.saffron.cashflow.repository.OwnerExpenseRepository;
 import com.saffron.cashflow.repository.SalaryPaymentRepository;
 import com.saffron.cashflow.repository.SupplierInvoiceRepository;
 import com.saffron.cashflow.repository.UserRepository;
@@ -60,6 +61,11 @@ public class ProfitLossService {
     // promised when the user picked "Full P&L impact" for credit
     // purchases. Payments don't move the P&L; only cash.
     private final SupplierInvoiceRepository supplierInvoiceRepository;
+    // Owner-paid expenses (out-of-pocket payments awaiting
+    // reimbursement) follow the same accrual rules as supplier
+    // invoices: the cost is recognised on expense_date; reimbursing
+    // the owner is a cash event only.
+    private final OwnerExpenseRepository ownerExpenseRepository;
 
     public ProfitLossService(
             DailyEntryRepository entryRepository,
@@ -70,7 +76,8 @@ public class ProfitLossService {
             ManualDeliveryService manualDeliveryService,
             ExpenseService expenseService,
             PayRateService payRateService,
-            SupplierInvoiceRepository supplierInvoiceRepository) {
+            SupplierInvoiceRepository supplierInvoiceRepository,
+            OwnerExpenseRepository ownerExpenseRepository) {
         this.entryRepository = entryRepository;
         this.userRepository = userRepository;
         this.workShiftRepository = workShiftRepository;
@@ -80,6 +87,7 @@ public class ProfitLossService {
         this.expenseService = expenseService;
         this.payRateService = payRateService;
         this.supplierInvoiceRepository = supplierInvoiceRepository;
+        this.ownerExpenseRepository = ownerExpenseRepository;
     }
 
     @Transactional(readOnly = true)
@@ -141,6 +149,17 @@ public class ProfitLossService {
             ExpenseCategory cat = row[0] instanceof ExpenseCategory ec
                     ? ec
                     : ExpenseCategory.SUPPLIER;
+            BigDecimal sum = row[1] == null ? BigDecimal.ZERO : (BigDecimal) row[1];
+            if (sum.signum() > 0) byCategory.merge(cat, sum, BigDecimal::add);
+        }
+        // Owner-paid expenses awaiting reimbursement: same accrual
+        // treatment as supplier invoices, just keyed off expense_date
+        // and the chosen ExpenseCategory. Voided rows are filtered out
+        // by the repository query.
+        for (Object[] row : ownerExpenseRepository.sumByCategoryBetween(from, to)) {
+            ExpenseCategory cat = row[0] instanceof ExpenseCategory ec
+                    ? ec
+                    : ExpenseCategory.OTHER;
             BigDecimal sum = row[1] == null ? BigDecimal.ZERO : (BigDecimal) row[1];
             if (sum.signum() > 0) byCategory.merge(cat, sum, BigDecimal::add);
         }

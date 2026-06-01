@@ -100,6 +100,12 @@ public enum Permission {
             "Open the supplier credit / accounts payable list and see outstanding balances."),
     PAYABLES_MANAGE(Category.FINANCE, "Manage payables",
             "Record supplier invoices on credit, edit them, and register payments against them."),
+    OWNER_EXPENSES_FILE(Category.FINANCE, "File owner expense",
+            "Record an expense paid out of the owner's pocket so the restaurant can reimburse it."),
+    OWNER_EXPENSES_VIEW(Category.FINANCE, "View owner expenses",
+            "See the list of owner-paid expenses and how much is still owed back to each owner."),
+    OWNER_EXPENSES_MANAGE(Category.FINANCE, "Manage owner expenses",
+            "Reimburse owners, void filings, and edit owner-expense entries."),
 
     // ───── Operations & compliance ─────
     INCIDENTS_VIEW(Category.OPERATIONS, "View incidents",
@@ -201,9 +207,11 @@ public enum Permission {
                     // People — visibility only
                     TEAM_VIEW,
                     // Finance — view-only on treasury, can edit expenses,
-                    // see payables but can't book new ones (admin only)
+                    // see payables / owner expenses but can't reimburse
+                    // owners (admin only)
                     EXPENSES_VIEW, EXPENSES_EDIT, TREASURY_VIEW,
                     PAYABLES_VIEW,
+                    OWNER_EXPENSES_VIEW, OWNER_EXPENSES_FILE,
                     // Operations
                     INCIDENTS_VIEW, INCIDENTS_FILE, INCIDENTS_RESOLVE,
                     CHECKLISTS_RUN, CHECKLISTS_CONFIGURE,
