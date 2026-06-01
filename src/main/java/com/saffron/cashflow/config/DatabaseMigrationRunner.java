@@ -37,7 +37,114 @@ public class DatabaseMigrationRunner {
             migrateUserPermissions(jdbc);
             migrateMenuRecipes(jdbc);
             migrateRestaurantClosures(jdbc);
+            migrateSupplierPayables(jdbc);
         };
+    }
+
+    /**
+     * Supplier accounts-payable schema.
+     *
+     * <p>Three-table design that keeps the accrual (P&amp;L hit on
+     * delivery) decoupled from the cash event (payment moves treasury):
+     * <ul>
+     *   <li>{@code supplier} — vendor master with default payment terms.</li>
+     *   <li>{@code supplier_invoice} — one row per delivery / bill.
+     *       {@code invoice_date} drives COGS recognition, {@code due_date}
+     *       drives aging, {@code amount_paid} is denormalised so the
+     *       list view doesn't have to join payments.</li>
+     *   <li>{@code supplier_invoice_line} — optional itemisation; each
+     *       line can point at a {@code stock_item} so the delivery posts
+     *       a {@code StockMovement(PURCHASE)} automatically.</li>
+     *   <li>{@code supplier_invoice_payment} — cash-out events.
+     *       Removing a payment is allowed; that's why it's a separate
+     *       table rather than just a column on the invoice.</li>
+     * </ul>
+     *
+     * <p>Idempotent — safe to run on every boot.</p>
+     */
+    private static void migrateSupplierPayables(JdbcTemplate jdbc) {
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS supplier (
+                  id VARCHAR(36) PRIMARY KEY,
+                  name VARCHAR(160) NOT NULL,
+                  contact_name VARCHAR(160),
+                  phone VARCHAR(64),
+                  email VARCHAR(160),
+                  vat_id VARCHAR(40),
+                  address VARCHAR(400),
+                  payment_terms_days INTEGER NOT NULL DEFAULT 7,
+                  notes TEXT,
+                  active BOOLEAN NOT NULL DEFAULT TRUE,
+                  created_by VARCHAR(36),
+                  created_at TIMESTAMPTZ NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_supplier_name_lower ON supplier (LOWER(name))");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_supplier_active ON supplier (active)");
+
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS supplier_invoice (
+                  id VARCHAR(36) PRIMARY KEY,
+                  supplier_id VARCHAR(36) NOT NULL REFERENCES supplier(id) ON DELETE RESTRICT,
+                  invoice_number VARCHAR(80),
+                  invoice_date DATE NOT NULL,
+                  due_date DATE NOT NULL,
+                  category VARCHAR(40) NOT NULL DEFAULT 'SUPPLIER',
+                  subtotal NUMERIC(12,2) NOT NULL DEFAULT 0,
+                  vat NUMERIC(12,2) NOT NULL DEFAULT 0,
+                  total NUMERIC(12,2) NOT NULL,
+                  amount_paid NUMERIC(12,2) NOT NULL DEFAULT 0,
+                  status VARCHAR(20) NOT NULL DEFAULT 'UNPAID',
+                  notes TEXT,
+                  created_by VARCHAR(36),
+                  created_at TIMESTAMPTZ NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL,
+                  voided_at TIMESTAMPTZ,
+                  voided_by VARCHAR(36)
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_supplier_invoice_supplier ON supplier_invoice (supplier_id, invoice_date DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_supplier_invoice_status ON supplier_invoice (status, due_date)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_supplier_invoice_invoice_date ON supplier_invoice (invoice_date)");
+
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS supplier_invoice_line (
+                  id VARCHAR(36) PRIMARY KEY,
+                  invoice_id VARCHAR(36) NOT NULL REFERENCES supplier_invoice(id) ON DELETE CASCADE,
+                  stock_item_id VARCHAR(36),
+                  description VARCHAR(300) NOT NULL,
+                  quantity NUMERIC(14,3) NOT NULL DEFAULT 1,
+                  unit VARCHAR(16) NOT NULL DEFAULT 'pcs',
+                  unit_cost NUMERIC(12,4) NOT NULL DEFAULT 0,
+                  line_total NUMERIC(12,2) NOT NULL DEFAULT 0,
+                  stock_movement_id VARCHAR(36),
+                  sort_order INTEGER NOT NULL DEFAULT 0,
+                  created_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_supplier_invoice_line_invoice ON supplier_invoice_line (invoice_id, sort_order)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_supplier_invoice_line_stock ON supplier_invoice_line (stock_item_id)");
+
+        jdbc.execute(
+                """
+                CREATE TABLE IF NOT EXISTS supplier_invoice_payment (
+                  id VARCHAR(36) PRIMARY KEY,
+                  invoice_id VARCHAR(36) NOT NULL REFERENCES supplier_invoice(id) ON DELETE CASCADE,
+                  payment_date DATE NOT NULL,
+                  amount NUMERIC(12,2) NOT NULL,
+                  method VARCHAR(20) NOT NULL DEFAULT 'BANK_TRANSFER',
+                  reference VARCHAR(120),
+                  notes TEXT,
+                  created_by VARCHAR(36),
+                  created_at TIMESTAMPTZ NOT NULL
+                )
+                """);
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_supplier_invoice_payment_invoice ON supplier_invoice_payment (invoice_id, payment_date DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_supplier_invoice_payment_date ON supplier_invoice_payment (payment_date)");
     }
 
     /**

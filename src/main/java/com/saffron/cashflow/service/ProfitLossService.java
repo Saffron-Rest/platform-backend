@@ -13,6 +13,7 @@ import com.saffron.cashflow.report.ProfitLossTemplate;
 import com.saffron.cashflow.domain.SalaryPayment;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.SalaryPaymentRepository;
+import com.saffron.cashflow.repository.SupplierInvoiceRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.repository.WorkShiftRepository;
 import com.saffron.cashflow.util.SalaryPaymentPeriod;
@@ -54,6 +55,11 @@ public class ProfitLossService {
     // accrued-labour total matches the Salaries panel after mid-period
     // pay changes.
     private final PayRateService payRateService;
+    // Supplier credit / accounts-payable invoices participate in COGS
+    // on the *invoice* (delivery) date — that's the accrual answer we
+    // promised when the user picked "Full P&L impact" for credit
+    // purchases. Payments don't move the P&L; only cash.
+    private final SupplierInvoiceRepository supplierInvoiceRepository;
 
     public ProfitLossService(
             DailyEntryRepository entryRepository,
@@ -63,7 +69,8 @@ public class ProfitLossService {
             SalaryPaymentRepository salaryPaymentRepository,
             ManualDeliveryService manualDeliveryService,
             ExpenseService expenseService,
-            PayRateService payRateService) {
+            PayRateService payRateService,
+            SupplierInvoiceRepository supplierInvoiceRepository) {
         this.entryRepository = entryRepository;
         this.userRepository = userRepository;
         this.workShiftRepository = workShiftRepository;
@@ -72,6 +79,7 @@ public class ProfitLossService {
         this.manualDeliveryService = manualDeliveryService;
         this.expenseService = expenseService;
         this.payRateService = payRateService;
+        this.supplierInvoiceRepository = supplierInvoiceRepository;
     }
 
     @Transactional(readOnly = true)
@@ -124,6 +132,17 @@ public class ProfitLossService {
         for (ExpenseItem standalone : expenseService.findStandaloneBetween(from, to)) {
             ExpenseCategory cat = standalone.getCategory() != null ? standalone.getCategory() : ExpenseCategory.OTHER;
             byCategory.merge(cat, standalone.getAmount(), BigDecimal::add);
+        }
+        // Credit-purchase / accounts-payable invoices: recognise their
+        // total under the configured category on invoice_date. We use
+        // the invoice total (subtotal + VAT, i.e. what we actually owe
+        // the supplier) so the P&L matches the eventual cash outflow.
+        for (Object[] row : supplierInvoiceRepository.sumByCategoryBetween(from, to)) {
+            ExpenseCategory cat = row[0] instanceof ExpenseCategory ec
+                    ? ec
+                    : ExpenseCategory.SUPPLIER;
+            BigDecimal sum = row[1] == null ? BigDecimal.ZERO : (BigDecimal) row[1];
+            if (sum.signum() > 0) byCategory.merge(cat, sum, BigDecimal::add);
         }
 
         BigDecimal cogs = sumCategories(byCategory, COGS);

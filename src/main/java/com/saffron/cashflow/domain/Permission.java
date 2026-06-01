@@ -96,6 +96,10 @@ public enum Permission {
             "Open the treasury panel and view cash positions."),
     TREASURY_MANAGE(Category.FINANCE, "Manage treasury",
             "Record deposits, withdrawals, and treasury settings."),
+    PAYABLES_VIEW(Category.FINANCE, "View payables",
+            "Open the supplier credit / accounts payable list and see outstanding balances."),
+    PAYABLES_MANAGE(Category.FINANCE, "Manage payables",
+            "Record supplier invoices on credit, edit them, and register payments against them."),
 
     // ───── Operations & compliance ─────
     INCIDENTS_VIEW(Category.OPERATIONS, "View incidents",
@@ -196,8 +200,10 @@ public enum Permission {
                     ATTENDANCE_VIEW, SCHEDULE_MANAGE,
                     // People — visibility only
                     TEAM_VIEW,
-                    // Finance — view-only on treasury, can edit expenses
+                    // Finance — view-only on treasury, can edit expenses,
+                    // see payables but can't book new ones (admin only)
                     EXPENSES_VIEW, EXPENSES_EDIT, TREASURY_VIEW,
+                    PAYABLES_VIEW,
                     // Operations
                     INCIDENTS_VIEW, INCIDENTS_FILE, INCIDENTS_RESOLVE,
                     CHECKLISTS_RUN, CHECKLISTS_CONFIGURE,

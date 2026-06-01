@@ -32,6 +32,7 @@ com/saffron/cashflow/util/WeeklyOperatingHours$DaySchedule.class
 com/saffron/cashflow/controller/SalaryController.class
 com/saffron/cashflow/controller/TotpController.class
 com/saffron/cashflow/service/AnalyticsService$Totals.class
+com/saffron/cashflow/domain/SupplierInvoiceStatus.class
 com/saffron/cashflow/controller/HealthController.class
 com/saffron/cashflow/controller/PosIntegrationController$DotykackaConfigRequest.class
 com/saffron/cashflow/service/SettingsService.class
@@ -101,6 +102,7 @@ com/saffron/cashflow/repository/SystemSettingRepository.class
 com/saffron/cashflow/service/ProfitLossService.class
 com/saffron/cashflow/web/ConflictException.class
 com/saffron/cashflow/domain/EmployeeCert.class
+com/saffron/cashflow/controller/SupplierController.class
 com/saffron/cashflow/service/EntrySpecification.class
 com/saffron/cashflow/service/PosSalePostHandler.class
 com/saffron/cashflow/domain/Incident.class
@@ -121,6 +123,7 @@ com/saffron/cashflow/dto/UpdatePayRateRequest.class
 com/saffron/cashflow/service/AlertService.class
 com/saffron/cashflow/service/HaccpService$1.class
 com/saffron/cashflow/repository/PayRateChangeRepository.class
+com/saffron/cashflow/domain/SupplierInvoice.class
 com/saffron/cashflow/controller/PosIntegrationController$SimulateSaleRequest.class
 com/saffron/cashflow/repository/UserTotpRepository.class
 com/saffron/cashflow/domain/ExpenseItem.class
@@ -131,6 +134,7 @@ com/saffron/cashflow/dto/RegisterPushTokenRequest.class
 com/saffron/cashflow/dto/TagAssignmentRequest.class
 com/saffron/cashflow/service/EmployeeCertService.class
 com/saffron/cashflow/domain/Role.class
+com/saffron/cashflow/repository/SupplierRepository.class
 com/saffron/cashflow/security/SecurityConfig.class
 com/saffron/cashflow/domain/TaggedEntityType.class
 com/saffron/cashflow/util/ShiftHoursUtil.class
@@ -149,6 +153,7 @@ com/saffron/cashflow/repository/ManualDeliveryIncomeRepository.class
 com/saffron/cashflow/repository/DailyEntryRepository.class
 com/saffron/cashflow/repository/MenuItemRepository.class
 com/saffron/cashflow/util/SalaryPaymentPeriod.class
+com/saffron/cashflow/domain/SupplierInvoicePayment$PaymentMethod.class
 com/saffron/cashflow/dto/CreateUserRequest.class
 com/saffron/cashflow/security/AuthHelper.class
 com/saffron/cashflow/controller/SearchController.class
@@ -180,6 +185,7 @@ com/saffron/cashflow/service/MenuAnalyticsService.class
 com/saffron/cashflow/service/HaccpService.class
 com/saffron/cashflow/repository/IncidentRepository.class
 com/saffron/cashflow/repository/ChecklistTemplateRepository.class
+com/saffron/cashflow/repository/SupplierInvoicePaymentRepository.class
 com/saffron/cashflow/repository/AlertRepository.class
 com/saffron/cashflow/service/RecipeService$CostBreakdown.class
 com/saffron/cashflow/domain/ReceiptFile.class
@@ -192,6 +198,7 @@ com/saffron/cashflow/repository/MenuCategoryRepository.class
 com/saffron/cashflow/report/PdfReportBuilder$FooterEvent.class
 com/saffron/cashflow/util/EntryMapper.class
 com/saffron/cashflow/dto/UpdateUserRequest.class
+com/saffron/cashflow/repository/SupplierInvoiceRepository.class
 com/saffron/cashflow/controller/TagController.class
 com/saffron/cashflow/domain/Tag.class
 com/saffron/cashflow/dto/LoginRequest.class
@@ -236,6 +243,7 @@ com/saffron/cashflow/repository/ExpenseItemRepository.class
 com/saffron/cashflow/controller/CardSettlementController.class
 com/saffron/cashflow/domain/CommentMention.class
 com/saffron/cashflow/dto/RevertEntryRequest.class
+com/saffron/cashflow/service/SupplierService.class
 com/saffron/cashflow/service/TelegramNotificationService.class
 com/saffron/cashflow/service/PosIntegrationService.class
 com/saffron/cashflow/util/WeeklyOperatingHours$1.class
@@ -245,12 +253,14 @@ com/saffron/cashflow/service/EntryService.class
 com/saffron/cashflow/service/DashboardService$1.class
 com/saffron/cashflow/dto/CopyWeekRequest.class
 com/saffron/cashflow/service/ChecklistService$2.class
+com/saffron/cashflow/domain/SupplierInvoiceLine.class
 com/saffron/cashflow/controller/ExpenseController$BulkIdsRequest.class
 com/saffron/cashflow/service/CommentService.class
 com/saffron/cashflow/domain/PayType.class
 com/saffron/cashflow/domain/MenuCategory.class
 com/saffron/cashflow/integration/dotykacka/DotykackaClient$CachedToken.class
 com/saffron/cashflow/controller/DotyposWebhookController.class
+com/saffron/cashflow/service/PayableService.class
 com/saffron/cashflow/domain/RestaurantClosure.class
 com/saffron/cashflow/domain/ChecklistRun.class
 com/saffron/cashflow/controller/CommentController$UpdateCommentRequest.class
@@ -270,6 +280,7 @@ com/saffron/cashflow/service/PosIngestService$SimulationRequest.class
 com/saffron/cashflow/service/EntryService$1.class
 com/saffron/cashflow/domain/StockMovementType.class
 com/saffron/cashflow/config/DatabaseMigrationRunner.class
+com/saffron/cashflow/domain/SupplierInvoicePayment.class
 com/saffron/cashflow/controller/SettingsController.class
 com/saffron/cashflow/domain/PushToken.class
 com/saffron/cashflow/integration/dotykacka/DotykackaSyncService$IngestStats.class
@@ -279,6 +290,7 @@ com/saffron/cashflow/service/FileStorageService.class
 com/saffron/cashflow/domain/SalaryPayment.class
 com/saffron/cashflow/controller/MenuController.class
 com/saffron/cashflow/controller/RecipeController.class
+com/saffron/cashflow/domain/Supplier.class
 com/saffron/cashflow/service/PosIngestService$StockSnapshot.class
 com/saffron/cashflow/dto/PayrollSettingsRequest.class
 com/saffron/cashflow/domain/Permission$Category.class
@@ -305,6 +317,7 @@ com/saffron/cashflow/controller/AlertController.class
 com/saffron/cashflow/controller/PosWebhookController.class
 com/saffron/cashflow/web/NotFoundException.class
 com/saffron/cashflow/dto/RecordSalaryPaymentRequest.class
+com/saffron/cashflow/controller/PayableController.class
 com/saffron/cashflow/repository/StockMovementRepository.class
 com/saffron/cashflow/controller/MenuAnalyticsController.class
 com/saffron/cashflow/service/ExportService$ExportResult.class
