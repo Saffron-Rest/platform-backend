@@ -469,6 +469,92 @@ public class OwnerExpenseService {
         return i >= 0 ? name.substring(i) : "";
     }
 
+    /**
+     * Edit a previously-recorded reimbursement: date, amount, method,
+     * reference, notes. The amount is bounded so the running total
+     * stays consistent (must not push {@code amountReimbursed} above
+     * the invoice {@code total}). Status is recomputed afterwards.
+     */
+    @Transactional
+    public Map<String, Object> updateReimbursement(
+            String expenseId, String reimbursementId, Map<String, Object> body) {
+        AuthHelper.requireAdminOr(Permission.OWNER_EXPENSES_MANAGE);
+        AuthUser actor = AuthHelper.currentUser();
+        OwnerExpense e = require(expenseId);
+        OwnerExpenseReimbursement r = reimbursementRepository.findById(reimbursementId)
+                .orElseThrow(() -> new NotFoundException("Reimbursement not found"));
+        if (r.getOwnerExpense() == null
+                || !r.getOwnerExpense().getId().equals(e.getId())) {
+            throw new BadRequestException("Reimbursement does not belong to this expense");
+        }
+        if (e.getStatus() == OwnerExpenseStatus.VOID) {
+            throw new ConflictException("Cannot edit a reimbursement on a cancelled expense");
+        }
+
+        BigDecimal originalAmount = r.getAmount() == null ? BigDecimal.ZERO : r.getAmount();
+
+        if (body.containsKey("paidDate")) {
+            LocalDate d = parseRequiredDate(body.get("paidDate"), "paidDate");
+            if (d.isAfter(LocalDate.now().plusDays(1))) {
+                throw new BadRequestException("Payment date cannot be in the future");
+            }
+            if (d.isBefore(e.getExpenseDate())) {
+                throw new BadRequestException(
+                        "Reimbursement date cannot precede the expense date ("
+                                + e.getExpenseDate() + ")");
+            }
+            r.setPaidDate(d);
+        }
+        if (body.containsKey("method")) {
+            r.setMethod(parseMethod(body.get("method"), r.getMethod()));
+        }
+        if (body.containsKey("reference")) {
+            r.setReference(stringOrNull(body.get("reference")));
+        }
+        if (body.containsKey("notes")) {
+            String n = stringOrNull(body.get("notes"));
+            if (n != null && n.length() > MAX_NOTES) {
+                throw new BadRequestException("Notes too long");
+            }
+            r.setNotes(n);
+        }
+        if (body.containsKey("amount")) {
+            BigDecimal newAmount = parseOptionalAmount(body.get("amount"));
+            if (newAmount == null || newAmount.signum() <= 0) {
+                throw new BadRequestException("Amount must be greater than zero");
+            }
+            newAmount = newAmount.setScale(2, RoundingMode.HALF_UP);
+            BigDecimal currentReimbursed = e.getAmountReimbursed() == null
+                    ? BigDecimal.ZERO
+                    : e.getAmountReimbursed();
+            BigDecimal projected = currentReimbursed.subtract(originalAmount).add(newAmount);
+            if (projected.compareTo(e.getTotal()) > 0) {
+                throw new BadRequestException(
+                        "Total reimbursements would exceed the expense total ("
+                                + e.getTotal().toPlainString() + "). "
+                                + "Maximum new amount: "
+                                + e.getTotal().subtract(currentReimbursed.subtract(originalAmount))
+                                        .toPlainString());
+            }
+            r.setAmount(newAmount);
+            e.setAmountReimbursed(projected);
+        }
+
+        reimbursementRepository.save(r);
+        recomputeStatus(e);
+        expenseRepository.save(e);
+
+        auditService.log(actor.id(), AuditAction.UPDATE, "OwnerExpenseReimbursement", r.getId(),
+                Map.of(
+                        "ownerExpenseId", e.getId(),
+                        "amount", r.getAmount(),
+                        "paidDate", r.getPaidDate().toString(),
+                        "method", r.getMethod().name(),
+                        "newOutstanding", e.outstanding(),
+                        "newStatus", e.getStatus().name()));
+        return toDetailMap(e, ownerNameMap(List.of(e)));
+    }
+
     @Transactional
     public Map<String, Object> deleteReimbursement(String expenseId, String reimbursementId) {
         AuthHelper.requireAdminOr(Permission.OWNER_EXPENSES_MANAGE);

@@ -81,6 +81,14 @@ public class OwnerExpenseController {
         return service.recordReimbursement(id, body);
     }
 
+    @PutMapping("/{id}/reimbursements/{reimbursementId}")
+    public Map<String, Object> updateReimbursement(
+            @PathVariable String id,
+            @PathVariable String reimbursementId,
+            @RequestBody Map<String, Object> body) {
+        return service.updateReimbursement(id, reimbursementId, body);
+    }
+
     @DeleteMapping("/{id}/reimbursements/{reimbursementId}")
     public Map<String, Object> deleteReimbursement(
             @PathVariable String id,

@@ -169,6 +169,29 @@ public class ExpenseService {
         if (o.getReference() != null) m.put("reference", o.getReference());
         m.put("tags", List.of());
         m.put("commentCount", 0L);
+        // Surface attached receipt photos / PDFs as "invoices" so the
+        // existing InvoiceGallery on the Finance ledger renders them
+        // identically to standalone-expense invoices. Lazy-fetched
+        // inside the read-only transaction.
+        List<com.saffron.cashflow.domain.ReceiptFile> receipts = o.getReceipts();
+        if (receipts != null && !receipts.isEmpty()) {
+            List<Map<String, Object>> files = new ArrayList<>();
+            for (com.saffron.cashflow.domain.ReceiptFile rf : receipts) {
+                Map<String, Object> fm = new LinkedHashMap<>();
+                fm.put("id", rf.getId());
+                fm.put("filename", rf.getFilename());
+                fm.put("path", rf.getPath());
+                if (rf.getCategory() != null && !rf.getCategory().isBlank()) {
+                    fm.put("category", rf.getCategory());
+                }
+                if (rf.getCreatedAt() != null) {
+                    fm.put("createdAt", rf.getCreatedAt().toString());
+                }
+                files.add(fm);
+            }
+            m.put("invoices", files);
+            m.put("invoice", files.get(0));
+        }
         return m;
     }
 
