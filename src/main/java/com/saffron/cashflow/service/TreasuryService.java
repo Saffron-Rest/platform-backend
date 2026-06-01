@@ -8,15 +8,19 @@ import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.EntryStatus;
 import com.saffron.cashflow.domain.ExpenseItem;
 import com.saffron.cashflow.domain.ManualDeliveryIncome;
+import com.saffron.cashflow.domain.OwnerExpense;
+import com.saffron.cashflow.domain.OwnerExpenseReimbursement;
 import com.saffron.cashflow.domain.PaymentSource;
 import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.SalaryPayment;
+import com.saffron.cashflow.domain.SupplierInvoicePayment;
 import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.domain.User;
 import com.saffron.cashflow.dto.RecordSalaryPaymentRequest;
 import com.saffron.cashflow.dto.TreasurySettingsRequest;
 import com.saffron.cashflow.dto.UpdateSalaryPaymentRequest;
 import com.saffron.cashflow.repository.DailyEntryRepository;
+import com.saffron.cashflow.repository.OwnerExpenseReimbursementRepository;
 import com.saffron.cashflow.repository.SalaryPaymentRepository;
 import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
@@ -59,6 +63,12 @@ public class TreasuryService {
     private final BankDepositService bankDepositService;
     private final TagService tagService;
     private final CommentService commentService;
+    // Owner-paid expense reimbursements: when the restaurant pays back
+    // an owner from the till (CASH) or from a card account (CARD),
+    // that's a real cash-out movement and belongs in this ledger. Bank
+    // transfers / cheques / "other" are bookkeeping-only here because
+    // the till and card accounts didn't move.
+    private final OwnerExpenseReimbursementRepository ownerReimbursementRepository;
 
     public TreasuryService(
             SystemSettingRepository settingRepository,
@@ -71,7 +81,8 @@ public class TreasuryService {
             CardSettlementService cardSettlementService,
             BankDepositService bankDepositService,
             @Lazy TagService tagService,
-            @Lazy CommentService commentService) {
+            @Lazy CommentService commentService,
+            OwnerExpenseReimbursementRepository ownerReimbursementRepository) {
         this.settingRepository = settingRepository;
         this.entryRepository = entryRepository;
         this.salaryPaymentRepository = salaryPaymentRepository;
@@ -83,6 +94,7 @@ public class TreasuryService {
         this.bankDepositService = bankDepositService;
         this.tagService = tagService;
         this.commentService = commentService;
+        this.ownerReimbursementRepository = ownerReimbursementRepository;
     }
 
     /** Default settlement % — any logged-in user (for shift report form). */
@@ -316,6 +328,23 @@ public class TreasuryService {
         }
     }
 
+    /**
+     * Map a supplier-/owner-payment method onto the till/card ledger.
+     *
+     * <p>{@code BANK_TRANSFER}, {@code CHEQUE}, and {@code OTHER} are
+     * real money movements but they happen at the bank — neither the
+     * cash drawer nor the card account are touched, so we return
+     * {@code null} and skip them on this ledger.</p>
+     */
+    private static PaymentSource methodToLedgerSource(SupplierInvoicePayment.PaymentMethod method) {
+        if (method == null) return null;
+        return switch (method) {
+            case CASH -> PaymentSource.CASH;
+            case CARD -> PaymentSource.CARD;
+            case BANK_TRANSFER, CHEQUE, OTHER -> null;
+        };
+    }
+
     private BigDecimal sumMovementsBefore(PaymentSource source, LocalDate from, TreasurySettings settings) {
         if (from.isEqual(LocalDate.MIN)) return BigDecimal.ZERO;
         LocalDate earliest = LocalDate.of(2000, 1, 1);
@@ -453,6 +482,52 @@ public class TreasuryService {
                     p.getId());
             if (p.getNotes() != null && !p.getNotes().isBlank()) {
                 row.put("notes", p.getNotes());
+            }
+            rows.add(row);
+        }
+
+        // 5) Owner-expense reimbursements: cash going *out* of the till
+        //    (or card account) when the restaurant pays the owner back
+        //    for an out-of-pocket expense. Other methods (bank
+        //    transfer, cheque, "other") are real money movements but
+        //    they happen at the bank, not in the till — they aren't
+        //    surfaced on this CASH/CARD ledger.
+        for (OwnerExpenseReimbursement r : ownerReimbursementRepository.findByPaidDateBetween(from, to)) {
+            PaymentSource ledgerSource = methodToLedgerSource(r.getMethod());
+            if (ledgerSource == null || ledgerSource != source) continue;
+            BigDecimal amt = r.getAmount();
+            if (amt == null || amt.signum() <= 0) continue;
+            OwnerExpense exp = r.getOwnerExpense();
+            String ownerName = exp == null
+                    ? "Owner"
+                    : userRepository.findById(exp.getOwnerUserId())
+                            .map(User::getName)
+                            .orElse("Owner");
+            String label = "Owner reimbursement · " + ownerName;
+            if (exp != null && exp.getDescription() != null && !exp.getDescription().isBlank()) {
+                label += " (" + exp.getDescription() + ")";
+            }
+            String refId = exp != null ? exp.getId() : r.getId();
+            Map<String, Object> row = baseRow(
+                    r.getPaidDate().toString(),
+                    "OWNER_REIMBURSEMENT",
+                    "STANDALONE_EXPENSE",
+                    label,
+                    amt,
+                    "-",
+                    refId != null
+                            ? "/admin/owner-expenses?focus=" + refId
+                            : "/admin/owner-expenses",
+                    "Open owner expense",
+                    refId);
+            if (r.getReference() != null && !r.getReference().isBlank()) {
+                row.put("notes",
+                        (r.getNotes() != null && !r.getNotes().isBlank()
+                                ? r.getNotes() + " · "
+                                : "")
+                                + "Ref " + r.getReference());
+            } else if (r.getNotes() != null && !r.getNotes().isBlank()) {
+                row.put("notes", r.getNotes());
             }
             rows.add(row);
         }
