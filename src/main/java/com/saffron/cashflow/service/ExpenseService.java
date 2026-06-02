@@ -394,6 +394,9 @@ public class ExpenseService {
 
     @Transactional
     public List<Map<String, Object>> sync(String entryId, List<ExpenseItemRequest> items) {
+        if (items == null) {
+            throw new BadRequestException("Expense list is required");
+        }
         DailyEntry entry = verifyEntryAccess(entryId);
         assertEditable(entry);
         migrateLegacyIfNeeded(entryId);

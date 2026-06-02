@@ -1,7 +1,9 @@
 package com.saffron.cashflow.web;
 
 import com.saffron.cashflow.security.ForbiddenException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
+import java.io.IOException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -68,6 +70,12 @@ public class ApiExceptionHandler {
                 .body(Map.of("error", "API endpoint not found. Restart the backend if you recently updated the app."));
     }
 
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<Map<String, String>> optimisticLock(OptimisticLockingFailureException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Map.of("error", "This report was modified by someone else. Please reload and try again."));
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> illegalArg(IllegalArgumentException ex) {
         // Service layer uses IllegalArgumentException for "user-facing" 4xx
@@ -75,6 +83,13 @@ public class ApiExceptionHandler {
         // Spring maps these to 500, which the FE shows as a generic failure.
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Map.of("error", ex.getMessage() != null ? ex.getMessage() : "Bad request"));
+    }
+
+    @ExceptionHandler(IOException.class)
+    public ResponseEntity<Map<String, String>> ioError(IOException ex) {
+        ex.printStackTrace();
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Could not save the uploaded file. Please try again or use a smaller file."));
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)

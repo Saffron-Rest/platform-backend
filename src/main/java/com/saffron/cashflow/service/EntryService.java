@@ -25,6 +25,7 @@ import com.saffron.cashflow.util.TreasurySettings;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.security.AuthUser;
 import com.saffron.cashflow.security.ForbiddenException;
+import com.saffron.cashflow.util.AuditKeys;
 import com.saffron.cashflow.util.AuditSnapshots;
 import com.saffron.cashflow.util.EntryCalculator;
 import com.saffron.cashflow.util.EntryMapper;
@@ -126,9 +127,13 @@ public class EntryService {
                 com.saffron.cashflow.domain.TaggedEntityType.ENTRY, ids);
         Map<String, Long> commentsByEntry = commentService.countByEntities(
                 com.saffron.cashflow.domain.TaggedEntityType.ENTRY, ids);
+        // Batch-load all cashiers in one query instead of one load() call per entry.
+        Map<String, DailyEntry> withCashier = entryRepository.findAllByIdsWithCashier(ids)
+                .stream().collect(Collectors.toMap(DailyEntry::getId, e -> e));
         return rows.stream()
                 .map(e -> {
-                    Map<String, Object> m = new LinkedHashMap<>(mapEntry(load(e.getId())));
+                    DailyEntry full = withCashier.getOrDefault(e.getId(), e);
+                    Map<String, Object> m = new LinkedHashMap<>(mapEntry(full));
                     m.put("tags", tagsByEntry.getOrDefault(e.getId(), List.of()));
                     m.put("commentCount", commentsByEntry.getOrDefault(e.getId(), 0L));
                     return m;
@@ -247,7 +252,7 @@ public class EntryService {
             recalculateEntry(entry.getId());
             DailyEntry saved = load(entry.getId());
             auditService.logChange(user.id(), AuditAction.UPDATE, "DailyEntry", entry.getId(), beforeRestore, AuditSnapshots.entry(saved),
-                    Map.of("restored", true));
+                    Map.of(AuditKeys.RESTORED, true));
             return mapEntry(saved);
         }
 
@@ -261,7 +266,7 @@ public class EntryService {
         recalculateEntry(entry.getId());
         DailyEntry saved = load(entry.getId());
         auditService.logChange(user.id(), AuditAction.CREATE, "DailyEntry", entry.getId(), Map.of(), AuditSnapshots.entry(saved),
-                Map.of("date", date.toString(), "cashierId", cashierId));
+                Map.of(AuditKeys.DATE, date.toString(), AuditKeys.CASHIER_ID, cashierId));
         return mapEntry(saved);
     }
 
@@ -351,7 +356,7 @@ public class EntryService {
         // resolve back to a visible record).
         tagService.clearForEntity(com.saffron.cashflow.domain.TaggedEntityType.ENTRY, id);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.DELETE, "DailyEntry", entry.getId(), before, Map.of(),
-                Map.of("reason", reason));
+                Map.of(AuditKeys.REASON, reason));
     }
 
     /**
@@ -421,10 +426,10 @@ public class EntryService {
         DailyEntry saved = load(entry.getId());
         Map<String, Object> afterForAudit = AuditSnapshots.entry(saved);
         Map<String, Object> details = new LinkedHashMap<>();
-        details.put("movedFromDate", oldDate.toString());
-        details.put("movedToDate", newDate.toString());
+        details.put(AuditKeys.MOVED_FROM_DATE, oldDate.toString());
+        details.put(AuditKeys.MOVED_TO_DATE, newDate.toString());
         if (reason != null && !reason.isBlank()) {
-            details.put("reason", reason.trim());
+            details.put(AuditKeys.REASON, reason.trim());
         }
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "DailyEntry",
                 entry.getId(), beforeForAudit, afterForAudit, details);
@@ -563,9 +568,9 @@ public class EntryService {
         DailyEntry saved = load(entry.getId());
         Map<String, Object> afterForAudit = AuditSnapshots.entry(saved);
         Map<String, Object> extra = new LinkedHashMap<>();
-        extra.put("revertedFromAuditId", auditId);
-        extra.put("revertedAction", audit.getAction().name());
-        extra.put("reason", trimmedReason);
+        extra.put(AuditKeys.REVERTED_FROM_AUDIT_ID, auditId);
+        extra.put(AuditKeys.REVERTED_ACTION, audit.getAction().name());
+        extra.put(AuditKeys.REASON, trimmedReason);
         auditService.logChange(user.id(), AuditAction.UPDATE, "DailyEntry", entry.getId(),
                 beforeForAudit, afterForAudit, extra);
 

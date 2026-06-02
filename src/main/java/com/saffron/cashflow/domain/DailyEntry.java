@@ -72,6 +72,9 @@ public class DailyEntry {
     private Instant deletedAt;
     private String deleteReason;
 
+    @Version
+    private Long version;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -98,6 +101,7 @@ public class DailyEntry {
     }
 
     public String getId() { return id; }
+    public Long getVersion() { return version; }
     public LocalDate getDate() { return date; }
     public void setDate(LocalDate date) { this.date = date; }
     public String getCashierId() { return cashier != null ? cashier.getId() : null; }
