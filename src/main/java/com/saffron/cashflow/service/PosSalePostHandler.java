@@ -1,12 +1,21 @@
 package com.saffron.cashflow.service;
 
+import com.saffron.cashflow.domain.DailyEntry;
+import com.saffron.cashflow.domain.EntryStatus;
 import com.saffron.cashflow.domain.PosSale;
 import com.saffron.cashflow.domain.StockItem;
+import com.saffron.cashflow.repository.DailyEntryRepository;
+import com.saffron.cashflow.repository.PosSaleRepository;
 import com.saffron.cashflow.repository.StockItemRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -30,10 +39,65 @@ public class PosSalePostHandler {
 
     private final StockItemRepository stockItemRepository;
     private final StockService stockService;
+    private final PosSaleRepository posSaleRepository;
+    private final DailyEntryRepository entryRepository;
+    private final EntryService entryService;
 
-    public PosSalePostHandler(StockItemRepository stockItemRepository, StockService stockService) {
+    public PosSalePostHandler(StockItemRepository stockItemRepository,
+                              StockService stockService,
+                              PosSaleRepository posSaleRepository,
+                              DailyEntryRepository entryRepository,
+                              @Lazy EntryService entryService) {
         this.stockItemRepository = stockItemRepository;
         this.stockService = stockService;
+        this.posSaleRepository = posSaleRepository;
+        this.entryRepository = entryRepository;
+        this.entryService = entryService;
+    }
+
+    /**
+     * Aggregates all POS sales for a given business day and auto-populates the
+     * corresponding cashier's DailyEntry with cash and card totals.
+     *
+     * <p>Called at POS shift close. Only populates DRAFT entries — a locked or
+     * submitted entry is never overwritten. Sets {@code posAutoPopulated = true}
+     * so the cashier report UI can show "Pre-filled from POS" and ask for
+     * confirmation rather than manual entry.</p>
+     */
+    @Transactional
+    public void autoPopulateDailyEntry(String cashierId, LocalDate businessDay) {
+        List<PosSale> sales = posSaleRepository.findByBusinessDay(businessDay);
+        if (sales.isEmpty()) return;
+
+        BigDecimal cashTotal = BigDecimal.ZERO;
+        BigDecimal cardTotal = BigDecimal.ZERO;
+        for (PosSale s : sales) {
+            BigDecimal gross = s.getUnitPrice()
+                    .multiply(s.getQuantity())
+                    .subtract(s.getDiscountAmount() != null ? s.getDiscountAmount().multiply(s.getQuantity()) : BigDecimal.ZERO);
+            String method = s.getPaymentMethod() != null ? s.getPaymentMethod().toUpperCase() : "CASH";
+            if (method.contains("CARD") || method.contains("CREDIT") || method.contains("DEBIT")) {
+                cardTotal = cardTotal.add(gross);
+            } else {
+                cashTotal = cashTotal.add(gross);
+            }
+        }
+
+        Optional<DailyEntry> entryOpt = entryRepository.findByCashierIdAndDateAndDeletedAtIsNull(cashierId, businessDay);
+        if (entryOpt.isEmpty()) return;
+        DailyEntry entry = entryOpt.get();
+        if (entry.getStatus() != EntryStatus.DRAFT) return;
+
+        entry.setCashSales(cashTotal.setScale(2, java.math.RoundingMode.HALF_UP));
+        entry.setCardSales(cardTotal.setScale(2, java.math.RoundingMode.HALF_UP));
+        entry.setPosAutoPopulated(true);
+        entryRepository.save(entry);
+        try {
+            entryService.recalculateEntry(entry.getId());
+        } catch (Exception ex) {
+            LOG.warn("Failed to recalculate entry {} after POS auto-populate: {}", entry.getId(), ex.getMessage());
+        }
+        LOG.info("Auto-populated DailyEntry {} from POS: cash={} card={}", entry.getId(), cashTotal, cardTotal);
     }
 
     /**

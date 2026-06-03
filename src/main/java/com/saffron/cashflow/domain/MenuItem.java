@@ -69,6 +69,14 @@ public class MenuItem {
     @Column(name = "featured", nullable = false, columnDefinition = "boolean default false")
     private boolean featured = false;
 
+    /** Whether this item should appear on the Saffron POS ordering screen. */
+    @Column(name = "pos_available", nullable = false, columnDefinition = "boolean default true")
+    private boolean posAvailable = true;
+
+    /** Display order on the POS grid within its category. Lower numbers appear first. */
+    @Column(name = "pos_display_order", nullable = false, columnDefinition = "integer default 0")
+    private int posDisplayOrder = 0;
+
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
@@ -119,6 +127,10 @@ public class MenuItem {
     public void setAllergens(String allergens) { this.allergens = allergens; }
     public boolean isFeatured() { return featured; }
     public void setFeatured(boolean featured) { this.featured = featured; }
+    public boolean isPosAvailable() { return posAvailable; }
+    public void setPosAvailable(boolean posAvailable) { this.posAvailable = posAvailable; }
+    public int getPosDisplayOrder() { return posDisplayOrder; }
+    public void setPosDisplayOrder(int posDisplayOrder) { this.posDisplayOrder = posDisplayOrder; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public Instant getArchivedAt() { return archivedAt; }

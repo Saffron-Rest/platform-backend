@@ -83,6 +83,24 @@ public class PosSale {
     @Column(name = "received_at", nullable = false, updatable = false)
     private Instant receivedAt;
 
+    /** VAT rate applied to this line (% e.g. 8.00 or 23.00).
+     *  Snapshotted from MenuItem.vatRatePct at ingest time. */
+    @Column(name = "vat_rate_pct", precision = 5, scale = 2)
+    private BigDecimal vatRatePct;
+
+    /** Net (ex-VAT) amount = quantity × unitPrice / (1 + vatRate). */
+    @Column(name = "vat_net_amount", precision = 12, scale = 2)
+    private BigDecimal vatNetAmount;
+
+    /** VAT amount = gross - net. */
+    @Column(name = "vat_amount", precision = 12, scale = 2)
+    private BigDecimal vatAmount;
+
+    /** Fiscal receipt number assigned by the kasa fiskalna after printing.
+     *  Null until the receipt is physically printed and confirmed. */
+    @Column(name = "fiscal_receipt_number", length = 64)
+    private String fiscalReceiptNumber;
+
     @PrePersist
     void onCreate() {
         if (id == null) id = UUID.randomUUID().toString();
@@ -118,4 +136,12 @@ public class PosSale {
     public LocalDate getBusinessDay() { return businessDay; }
     public void setBusinessDay(LocalDate businessDay) { this.businessDay = businessDay; }
     public Instant getReceivedAt() { return receivedAt; }
+    public BigDecimal getVatRatePct() { return vatRatePct; }
+    public void setVatRatePct(BigDecimal vatRatePct) { this.vatRatePct = vatRatePct; }
+    public BigDecimal getVatNetAmount() { return vatNetAmount; }
+    public void setVatNetAmount(BigDecimal vatNetAmount) { this.vatNetAmount = vatNetAmount; }
+    public BigDecimal getVatAmount() { return vatAmount; }
+    public void setVatAmount(BigDecimal vatAmount) { this.vatAmount = vatAmount; }
+    public String getFiscalReceiptNumber() { return fiscalReceiptNumber; }
+    public void setFiscalReceiptNumber(String fiscalReceiptNumber) { this.fiscalReceiptNumber = fiscalReceiptNumber; }
 }

@@ -14,6 +14,8 @@ public interface PosSaleRepository extends JpaRepository<PosSale, String> {
 
     Optional<PosSale> findByIntegrationIdAndExternalId(String integrationId, String externalId);
 
+    List<PosSale> findByBusinessDay(LocalDate businessDay);
+
     List<PosSale> findByBusinessDayBetween(LocalDate from, LocalDate to);
 
     @Query("select s from PosSale s where s.businessDay between :from and :to order by s.occurredAt asc")

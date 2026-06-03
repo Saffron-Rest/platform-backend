@@ -69,6 +69,11 @@ public class DailyEntry {
 
     private String notes;
     private Instant submittedAt;
+
+    /** True when cash/card totals were auto-populated from POS sales data
+     *  rather than entered manually. Cashier confirms rather than types. */
+    @Column(name = "pos_auto_populated", nullable = false, columnDefinition = "boolean default false")
+    private boolean posAutoPopulated = false;
     private Instant deletedAt;
     private String deleteReason;
 
@@ -102,6 +107,8 @@ public class DailyEntry {
 
     public String getId() { return id; }
     public Long getVersion() { return version; }
+    public boolean isPosAutoPopulated() { return posAutoPopulated; }
+    public void setPosAutoPopulated(boolean posAutoPopulated) { this.posAutoPopulated = posAutoPopulated; }
     public LocalDate getDate() { return date; }
     public void setDate(LocalDate date) { this.date = date; }
     public String getCashierId() { return cashier != null ? cashier.getId() : null; }
