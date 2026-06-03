@@ -111,4 +111,59 @@ public class PosOrderController {
         if (item == null) throw new com.saffron.cashflow.web.NotFoundException("No item found for barcode: " + code);
         return item;
     }
+
+    // ── Discounts ────────────────────────────────────────────────────────────
+
+    /** Apply item or order discount. Body: { type, lineId?, value, isPercentage } */
+    @PostMapping("/orders/{id}/discount")
+    public Map<String, Object> applyDiscount(@PathVariable String id, @RequestBody Map<String, Object> req) {
+        return posOrderService.applyDiscount(id, req);
+    }
+
+    @DeleteMapping("/orders/{id}/discount")
+    public Map<String, Object> clearDiscount(@PathVariable String id) {
+        return posOrderService.clearDiscount(id);
+    }
+
+    // ── Combined payment ─────────────────────────────────────────────────────
+
+    /** Pay with multiple methods. Body: { payments: [{method,amount}], tipAmount?, buyerNip? } */
+    @PostMapping("/orders/{id}/pay-multi")
+    public Map<String, Object> payMulti(@PathVariable String id, @RequestBody Map<String, Object> req) {
+        return posOrderService.payOrderMulti(id, req);
+    }
+
+    // ── Customer display ─────────────────────────────────────────────────────
+
+    /** Polling endpoint for the customer-facing display screen. */
+    @GetMapping("/display/order")
+    public Map<String, Object> displayOrder() {
+        return posOrderService.currentDisplayOrder();
+    }
+
+    // ── Happy Hours / time-based pricing ─────────────────────────────────────
+
+    @GetMapping("/time-prices")
+    public List<Map<String, Object>> listTimePrices(
+            @RequestParam(required = false) String menuItemId) {
+        return posOrderService.listTimeBasedPrices(menuItemId);
+    }
+
+    @PostMapping("/time-prices")
+    @ResponseStatus(HttpStatus.CREATED)
+    public Map<String, Object> saveTimePrice(@RequestBody Map<String, Object> req) {
+        return posOrderService.saveTimeBasedPrice(req);
+    }
+
+    @PutMapping("/time-prices/{id}")
+    public Map<String, Object> updateTimePrice(@PathVariable String id, @RequestBody Map<String, Object> req) {
+        req.put("id", id);
+        return posOrderService.saveTimeBasedPrice(req);
+    }
+
+    @DeleteMapping("/time-prices/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteTimePrice(@PathVariable String id) {
+        posOrderService.deleteTimeBasedPrice(id);
+    }
 }
