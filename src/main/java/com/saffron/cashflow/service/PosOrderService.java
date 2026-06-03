@@ -53,11 +53,21 @@ public class PosOrderService {
                     return cmp != 0 ? cmp : Integer.compare(a.getPosDisplayOrder(), b.getPosDisplayOrder());
                 })
                 .toList();
+        // Build id→name lookup so category tabs show real names, not UUIDs.
+        java.util.Map<String, String> catNames = new java.util.HashMap<>();
+        java.util.Map<String, Integer> catOrder = new java.util.HashMap<>();
+        for (com.saffron.cashflow.domain.MenuCategory c :
+                categoryRepository.findAllByActiveTrueOrderBySortOrderAscNameAsc()) {
+            catNames.put(c.getId(), c.getName());
+            catOrder.put(c.getId(), c.getSortOrder());
+        }
         List<Map<String, Object>> result = new ArrayList<>();
         for (MenuItem i : items) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", i.getId());
             m.put("categoryId", i.getCategoryId());
+            m.put("categoryName", catNames.getOrDefault(i.getCategoryId(), i.getCategoryId()));
+            m.put("categorySortOrder", catOrder.getOrDefault(i.getCategoryId(), 999));
             m.put("name", i.getName());
             m.put("sku", i.getSku());
             m.put("sellPrice", i.getSellPrice().doubleValue());
