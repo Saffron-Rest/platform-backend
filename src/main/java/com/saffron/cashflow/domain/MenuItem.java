@@ -34,6 +34,10 @@ public class MenuItem {
     @Column(length = 64)
     private String sku;
 
+    /** EAN-13 / EAN-8 barcode for scanner-based ordering. */
+    @Column(length = 20)
+    private String barcode;
+
     @Column(length = 500)
     private String description;
 
@@ -109,6 +113,8 @@ public class MenuItem {
     public void setName(String name) { this.name = name; }
     public String getSku() { return sku; }
     public void setSku(String sku) { this.sku = sku; }
+    public String getBarcode() { return barcode; }
+    public void setBarcode(String barcode) { this.barcode = barcode; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
     public BigDecimal getSellPrice() { return sellPrice; }

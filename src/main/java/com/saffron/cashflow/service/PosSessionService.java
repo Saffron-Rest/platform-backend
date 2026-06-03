@@ -1,7 +1,9 @@
 package com.saffron.cashflow.service;
 
+import com.saffron.cashflow.domain.CashDrawerTransaction;
 import com.saffron.cashflow.domain.PosOrder;
 import com.saffron.cashflow.domain.PosSession;
+import com.saffron.cashflow.repository.CashDrawerTransactionRepository;
 import com.saffron.cashflow.repository.PosOrderRepository;
 import com.saffron.cashflow.repository.PosSessionRepository;
 import com.saffron.cashflow.security.AuthHelper;
@@ -28,13 +30,16 @@ public class PosSessionService {
     private final PosSessionRepository sessionRepository;
     private final PosOrderRepository orderRepository;
     private final PosSalePostHandler posSalePostHandler;
+    private final CashDrawerTransactionRepository drawerRepository;
 
     public PosSessionService(PosSessionRepository sessionRepository,
                              PosOrderRepository orderRepository,
-                             PosSalePostHandler posSalePostHandler) {
+                             PosSalePostHandler posSalePostHandler,
+                             CashDrawerTransactionRepository drawerRepository) {
         this.sessionRepository = sessionRepository;
         this.orderRepository = orderRepository;
         this.posSalePostHandler = posSalePostHandler;
+        this.drawerRepository = drawerRepository;
     }
 
     /** Returns the current open session for this cashier, or null. */
@@ -113,6 +118,36 @@ public class PosSessionService {
         return toMap(session);
     }
 
+    @Transactional
+    public Map<String, Object> recordCashMovement(String sessionId, String typeStr, String reasonStr,
+                                                   BigDecimal amount, String note) {
+        PosSession session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new com.saffron.cashflow.web.BadRequestException("Session not found"));
+        if (session.getStatus() == PosSession.Status.CLOSED) {
+            throw new com.saffron.cashflow.web.BadRequestException("Session is already closed");
+        }
+        String cashierId = AuthHelper.currentUser().id();
+        CashDrawerTransaction tx = new CashDrawerTransaction();
+        tx.setSessionId(sessionId);
+        tx.setCashierId(cashierId);
+        tx.setType(CashDrawerTransaction.Type.valueOf(typeStr.toUpperCase()));
+        tx.setAmount(amount);
+        if (reasonStr != null) {
+            try { tx.setReason(CashDrawerTransaction.Reason.valueOf(reasonStr.toUpperCase())); } catch (Exception ignored) {}
+        }
+        tx.setNote(note);
+        drawerRepository.save(tx);
+        LOG.info("Cash drawer {} {} PLN session={} cashier={}", typeStr, amount, sessionId, cashierId);
+        return java.util.Map.of(
+                "id", tx.getId(),
+                "type", tx.getType().name(),
+                "amount", tx.getAmount().doubleValue(),
+                "reason", tx.getReason().name(),
+                "note", tx.getNote() != null ? tx.getNote() : "",
+                "createdAt", tx.getCreatedAt().toString()
+        );
+    }
+
     private Map<String, Object> toMap(PosSession s) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", s.getId());
@@ -126,6 +161,8 @@ public class PosSessionService {
         m.put("orderCount", s.getOrderCount());
         m.put("openedAt", s.getOpenedAt().toString());
         m.put("closedAt", s.getClosedAt() != null ? s.getClosedAt().toString() : null);
+        BigDecimal netMovements = drawerRepository.netMovementForSession(s.getId());
+        m.put("cashDrawerNet", netMovements != null ? netMovements.doubleValue() : 0.0);
         return m;
     }
 }

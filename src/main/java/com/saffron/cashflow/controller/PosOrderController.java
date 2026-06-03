@@ -79,7 +79,7 @@ public class PosOrderController {
         return posOrderService.removeLine(orderId, lineId);
     }
 
-    /** Record payment. Pass paymentMethod, optionally amountTendered, buyerNip, fiscalReceiptNumber. */
+    /** Record payment. Pass paymentMethod, optionally amountTendered, tipAmount, buyerNip, fiscalReceiptNumber. */
     @PostMapping("/orders/{id}/pay")
     public Map<String, Object> payOrder(@PathVariable String id, @RequestBody Map<String, Object> req) {
         return posOrderService.payOrder(id, req);
@@ -88,5 +88,27 @@ public class PosOrderController {
     @PostMapping("/orders/{id}/void")
     public Map<String, Object> voidOrder(@PathVariable String id) {
         return posOrderService.voidOrder(id);
+    }
+
+    /** Park (hold) an order mid-meal. Body: { "note": "waiting for dessert" } */
+    @PostMapping("/orders/{id}/park")
+    public Map<String, Object> parkOrder(@PathVariable String id,
+                                          @RequestBody(required = false) Map<String, Object> body) {
+        String note = body != null ? (String) body.get("note") : null;
+        return posOrderService.parkOrder(id, note);
+    }
+
+    /** Resume a parked order. */
+    @PostMapping("/orders/{id}/resume")
+    public Map<String, Object> resumeOrder(@PathVariable String id) {
+        return posOrderService.resumeOrder(id);
+    }
+
+    /** Look up a menu item by barcode or SKU. Returns 404 if not found. */
+    @GetMapping("/menu/barcode/{code}")
+    public Map<String, Object> barcodeSearch(@PathVariable String code) {
+        Map<String, Object> item = posOrderService.lookupByBarcode(code);
+        if (item == null) throw new com.saffron.cashflow.web.NotFoundException("No item found for barcode: " + code);
+        return item;
     }
 }

@@ -22,7 +22,7 @@ import java.util.UUID;
         })
 public class PosOrder {
 
-    public enum Status { OPEN, PAYING, PAID, VOIDED }
+    public enum Status { OPEN, PARKED, PAYING, PAID, VOIDED }
 
     @Id
     private String id;
@@ -73,6 +73,18 @@ public class PosOrder {
     @Column(name = "buyer_nip", length = 20)
     private String buyerNip;
 
+    /** Tip amount added on top of the bill (not included in VAT calculation). */
+    @Column(name = "tip_amount", nullable = false, precision = 12, scale = 2)
+    private BigDecimal tipAmount = BigDecimal.ZERO;
+
+    /** When the order was parked (held mid-meal). Null unless status = PARKED. */
+    @Column(name = "parked_at")
+    private Instant parkedAt;
+
+    /** Optional cashier note set when parking ("waiting for dessert"). */
+    @Column(name = "parked_note", length = 200)
+    private String parkedNote;
+
     @Column(name = "opened_at", nullable = false)
     private Instant openedAt;
 
@@ -116,6 +128,12 @@ public class PosOrder {
     public void setBuyerNip(String buyerNip) { this.buyerNip = buyerNip; }
     public Instant getOpenedAt() { return openedAt; }
     public void setOpenedAt(Instant openedAt) { this.openedAt = openedAt; }
+    public BigDecimal getTipAmount() { return tipAmount; }
+    public void setTipAmount(BigDecimal tipAmount) { this.tipAmount = tipAmount; }
+    public Instant getParkedAt() { return parkedAt; }
+    public void setParkedAt(Instant parkedAt) { this.parkedAt = parkedAt; }
+    public String getParkedNote() { return parkedNote; }
+    public void setParkedNote(String parkedNote) { this.parkedNote = parkedNote; }
     public Instant getPaidAt() { return paidAt; }
     public void setPaidAt(Instant paidAt) { this.paidAt = paidAt; }
     public List<PosOrderLine> getLines() { return lines; }

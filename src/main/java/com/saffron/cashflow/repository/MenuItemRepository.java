@@ -16,5 +16,7 @@ public interface MenuItemRepository extends JpaRepository<MenuItem, String> {
 
     Optional<MenuItem> findFirstBySkuIgnoreCase(String sku);
 
+    Optional<MenuItem> findFirstByBarcodeAndActiveTrue(String barcode);
+
     Optional<MenuItem> findFirstByNameIgnoreCase(String name);
 }

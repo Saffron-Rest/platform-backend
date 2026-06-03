@@ -42,4 +42,19 @@ public class PosSessionController {
                 : BigDecimal.ZERO;
         return posSessionService.closeSession(sessionId, closingFloat);
     }
+
+    /**
+     * Record a cash-in or cash-out event (not a sale).
+     * Body: { "sessionId": "...", "type": "OUT", "reason": "BANK_DEPOSIT", "amount": 500.00, "note": "..." }
+     */
+    @PostMapping("/cash")
+    @ResponseStatus(org.springframework.http.HttpStatus.CREATED)
+    public java.util.Map<String, Object> cashMovement(@RequestBody java.util.Map<String, Object> body) {
+        String sessionId = (String) body.get("sessionId");
+        String type = (String) body.getOrDefault("type", "OUT");
+        String reason = (String) body.getOrDefault("reason", "OTHER");
+        BigDecimal amount = new BigDecimal(body.get("amount").toString());
+        String note = (String) body.get("note");
+        return posSessionService.recordCashMovement(sessionId, type, reason, amount, note);
+    }
 }

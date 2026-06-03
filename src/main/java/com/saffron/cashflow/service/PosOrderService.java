@@ -208,10 +208,64 @@ public class PosOrderService {
         if (req.get("fiscalReceiptNumber") != null) {
             order.setFiscalReceiptNumber((String) req.get("fiscalReceiptNumber"));
         }
+        if (req.get("tipAmount") != null) {
+            order.setTipAmount(new BigDecimal(req.get("tipAmount").toString()));
+        }
         order.setStatus(PosOrder.Status.PAID);
         order.setPaidAt(Instant.now());
         order = orderRepository.save(order);
         return orderToMap(order);
+    }
+
+    @Transactional
+    public Map<String, Object> parkOrder(String orderId, String note) {
+        PosOrder order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Order not found"));
+        if (order.getStatus() != PosOrder.Status.OPEN) {
+            throw new BadRequestException("Only OPEN orders can be parked");
+        }
+        order.setStatus(PosOrder.Status.PARKED);
+        order.setParkedAt(Instant.now());
+        order.setParkedNote(note);
+        order = orderRepository.save(order);
+        return orderToMap(order);
+    }
+
+    @Transactional
+    public Map<String, Object> resumeOrder(String orderId) {
+        PosOrder order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Order not found"));
+        if (order.getStatus() != PosOrder.Status.PARKED) {
+            throw new BadRequestException("Only PARKED orders can be resumed");
+        }
+        order.setStatus(PosOrder.Status.OPEN);
+        order.setParkedAt(null);
+        order.setParkedNote(null);
+        order = orderRepository.save(order);
+        return orderToMap(order);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> lookupByBarcode(String code) {
+        // Search barcode first, then fall back to SKU.
+        MenuItem item = menuItemRepository.findFirstByBarcodeAndActiveTrue(code)
+                .or(() -> menuItemRepository.findFirstBySkuIgnoreCase(code))
+                .orElse(null);
+        if (item == null || !item.isPosAvailable()) return null;
+        java.util.Map<String, String> catNames = new java.util.HashMap<>();
+        categoryRepository.findAllByActiveTrueOrderBySortOrderAscNameAsc()
+                .forEach(c -> catNames.put(c.getId(), c.getName()));
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", item.getId());
+        m.put("categoryId", item.getCategoryId());
+        m.put("categoryName", catNames.getOrDefault(item.getCategoryId(), item.getCategoryId()));
+        m.put("name", item.getName());
+        m.put("sku", item.getSku());
+        m.put("barcode", item.getBarcode());
+        m.put("sellPrice", item.getSellPrice().doubleValue());
+        m.put("vatRatePct", item.getVatRatePct().doubleValue());
+        m.put("posDisplayOrder", item.getPosDisplayOrder());
+        return m;
     }
 
     @Transactional
@@ -296,10 +350,15 @@ public class PosOrderService {
         m.put("orderNote", o.getOrderNote());
         m.put("totalGross", o.getTotalGross().doubleValue());
         m.put("totalVat", o.getTotalVat().doubleValue());
+        BigDecimal tip = o.getTipAmount() != null ? o.getTipAmount() : BigDecimal.ZERO;
+        m.put("tipAmount", tip.doubleValue());
+        m.put("paymentTotal", o.getTotalGross().add(tip).doubleValue());
         m.put("paymentMethod", o.getPaymentMethod() != null ? o.getPaymentMethod().name() : null);
         m.put("amountTendered", o.getAmountTendered() != null ? o.getAmountTendered().doubleValue() : null);
         m.put("fiscalReceiptNumber", o.getFiscalReceiptNumber());
         m.put("buyerNip", o.getBuyerNip());
+        m.put("parkedAt", o.getParkedAt() != null ? o.getParkedAt().toString() : null);
+        m.put("parkedNote", o.getParkedNote());
         m.put("openedAt", o.getOpenedAt() != null ? o.getOpenedAt().toString() : null);
         m.put("paidAt", o.getPaidAt() != null ? o.getPaidAt().toString() : null);
         List<Map<String, Object>> lines = new ArrayList<>();
