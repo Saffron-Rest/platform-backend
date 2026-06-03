@@ -204,21 +204,46 @@ public class TreasuryService {
             }
         }
 
+        // Owner-expense reimbursements: the restaurant pays the owner back from
+        // cash or card. Bank/cheque/other are bookkeeping-only and don't move
+        // the till or card account, so methodToLedgerSource returns null for them.
+        BigDecimal ownerCashOut = BigDecimal.ZERO;
+        BigDecimal ownerCashOutPostCount = BigDecimal.ZERO;
+        BigDecimal ownerCardOut = BigDecimal.ZERO;
+        for (OwnerExpenseReimbursement r : ownerReimbursementRepository.findByPaidDateBetween(from, to)) {
+            if (r.getAmount() == null || r.getAmount().signum() <= 0) continue;
+            PaymentSource src = methodToLedgerSource(r.getMethod());
+            if (src == null) continue;
+            if (src == PaymentSource.CASH) {
+                ownerCashOut = ownerCashOut.add(r.getAmount());
+                if (isAfterCutoff(r.getPaidDate(), r.getCreatedAt(), cutoff, cutoffStamp)) {
+                    ownerCashOutPostCount = ownerCashOutPostCount.add(r.getAmount());
+                }
+            } else {
+                ownerCardOut = ownerCardOut.add(r.getAmount());
+            }
+        }
+
         BigDecimal cashRaw = latestCount
                 .map(DailyEntry::getActualCashCounted)
                 .orElse(settings.getInitialCashBalance());
         // Drawer after non-salary post-count outflows — the baseline before
         // we additionally subtract salaries (the UI's "include salary" toggle
         // flips between this baseline and the fully-adjusted balance).
-        BigDecimal cashBalanceBeforeSalary = cashRaw.subtract(standaloneCashExpensesPostCount);
+        BigDecimal cashBalanceBeforeSalary = cashRaw
+                .subtract(standaloneCashExpensesPostCount)
+                .subtract(ownerCashOutPostCount);
         BigDecimal cashBalance = cashBalanceBeforeSalary.subtract(salaryCashOutPostCount);
         // Card balance stays cumulative (no physical count).
         BigDecimal cardBalanceBeforeSalary = settings.getInitialCardBalance().add(cardFromEntries);
-        BigDecimal cardBalance = cardBalanceBeforeSalary.subtract(salaryCardOut);
+        BigDecimal cardBalance = cardBalanceBeforeSalary
+                .subtract(salaryCardOut)
+                .subtract(ownerCardOut);
         // Cumulative cash balance kept for reference / cross-checks.
         BigDecimal cashComputedBalance = settings.getInitialCashBalance()
                 .add(cashFromEntries)
-                .subtract(salaryCashOut);
+                .subtract(salaryCashOut)
+                .subtract(ownerCashOut);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("settings", settings.toApiMap());
@@ -261,6 +286,9 @@ public class TreasuryService {
         // not subtracted from the displayed balances above.
         result.put("salaryPaidFromCashExcluded", toDouble(salaryCashExcluded));
         result.put("salaryPaidFromCardExcluded", toDouble(salaryCardExcluded));
+        result.put("ownerReimbursementCashOut", toDouble(ownerCashOut));
+        result.put("ownerReimbursementCashOutPostCount", toDouble(ownerCashOutPostCount));
+        result.put("ownerReimbursementCardOut", toDouble(ownerCardOut));
         result.put("currency", "PLN");
         return result;
     }
