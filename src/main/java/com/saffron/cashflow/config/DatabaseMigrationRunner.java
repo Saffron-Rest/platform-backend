@@ -39,7 +39,149 @@ public class DatabaseMigrationRunner {
             migrateRestaurantClosures(jdbc);
             migrateSupplierPayables(jdbc);
             migrateOwnerExpenses(jdbc);
+            migratePosSchema(jdbc);
         };
+    }
+
+    /**
+     * POS module — all tables and column additions introduced across POS sprint 1-3.
+     * Idempotent: every statement uses CREATE TABLE IF NOT EXISTS or ADD COLUMN IF NOT EXISTS.
+     */
+    private static void migratePosSchema(JdbcTemplate jdbc) {
+
+        // ── New columns on pre-existing tables ──────────────────────────────
+
+        // pos_sale: fiscal VAT fields (Sprint 1)
+        jdbc.execute("ALTER TABLE pos_sale ADD COLUMN IF NOT EXISTS vat_rate_pct NUMERIC(5,2)");
+        jdbc.execute("ALTER TABLE pos_sale ADD COLUMN IF NOT EXISTS vat_net_amount NUMERIC(12,2)");
+        jdbc.execute("ALTER TABLE pos_sale ADD COLUMN IF NOT EXISTS vat_amount NUMERIC(12,2)");
+        jdbc.execute("ALTER TABLE pos_sale ADD COLUMN IF NOT EXISTS fiscal_receipt_number VARCHAR(64)");
+
+        // menu_item: POS display fields
+        jdbc.execute("ALTER TABLE menu_item ADD COLUMN IF NOT EXISTS barcode VARCHAR(20)");
+        jdbc.execute("ALTER TABLE menu_item ADD COLUMN IF NOT EXISTS pos_available BOOLEAN NOT NULL DEFAULT true");
+        jdbc.execute("ALTER TABLE menu_item ADD COLUMN IF NOT EXISTS pos_display_order INTEGER NOT NULL DEFAULT 0");
+
+        // daily_entry: optimistic lock + POS auto-populate flag
+        jdbc.execute("ALTER TABLE daily_entry ADD COLUMN IF NOT EXISTS version BIGINT");
+        jdbc.execute("ALTER TABLE daily_entry ADD COLUMN IF NOT EXISTS pos_auto_populated BOOLEAN NOT NULL DEFAULT false");
+
+        // pos_order: tip, parking, delivery, order type (the columns causing the error)
+        jdbc.execute("ALTER TABLE pos_order ADD COLUMN IF NOT EXISTS order_type VARCHAR(12) NOT NULL DEFAULT 'DINE_IN'");
+        jdbc.execute("ALTER TABLE pos_order ADD COLUMN IF NOT EXISTS customer_name VARCHAR(100)");
+        jdbc.execute("ALTER TABLE pos_order ADD COLUMN IF NOT EXISTS customer_phone VARCHAR(30)");
+        jdbc.execute("ALTER TABLE pos_order ADD COLUMN IF NOT EXISTS delivery_address VARCHAR(300)");
+        jdbc.execute("ALTER TABLE pos_order ADD COLUMN IF NOT EXISTS special_requests VARCHAR(500)");
+        jdbc.execute("ALTER TABLE pos_order ADD COLUMN IF NOT EXISTS tip_amount NUMERIC(12,2) NOT NULL DEFAULT 0");
+        jdbc.execute("ALTER TABLE pos_order ADD COLUMN IF NOT EXISTS parked_at TIMESTAMPTZ");
+        jdbc.execute("ALTER TABLE pos_order ADD COLUMN IF NOT EXISTS parked_note VARCHAR(200)");
+
+        // ── New tables ────────────────────────────────────────────────────────
+
+        // POS table floor map
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS pos_table (
+                  id VARCHAR(36) PRIMARY KEY,
+                  name VARCHAR(40) NOT NULL,
+                  area VARCHAR(60),
+                  grid_x INTEGER NOT NULL DEFAULT 0,
+                  grid_y INTEGER NOT NULL DEFAULT 0,
+                  seats INTEGER NOT NULL DEFAULT 4,
+                  is_active BOOLEAN NOT NULL DEFAULT true,
+                  created_at TIMESTAMPTZ NOT NULL
+                )""");
+
+        // POS order lines
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS pos_order_line (
+                  id VARCHAR(36) PRIMARY KEY,
+                  order_id VARCHAR(36) NOT NULL REFERENCES pos_order(id) ON DELETE CASCADE,
+                  menu_item_id VARCHAR(36),
+                  item_name VARCHAR(160) NOT NULL,
+                  quantity NUMERIC(12,3) NOT NULL,
+                  unit_price NUMERIC(12,2) NOT NULL,
+                  vat_rate_pct NUMERIC(5,2) NOT NULL,
+                  discount_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+                  line_gross NUMERIC(12,2),
+                  vat_net_amount NUMERIC(12,2),
+                  vat_amount NUMERIC(12,2),
+                  note VARCHAR(200)
+                )""");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_pos_order_line_order ON pos_order_line (order_id)");
+
+        // POS session (shift open/close)
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS pos_session (
+                  id VARCHAR(36) PRIMARY KEY,
+                  cashier_id VARCHAR(36) NOT NULL,
+                  business_day DATE NOT NULL,
+                  status VARCHAR(8) NOT NULL DEFAULT 'OPEN',
+                  opening_float NUMERIC(12,2) NOT NULL DEFAULT 0,
+                  closing_float NUMERIC(12,2),
+                  cash_sales_total NUMERIC(12,2),
+                  card_sales_total NUMERIC(12,2),
+                  order_count INTEGER,
+                  opened_at TIMESTAMPTZ NOT NULL,
+                  closed_at TIMESTAMPTZ
+                )""");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_pos_session_cashier ON pos_session (cashier_id)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_pos_session_business_day ON pos_session (business_day)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_pos_session_status ON pos_session (status)");
+
+        // Cash drawer transactions (deposit/withdrawal)
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS cash_drawer_transaction (
+                  id VARCHAR(36) PRIMARY KEY,
+                  session_id VARCHAR(36) NOT NULL,
+                  cashier_id VARCHAR(36) NOT NULL,
+                  type VARCHAR(4) NOT NULL,
+                  amount NUMERIC(12,2) NOT NULL,
+                  reason VARCHAR(20) NOT NULL DEFAULT 'OTHER',
+                  note VARCHAR(200),
+                  created_at TIMESTAMPTZ NOT NULL
+                )""");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_cash_drawer_session ON cash_drawer_transaction (session_id)");
+
+        // POS order payment legs (combined/split payment)
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS pos_order_payment (
+                  id VARCHAR(36) PRIMARY KEY,
+                  order_id VARCHAR(36) NOT NULL,
+                  method VARCHAR(20) NOT NULL,
+                  amount NUMERIC(12,2) NOT NULL,
+                  reference VARCHAR(64),
+                  processed_at TIMESTAMPTZ NOT NULL
+                )""");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_pos_order_payment_order ON pos_order_payment (order_id)");
+
+        // Happy hour / time-based pricing
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS pos_time_based_price (
+                  id VARCHAR(36) PRIMARY KEY,
+                  menu_item_id VARCHAR(36) NOT NULL,
+                  name VARCHAR(60) NOT NULL,
+                  effective_price NUMERIC(12,2) NOT NULL,
+                  start_time TIME NOT NULL,
+                  end_time TIME NOT NULL,
+                  days_of_week VARCHAR(40),
+                  is_active BOOLEAN NOT NULL DEFAULT true
+                )""");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_pos_time_price_item ON pos_time_based_price (menu_item_id)");
+
+        // QR / BLIK transactions
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS pos_qr_transaction (
+                  id VARCHAR(36) PRIMARY KEY,
+                  order_id VARCHAR(36) NOT NULL,
+                  amount NUMERIC(12,2) NOT NULL,
+                  status VARCHAR(12) NOT NULL DEFAULT 'PENDING',
+                  qr_payload VARCHAR(512) NOT NULL,
+                  provider_reference VARCHAR(64),
+                  created_at TIMESTAMPTZ NOT NULL,
+                  expires_at TIMESTAMPTZ NOT NULL,
+                  confirmed_at TIMESTAMPTZ
+                )""");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_pos_qr_order ON pos_qr_transaction (order_id)");
     }
 
     /**
