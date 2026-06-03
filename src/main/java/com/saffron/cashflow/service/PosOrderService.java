@@ -229,6 +229,11 @@ public class PosOrderService {
         order.setCashierId(cashierId);
         order.setIntegrationId(integrationId);
         order.setTableId((String) req.get("tableId"));
+        if (req.get("orderType") != null) order.setOrderType((String) req.get("orderType"));
+        if (req.get("customerName") != null) order.setCustomerName((String) req.get("customerName"));
+        if (req.get("customerPhone") != null) order.setCustomerPhone((String) req.get("customerPhone"));
+        if (req.get("deliveryAddress") != null) order.setDeliveryAddress((String) req.get("deliveryAddress"));
+        if (req.get("specialRequests") != null) order.setSpecialRequests((String) req.get("specialRequests"));
         if (req.get("covers") != null) order.setCovers(((Number) req.get("covers")).intValue());
         if (req.get("orderNote") != null) order.setOrderNote((String) req.get("orderNote"));
 
@@ -554,6 +559,11 @@ public class PosOrderService {
         m.put("tableId", o.getTableId());
         m.put("cashierId", o.getCashierId());
         m.put("status", o.getStatus().name());
+        m.put("orderType", o.getOrderType());
+        m.put("customerName", o.getCustomerName());
+        m.put("customerPhone", o.getCustomerPhone());
+        m.put("deliveryAddress", o.getDeliveryAddress());
+        m.put("specialRequests", o.getSpecialRequests());
         m.put("covers", o.getCovers());
         m.put("orderNote", o.getOrderNote());
         m.put("totalGross", o.getTotalGross().doubleValue());

@@ -41,6 +41,24 @@ public class PosOrder {
     @Column(nullable = false, length = 12)
     private Status status = Status.OPEN;
 
+    /** Order type — DINE_IN (default), TAKEAWAY, or DELIVERY (phone/online order). */
+    @Column(name = "order_type", length = 12, nullable = false)
+    private String orderType = "DINE_IN";
+
+    // ── Delivery / phone-order customer fields ──────────────────────────────
+
+    @Column(name = "customer_name", length = 100)
+    private String customerName;
+
+    @Column(name = "customer_phone", length = 30)
+    private String customerPhone;
+
+    @Column(name = "delivery_address", length = 300)
+    private String deliveryAddress;
+
+    @Column(name = "special_requests", length = 500)
+    private String specialRequests;
+
     /** Number of covers (guests) — used for per-cover analytics. */
     @Column(name = "covers")
     private Integer covers;
@@ -100,6 +118,16 @@ public class PosOrder {
         if (openedAt == null) openedAt = Instant.now();
     }
 
+    public String getOrderType() { return orderType; }
+    public void setOrderType(String orderType) { this.orderType = orderType; }
+    public String getCustomerName() { return customerName; }
+    public void setCustomerName(String customerName) { this.customerName = customerName; }
+    public String getCustomerPhone() { return customerPhone; }
+    public void setCustomerPhone(String customerPhone) { this.customerPhone = customerPhone; }
+    public String getDeliveryAddress() { return deliveryAddress; }
+    public void setDeliveryAddress(String deliveryAddress) { this.deliveryAddress = deliveryAddress; }
+    public String getSpecialRequests() { return specialRequests; }
+    public void setSpecialRequests(String specialRequests) { this.specialRequests = specialRequests; }
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getTableId() { return tableId; }
