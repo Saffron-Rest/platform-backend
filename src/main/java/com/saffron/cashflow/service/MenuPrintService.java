@@ -228,14 +228,24 @@ public class MenuPrintService {
             doc.newPage();
             drawHeritage(doc);
 
-            for (MenuCategory cat : categories) {
+            for (int ci = 0; ci < categories.size(); ci++) {
+                MenuCategory cat   = categories.get(ci);
                 List<MenuItem> items = itemsByCategory.get(cat.getId());
                 if (items == null || items.isEmpty()) continue;
-                doc.newPage();
-                drawSectionDivider(doc, cat.getName());
+
+                if (ci == 0) {
+                    // First category: always on its own fresh page with full divider
+                    doc.newPage();
+                    drawSectionDivider(doc, cat.getName());
+                } else {
+                    // Subsequent categories: flow naturally — small categories share a page.
+                    // A compact header provides visual separation without wasting a full page.
+                    drawCompactSectionDivider(doc, cat.getName());
+                }
+
                 switch (opt.layout()) {
-                    case GRID -> drawGrid(doc, items, opt.showPrices(), opt.locale());
-                    case LIST -> drawList(doc, items, opt.showPrices(), opt.locale());
+                    case GRID    -> drawGrid(doc, items, opt.showPrices(), opt.locale());
+                    case LIST    -> drawList(doc, items, opt.showPrices(), opt.locale());
                     case COMPACT -> drawCompact(doc, items, opt.showPrices(), opt.locale());
                 }
             }
@@ -506,8 +516,58 @@ public class MenuPrintService {
         }
 
         Paragraph after = new Paragraph(" ");
-        after.setSpacingAfter(28);
+        after.setSpacingAfter(16);
         doc.add(after);
+    }
+
+    /**
+     * Compact in-flow section header used for every category after the first.
+     *
+     * <p>The full {@link #drawSectionDivider} takes ~170pt of vertical space —
+     * too much when a short category (4 items) follows directly on the same page.
+     * This compact version takes ~70pt: a thin hairline, the category name in a
+     * medium serif, an optional Azerbaijani subtitle, and a short saffron rule.
+     * No eyebrow, no blurb. iText will automatically page-break this header if
+     * it does not fit the remaining space.</p>
+     */
+    private void drawCompactSectionDivider(Document doc, String name) throws DocumentException {
+        Font head    = font(SERIF_BOLD,    20,    INK);
+        Font azFont  = font(SERIF_ITALIC,  11,    MUTED);
+        Font eyebrow = font(SANS_BOLD,      8f,   SAFFRON_DEEP);
+
+        // Wide hairline spacer — clear visual break between previous section and this one
+        Paragraph preSpacer = new Paragraph(" ");
+        preSpacer.setSpacingBefore(28);
+        doc.add(preSpacer);
+        doc.add(new Chunk(new LineSeparator(0.5f, 100, HAIRLINE, Element.ALIGN_LEFT, 0)));
+
+        // Compact eyebrow (e.g. "FRESH & VIBRANT")
+        Paragraph eb = new Paragraph(spacedCaps(eyebrowFor(name)), eyebrow);
+        eb.setSpacingBefore(14);
+        doc.add(eb);
+
+        // Category name — left-aligned, reads like a chapter title
+        Paragraph h = new Paragraph(name, head);
+        h.setSpacingBefore(4);
+        h.setSpacingAfter(0);
+        h.setKeepWithNext(true);   // never orphan the heading from its items
+        doc.add(h);
+
+        // Optional Azerbaijani translation
+        String az = azFor(name);
+        if (az != null) {
+            Paragraph azP = new Paragraph(az, azFont);
+            azP.setSpacingBefore(3);
+            azP.setKeepWithNext(true);
+            doc.add(azP);
+        }
+
+        // Short saffron rule — visual closure under the heading
+        doc.add(new Chunk(new LineSeparator(1.2f, 32, SAFFRON, Element.ALIGN_LEFT, 0)));
+
+        Paragraph post = new Paragraph(" ");
+        post.setSpacingAfter(10);
+        doc.add(post);
     }
 
     // ---------- GRID ----------
@@ -1178,10 +1238,25 @@ public class MenuPrintService {
 
     // ---------- Helpers ----------
 
-    private static String azFor(String englishName) {
-        if (englishName == null) return null;
-        String key = englishName.trim().toLowerCase(Locale.ROOT);
-        return CATEGORY_TRANSLATIONS.get(key);
+    private static String azFor(String name) {
+        if (name == null) return null;
+        String key = name.trim().toLowerCase(Locale.ROOT);
+        // Direct lookup first (covers both English and any exact-match Polish)
+        String az = CATEGORY_TRANSLATIONS.get(key);
+        if (az != null) return az;
+        // Polish → English canonical → Azerbaijani
+        String canonical = switch (key) {
+            case "zupy", "zupa"                           -> "soups";
+            case "sałatki", "sałatka", "salaty", "salata" -> "salads";
+            case "przystawki", "przystawka"               -> "starters";
+            case "dania główne", "dania glowne"           -> "mains";
+            case "desery", "deser"                        -> "desserts";
+            case "napoje", "napój"                        -> "drinks";
+            case "pieczywo", "chleb"                      -> "breads";
+            case "dodatki"                                -> "sides";
+            default                                       -> null;
+        };
+        return canonical != null ? CATEGORY_TRANSLATIONS.get(canonical) : null;
     }
 
     /**
@@ -1192,23 +1267,33 @@ public class MenuPrintService {
         if (name == null) return "From our menu";
         String key = name.trim().toLowerCase(Locale.ROOT);
         return switch (key) {
+            // English
             case "starters", "appetisers", "appetizers" -> "To begin";
-            case "salads" -> "Fresh & vibrant";
-            case "soups" -> "To warm";
-            case "mains", "main courses" -> "From the kitchen";
-            case "plov", "plov & rice" -> "The national dish";
-            case "kebabs", "kebab", "grill" -> "From the charcoal";
-            case "sides" -> "Alongside";
-            case "breads" -> "Freshly baked";
-            case "desserts", "sweets" -> "Sweet endings";
-            case "drinks", "beverages" -> "To drink";
-            case "tea" -> "At the end of the meal";
-            case "hot drinks" -> "Warm drinks";
-            case "cold drinks" -> "Refreshments";
-            case "wine" -> "Wine list";
-            case "beer" -> "Beers";
-            case "cocktails" -> "Cocktails";
-            default -> "From our menu";
+            case "salads", "salad"                      -> "Fresh & vibrant";
+            case "soups", "soup"                        -> "To warm";
+            case "mains", "main courses", "main course" -> "From the kitchen";
+            case "plov", "plov & rice"                  -> "The national dish";
+            case "kebabs", "kebab", "grill"             -> "From the charcoal";
+            case "sides", "side dishes"                 -> "Alongside";
+            case "breads", "bread"                      -> "Freshly baked";
+            case "desserts", "sweets", "dessert"        -> "Sweet endings";
+            case "drinks", "beverages", "drink"         -> "To drink";
+            case "tea"                                  -> "At the end of the meal";
+            case "hot drinks"                           -> "Warm drinks";
+            case "cold drinks"                          -> "Refreshments";
+            case "wine"                                 -> "Wine list";
+            case "beer", "beers"                        -> "Beers";
+            case "cocktails", "cocktail"                -> "Cocktails";
+            // Polish
+            case "zupy", "zupa"                         -> "Do rozgrzania";
+            case "sałatki", "sałatka", "salaty", "salata" -> "Świeże & wyraziste";
+            case "przystawki", "przystawka"             -> "Na początek";
+            case "dania główne", "dania glowne"         -> "Z kuchni";
+            case "desery", "deser"                      -> "Słodkie zakończenie";
+            case "napoje", "napój"                      -> "Do picia";
+            case "pieczywo", "chleb"                    -> "Świeżo pieczone";
+            case "dodatki"                              -> "Do tego";
+            default                                     -> "From our menu";
         };
     }
 
@@ -1216,24 +1301,25 @@ public class MenuPrintService {
         if (name == null) return null;
         String key = name.trim().toLowerCase(Locale.ROOT);
         return switch (key) {
-            case "starters", "appetisers", "appetizers" ->
+            case "starters", "appetisers", "appetizers", "przystawki", "przystawka" ->
                     "Small plates to open the meal — eaten slowly, ideally with bread, while the table is being set.";
-            case "salads" ->
+            case "salads", "salad", "sałatki", "sałatka" ->
                     "Fresh herbs, sumac, walnuts and pomegranate — the everyday Azerbaijani table at its most generous.";
-            case "soups" ->
+            case "soups", "soup", "zupy", "zupa" ->
                     "Slow-cooked broths and yoghurt soups — what grandmothers in Şəki call medicine and what we call lunch.";
-            case "mains", "main courses" ->
+            case "mains", "main courses", "dania główne", "dania glowne" ->
                     "Plov, kebabs, slow-braised lamb. Dishes that take their time, and reward yours.";
             case "plov", "plov & rice" ->
                     "The crown of Azerbaijani cuisine — saffron-stained rice with lamb, chestnuts, dried apricot and herbs.";
             case "kebabs", "kebab", "grill" ->
                     "Charcoal-grilled lamb, chicken and sturgeon — marinated overnight, served with sumac and onion.";
-            case "sides" ->
+            case "sides", "side dishes", "dodatki" ->
                     "Pickles, herbs, breads — the side stage where the main dishes meet, and where the table fills up.";
-            case "breads" -> "Tandir-baked, torn and shared — never sliced.";
-            case "desserts", "sweets" ->
+            case "breads", "bread", "pieczywo" -> "Tandir-baked, torn and shared — never sliced.";
+            case "desserts", "sweets", "dessert", "desery", "deser" ->
                     "Pakhlava, şəkərbura, halva — pastries that taste of holidays, weddings and patience.";
-            case "drinks", "beverages" -> "Şərbət, ayran, compote, tea — pairings for every season and every dish.";
+            case "drinks", "beverages", "drink", "napoje" ->
+                    "Şərbət, ayran, compote, tea — pairings for every season and every dish.";
             case "tea" -> "Loose-leaf, in armudu glasses — refilled until you tell us to stop.";
             default -> null;
         };
@@ -1379,23 +1465,37 @@ public class MenuPrintService {
      * before their first paint.</p>
      */
     private static class MenuChrome extends PdfPageEventHelper {
-        private boolean suppressNext = false;
+        private boolean suppressPageNumber = false;
 
-        void suppressNext() { this.suppressNext = true; }
-        // No-op retained so the build pipeline can keep setting a label
-        // without having to special-case the new chrome.
+        void suppressNext() { this.suppressPageNumber = true; }
         void setSection(@SuppressWarnings("unused") String s) {}
 
+        /**
+         * Cream background on every page — drawn under all content so it
+         * feels like quality paper rather than a clinical white sheet.
+         */
+        @Override
+        public void onStartPage(PdfWriter writer, Document doc) {
+            try {
+                PdfContentByte cb = writer.getDirectContentUnder();
+                Rectangle page = doc.getPageSize();
+                cb.saveState();
+                cb.setColorFill(CREAM);
+                cb.rectangle(0, 0, page.getWidth(), page.getHeight());
+                cb.fill();
+                cb.restoreState();
+            } catch (Exception ignored) {}
+        }
+
+        /** Small centred page number at the bottom of every body page. */
         @Override
         public void onEndPage(PdfWriter writer, Document doc) {
-            if (suppressNext) { suppressNext = false; return; }
+            if (suppressPageNumber) { suppressPageNumber = false; return; }
             int p = writer.getPageNumber();
             if (p <= 1) return;
-
-            PdfContentByte cb = writer.getDirectContent();
-            Rectangle page = doc.getPageSize();
-
             try {
+                PdfContentByte cb = writer.getDirectContent();
+                Rectangle page = doc.getPageSize();
                 Font fNum = font(SERIF_REG, 9.5f, MUTED);
                 ColumnText.showTextAligned(
                         cb, Element.ALIGN_CENTER, new Phrase(String.valueOf(p), fNum),
