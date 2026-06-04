@@ -115,13 +115,18 @@ public class MenuPrintService {
         return f;
     }
 
-    private static final Color INK = new Color(0x1A, 0x18, 0x14);
-    private static final Color INK_SOFT = new Color(0x3A, 0x33, 0x29);
-    private static final Color SAFFRON = new Color(0xC9, 0x6A, 0x1A);
+    private static final Color INK        = new Color(0x1A, 0x18, 0x14);
+    private static final Color INK_SOFT   = new Color(0x3A, 0x33, 0x29);
+    private static final Color SAFFRON    = new Color(0xC9, 0x6A, 0x1A);
     private static final Color SAFFRON_DEEP = new Color(0xA4, 0x52, 0x12);
-    private static final Color CREAM = new Color(0xFA, 0xF4, 0xE8);
-    private static final Color MUTED = new Color(0x6B, 0x63, 0x57);
-    private static final Color HAIRLINE = new Color(0xE2, 0xDD, 0xD2);
+    private static final Color CREAM      = new Color(0xFA, 0xF4, 0xE8);
+    private static final Color MUTED      = new Color(0x6B, 0x63, 0x57);
+    private static final Color HAIRLINE   = new Color(0xE2, 0xDD, 0xD2);
+    /**
+     * Price colour — darker and quieter than the accent saffron so prices
+     * recede behind dish names. Fine-dining principle: food sells, price follows.
+     */
+    private static final Color PRICE_COLOR = new Color(0x7A, 0x48, 0x18);
 
     private static final DateTimeFormatter MENU_DATE =
             DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
@@ -455,7 +460,7 @@ public class MenuPrintService {
             az.setSpacingAfter(4);
             doc.add(az);
 
-            LineSeparator hair = new LineSeparator(0.6f, 80, SAFFRON, Element.ALIGN_LEFT, 0);
+            LineSeparator hair = new LineSeparator(0.6f, 38, SAFFRON, Element.ALIGN_LEFT, 0);
             doc.add(new Chunk(hair));
 
             Paragraph body = new Paragraph(n[2], noteBody);
@@ -665,14 +670,14 @@ public class MenuPrintService {
         // ── Fonts ─────────────────────────────────────────────────────────────
         Font nameFont     = font(SERIF_BOLD,   13.5f, INK);
         Font portionFont  = font(SANS_REG,      8.5f, MUTED);
-        Font priceFont    = font(SANS_BOLD,    12f,   SAFFRON_DEEP);
+        Font priceFont    = font(SANS_REG,     11f,   PRICE_COLOR);   // quiet — food sells, price follows
         Font pillFont     = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
         Font descFont     = font(SERIF_ITALIC,  9.5f, MUTED);
         Font tagsFont     = font(SANS_ITALIC,   8f,   MUTED);
         Font allergenFont = font(SANS_REG,      7.5f, MUTED);
         Font optLabelFont = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
         Font varNameFont  = font(SANS_REG,      9.5f, INK_SOFT);
-        Font varPriceFont = font(SANS_BOLD,     9.5f, SAFFRON_DEEP);
+        Font varPriceFont = font(SANS_REG,      9f,   PRICE_COLOR);
         Font varSameFont  = font(SANS_ITALIC,   9f,   MUTED);
 
         List<VariantEntry> variants = parseVariants(item);
@@ -830,14 +835,14 @@ public class MenuPrintService {
         // ── Fonts ────────────────────────────────────────────────────────────
         Font nameFont      = font(SERIF_BOLD,   14.5f, INK);
         Font portionFont   = font(SANS_REG,      9.5f, MUTED);
-        Font priceFont     = font(SANS_BOLD,    13,    SAFFRON_DEEP);
+        Font priceFont     = font(SANS_REG,     11.5f, PRICE_COLOR);  // quiet — food sells, price follows
         Font pillFont      = font(SANS_BOLD,     7.5f, SAFFRON_DEEP);
-        Font descFont      = font(SERIF_ITALIC, 11,    MUTED);        // italic serif — most readable in list
+        Font descFont      = font(SERIF_ITALIC, 11,    MUTED);
         Font tagsFont      = font(SANS_ITALIC,   9,    MUTED);
         Font allergenFont  = font(SANS_REG,      8,    MUTED);
         Font optLabelFont  = font(SANS_BOLD,     7.5f, SAFFRON_DEEP);
         Font varNameFont   = font(SANS_REG,     10.5f, INK_SOFT);
-        Font varPriceFont  = font(SANS_BOLD,    10.5f, SAFFRON_DEEP);
+        Font varPriceFont  = font(SANS_REG,      9.5f, PRICE_COLOR);
         Font varSameFont   = font(SANS_ITALIC,  10f,   MUTED);
 
         for (int i = 0; i < items.size(); i++) {
@@ -970,13 +975,13 @@ public class MenuPrintService {
         // ── Fonts ────────────────────────────────────────────────────────────
         Font nameFont      = font(SERIF_BOLD,   12.5f, INK);
         Font portionFont   = font(SANS_REG,      8.5f, MUTED);
-        Font priceFont     = font(SANS_BOLD,    11.5f, SAFFRON_DEEP);
+        Font priceFont     = font(SANS_REG,     10.5f, PRICE_COLOR);  // quiet — food sells, price follows
         Font pillFont      = font(SANS_BOLD,     7,    SAFFRON_DEEP);
         Font descFont      = font(SERIF_ITALIC,  9.5f, MUTED);
         Font tagsFont      = font(SANS_ITALIC,   8,    MUTED);
         Font optLabelFont  = font(SANS_BOLD,     6.5f, SAFFRON_DEEP);
         Font varNameFont   = font(SANS_REG,      9f,   INK_SOFT);
-        Font varPriceFont  = font(SANS_BOLD,     9f,   SAFFRON_DEEP);
+        Font varPriceFont  = font(SANS_REG,      8.5f, PRICE_COLOR);
         Font varSameFont   = font(SANS_ITALIC,   8.5f, MUTED);
 
         for (int i = 0; i < items.size(); i++) {
@@ -1443,9 +1448,21 @@ public class MenuPrintService {
         };
     }
 
+    /**
+     * Formats a price for the printed menu.
+     *
+     * <p>Fine-dining convention: whole numbers omit the ".00" — "38 zł" not
+     * "38.00 zł". Fractional prices (e.g. 26.50) still show two decimal
+     * places. Using "zł" only (not "PLN") keeps the page clean and Polish.</p>
+     */
     private static String formatPrice(BigDecimal price, Locale locale) {
         if (price == null) return "";
         BigDecimal scaled = price.setScale(2, RoundingMode.HALF_UP);
+        // Whole number — drop the ".00"
+        if (scaled.stripTrailingZeros().scale() <= 0) {
+            return scaled.toBigInteger().toString() + " zł";
+        }
+        // Fractional — keep two places, use comma for Polish locale
         if (locale != null && "pl".equalsIgnoreCase(locale.getLanguage())) {
             return scaled.toPlainString().replace('.', ',') + " zł";
         }
@@ -1486,7 +1503,12 @@ public class MenuPrintService {
             } catch (Exception ignored) {}
         }
 
-        /** Small centred page number at the bottom of every body page. */
+        /**
+         * Page chrome on every body page:
+         *  - "SAFFRON" brand mark, top-right in tiny spaced caps (branding consistency)
+         *  - Small centred page number at the bottom
+         * Cover and closing pages opt out via {@code suppressNext()}.
+         */
         @Override
         public void onEndPage(PdfWriter writer, Document doc) {
             if (suppressPageNumber) { suppressPageNumber = false; return; }
@@ -1495,6 +1517,15 @@ public class MenuPrintService {
             try {
                 PdfContentByte cb = writer.getDirectContent();
                 Rectangle page = doc.getPageSize();
+
+                // Running brand mark — top right, in the top margin
+                Font fBrand = font(SANS_BOLD, 7f, new Color(0xC9, 0x6A, 0x1A)); // SAFFRON
+                ColumnText.showTextAligned(
+                        cb, Element.ALIGN_RIGHT,
+                        new Phrase(spacedCaps("Saffron"), fBrand),
+                        page.getWidth() - 68f, page.getHeight() - 52f, 0);
+
+                // Page number — bottom centre
                 Font fNum = font(SERIF_REG, 9.5f, MUTED);
                 ColumnText.showTextAligned(
                         cb, Element.ALIGN_CENTER, new Phrase(String.valueOf(p), fNum),
