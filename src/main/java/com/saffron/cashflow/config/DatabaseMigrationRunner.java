@@ -40,6 +40,7 @@ public class DatabaseMigrationRunner {
             migrateSupplierPayables(jdbc);
             migrateOwnerExpenses(jdbc);
             migratePosSchema(jdbc);
+            migrateExpenseCategoryConstraint(jdbc);
         };
     }
 
@@ -847,6 +848,29 @@ public class DatabaseMigrationRunner {
                 table,
                 column);
         return n != null && n > 0;
+    }
+
+    /**
+     * Rebuilds the expense_item category check constraint from the live enum.
+     * The constraint was first created before RENT (and other categories) were
+     * added, so it must be dropped and recreated whenever ExpenseCategory grows.
+     * Idempotent — safe to run on every boot.
+     */
+    private static void migrateExpenseCategoryConstraint(JdbcTemplate jdbc) {
+        String allowed = Arrays.stream(com.saffron.cashflow.domain.ExpenseCategory.values())
+                .map(c -> "'" + c.name() + "'")
+                .collect(Collectors.joining(", "));
+        try {
+            jdbc.execute("ALTER TABLE expense_item DROP CONSTRAINT IF EXISTS expense_item_category_check");
+            jdbc.execute(
+                    "ALTER TABLE expense_item ADD CONSTRAINT expense_item_category_check CHECK (category IN ("
+                            + allowed + "))");
+            System.out.println("Database: expense_item_category_check updated ("
+                    + com.saffron.cashflow.domain.ExpenseCategory.values().length + " categories)");
+        } catch (Exception ex) {
+            throw new IllegalStateException(
+                    "Failed to migrate expense_item_category_check: " + ex.getMessage(), ex);
+        }
     }
 
     private static void migrateAuditLogActionConstraint(JdbcTemplate jdbc) {
