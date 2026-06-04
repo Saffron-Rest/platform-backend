@@ -53,6 +53,10 @@ public class DatabaseMigrationRunner {
         // POS PIN login — bcrypt-hashed 4-digit code per cashier
         jdbc.execute("ALTER TABLE app_user ADD COLUMN IF NOT EXISTS pos_pin VARCHAR(255)");
 
+        // Menu item: portion size label (e.g. "500g", "330ml") and variants JSON
+        jdbc.execute("ALTER TABLE menu_item ADD COLUMN IF NOT EXISTS portion_size VARCHAR(40)");
+        jdbc.execute("ALTER TABLE menu_item ADD COLUMN IF NOT EXISTS variants TEXT");
+
         // ── New columns on pre-existing tables ──────────────────────────────
 
         // pos_sale: fiscal VAT fields (Sprint 1)

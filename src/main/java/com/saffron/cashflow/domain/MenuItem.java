@@ -69,6 +69,22 @@ public class MenuItem {
     @Column(length = 255)
     private String allergens;
 
+    /**
+     * Optional serving/portion label shown next to the name on the printed menu,
+     * e.g. "500g", "330ml", "2 pieces". Null when not relevant.
+     */
+    @Column(name = "portion_size", length = 40)
+    private String portionSize;
+
+    /**
+     * Optional JSON array of variants for items that come in multiple options,
+     * e.g. {@code [{"name":"Small","price":15.00},{"name":"Large","price":22.00}]}.
+     * If a variant omits {@code price} it inherits the item's {@code sellPrice}.
+     * Null when the item has no variants.
+     */
+    @Column(name = "variants", columnDefinition = "TEXT")
+    private String variants;
+
     /** Whether to feature this item on the printable menu (e.g. chef's recommendation). */
     @Column(name = "featured", nullable = false, columnDefinition = "boolean default false")
     private boolean featured = false;
@@ -131,6 +147,10 @@ public class MenuItem {
     public void setDietaryTags(String dietaryTags) { this.dietaryTags = dietaryTags; }
     public String getAllergens() { return allergens; }
     public void setAllergens(String allergens) { this.allergens = allergens; }
+    public String getPortionSize() { return portionSize; }
+    public void setPortionSize(String portionSize) { this.portionSize = portionSize; }
+    public String getVariants() { return variants; }
+    public void setVariants(String variants) { this.variants = variants; }
     public boolean isFeatured() { return featured; }
     public void setFeatured(boolean featured) { this.featured = featured; }
     public boolean isPosAvailable() { return posAvailable; }

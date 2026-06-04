@@ -183,6 +183,8 @@ public class MenuService {
         item.setSellPrice(sellPrice);
         item.setFoodCost(foodCost);
         item.setVatRatePct(vat);
+        item.setPortionSize(trimToNull(req.portionSize(), 40));
+        item.setVariants(normaliseVariants(req.variants()));
         item.setActive(true);
         item = itemRepository.save(item);
 
@@ -222,6 +224,8 @@ public class MenuService {
         if (req.dietaryTags() != null) item.setDietaryTags(normaliseTags(req.dietaryTags()));
         if (req.allergens() != null) item.setAllergens(normaliseTags(req.allergens()));
         if (req.featured() != null) item.setFeatured(req.featured());
+        if (req.portionSize() != null) item.setPortionSize(trimToNull(req.portionSize(), 40));
+        if (req.variants() != null) item.setVariants(normaliseVariants(req.variants()));
         if (req.sku() != null) {
             String sku = req.sku().trim();
             if (sku.isEmpty()) {
@@ -527,6 +531,8 @@ public class MenuService {
                 : null);
         m.put("dietaryTags", item.getDietaryTags());
         m.put("allergens", item.getAllergens());
+        m.put("portionSize", item.getPortionSize());
+        m.put("variants", item.getVariants());
         m.put("featured", item.isFeatured());
         m.put("categoryId", item.getCategoryId());
         m.put("categoryName", cat != null ? cat.getName() : null);
@@ -553,6 +559,13 @@ public class MenuService {
         m.put("createdAt", item.getCreatedAt() != null ? item.getCreatedAt().toString() : null);
         m.put("updatedAt", item.getUpdatedAt() != null ? item.getUpdatedAt().toString() : null);
         return m;
+    }
+
+    /** Sanitise variant JSON: null / blank → null; any other string stored as-is. */
+    private static String normaliseVariants(String raw) {
+        if (raw == null) return null;
+        String t = raw.trim();
+        return t.isEmpty() || t.equals("[]") || t.equals("null") ? null : t;
     }
 
     private static String normaliseTags(String raw) {
@@ -626,7 +639,14 @@ public class MenuService {
             BigDecimal foodCost,
             BigDecimal vatRatePct,
             Boolean featured,
-            Boolean active) {
+            Boolean active,
+            /** Optional serving label, e.g. "500g", "330ml". */
+            String portionSize,
+            /**
+             * JSON array of variants, e.g. {@code [{"name":"Small","price":15},{"name":"Large"}]}.
+             * Null / empty string clears any existing variants.
+             */
+            String variants) {
         public MenuItemRequest {
             Objects.requireNonNullElse(name, "");
         }
