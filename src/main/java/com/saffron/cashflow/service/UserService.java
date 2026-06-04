@@ -241,6 +241,20 @@ public class UserService {
     }
 
     @Transactional
+    public Map<String, Object> setPosPin(String id, String pin) {
+        AuthHelper.requireAdminOr(Permission.TEAM_MANAGE);
+        User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User not found"));
+        if (pin == null || pin.isBlank()) {
+            user.setPosPin(null);
+        } else {
+            if (!pin.matches("\\d{4}")) throw new BadRequestException("PIN must be exactly 4 digits");
+            user.setPosPin(passwordEncoder.encode(pin));
+        }
+        userRepository.save(user);
+        return Map.of("success", true, "hasPin", user.getPosPin() != null);
+    }
+
+    @Transactional
     public Map<String, Object> deactivate(String id) {
         AuthHelper.requireAdminOr(Permission.TEAM_MANAGE);
         if (id.equals(AuthHelper.currentUser().id())) {
@@ -274,6 +288,7 @@ public class UserService {
         m.put("hourlyRate", u.getPayAmount() != null ? u.getPayAmount().doubleValue() : null);
         if (u.getStartDate() != null) m.put("startDate", u.getStartDate().toString());
         if (u.getCreatedAt() != null) m.put("createdAt", u.getCreatedAt().toString());
+        m.put("hasPin", u.getPosPin() != null);
         // Permission overlay — role defaults, admin-granted extras, and
         // admin-revoked defaults. The list endpoint includes these so
         // the AdminTeam page can show summary badges without a per-user

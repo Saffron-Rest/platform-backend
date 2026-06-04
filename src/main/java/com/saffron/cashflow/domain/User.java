@@ -53,6 +53,10 @@ public class User {
      * encoding contract. Never edited by users themselves; only by an
      * admin via {@code UserService.setPermissions}.
      */
+    /** BCrypt hash of this cashier's 4-digit POS PIN. Null if no PIN set. */
+    @Column(name = "pos_pin")
+    private String posPin;
+
     @Column(name = "extra_permissions", columnDefinition = "TEXT")
     private String extraPermissions;
 
@@ -107,6 +111,8 @@ public class User {
     public void setPayAmount(BigDecimal payAmount) { this.payAmount = payAmount; }
     public LocalDate getStartDate() { return startDate; }
     public void setStartDate(LocalDate startDate) { this.startDate = startDate; }
+    public String getPosPin() { return posPin; }
+    public void setPosPin(String posPin) { this.posPin = posPin; }
     public String getExtraPermissions() { return extraPermissions; }
     public void setExtraPermissions(String extraPermissions) { this.extraPermissions = extraPermissions; }
     public String getRevokedPermissions() { return revokedPermissions; }

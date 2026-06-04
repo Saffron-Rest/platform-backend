@@ -49,6 +49,9 @@ public class DatabaseMigrationRunner {
      */
     private static void migratePosSchema(JdbcTemplate jdbc) {
 
+        // POS PIN login — bcrypt-hashed 4-digit code per cashier
+        jdbc.execute("ALTER TABLE app_user ADD COLUMN IF NOT EXISTS pos_pin VARCHAR(255)");
+
         // ── New columns on pre-existing tables ──────────────────────────────
 
         // pos_sale: fiscal VAT fields (Sprint 1)

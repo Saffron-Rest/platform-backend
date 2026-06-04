@@ -37,6 +37,9 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health", "/api/auth/login").permitAll()
+                        // POS PIN authentication — public so the tablet can work without platform login
+                        .requestMatchers(HttpMethod.POST, "/api/pos/pin-auth").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/pos/cashiers-today").permitAll()
                         // Public menu image endpoint — used by the printable PDF preview and
                         // any guest-facing menu page. Images are non-sensitive.
                         .requestMatchers(HttpMethod.GET, "/api/files/menu/**").permitAll()

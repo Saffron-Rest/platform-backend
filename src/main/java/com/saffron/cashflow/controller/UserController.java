@@ -60,6 +60,20 @@ public class UserController {
     }
 
     // ====================================================================
+    // POS PIN management
+    // ====================================================================
+
+    /**
+     * Set or clear a cashier's POS PIN.
+     * Body: {@code { "pin": "1234" }} to set, or {@code { "pin": null }} to clear.
+     */
+    @PutMapping("/{id}/pos-pin")
+    public Map<String, Object> setPosPin(@PathVariable String id, @RequestBody java.util.Map<String, Object> body) {
+        String pin = body.get("pin") != null ? body.get("pin").toString() : null;
+        return userService.setPosPin(id, pin);
+    }
+
+    // ====================================================================
     // Permission overlay
     // ====================================================================
 
