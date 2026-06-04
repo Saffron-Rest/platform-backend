@@ -516,105 +516,165 @@ public class MenuPrintService {
             throws DocumentException {
         PdfPTable table = new PdfPTable(2);
         table.setWidthPercentage(100);
-        table.setSpacingBefore(0);
+        table.setSpacingBefore(8);
         table.setSplitLate(false);
         table.getDefaultCell().setBorder(Rectangle.NO_BORDER);
+        try { table.setWidths(new float[]{1f, 1f}); } catch (DocumentException ignored) {}
 
         for (MenuItem item : items) table.addCell(gridCard(item, showPrices, locale));
         if (items.size() % 2 == 1) {
+            // Empty filler card (same wrapper dimensions) keeps even-column alignment
             PdfPCell filler = new PdfPCell();
             filler.setBorder(Rectangle.NO_BORDER);
+            filler.setPaddingRight(16);
+            filler.setPaddingBottom(20);
             table.addCell(filler);
         }
         doc.add(table);
     }
 
+    /**
+     * One item card for the 2-column grid layout.
+     *
+     * Structure (top to bottom):
+     *   ┌──────────────────────────────────┐
+     *   │  Photo (full-bleed cover, 175pt) │  ← real image or warm cream placeholder
+     *   │  OR cream gradient placeholder   │
+     *   ├── 2pt saffron accent line ────────┤
+     *   │  [♦ Chef's signature]            │  ← only if featured
+     *   │  Name              38.00 zł      │  ← name (serif bold) + price (saffron)
+     *   │  ──────────────────────────────  │  ← hairline
+     *   │  Description text in italic...   │  ← first, before options
+     *   │  vegetarian · gluten-free        │
+     *   │  OPTIONS ─────                   │  ← only if variants exist
+     *   │    Small          25.00 zł       │
+     *   │    Regular        35.00 zł       │
+     *   └──────────────────────────────────┘
+     *
+     * Images use "cover" scaling (fills the cell, crops excess) so there
+     * is never a cream letterbox gap around the photo.
+     */
     private PdfPCell gridCard(MenuItem item, boolean showPrices, Locale locale) {
+        // Outer spacer — creates gutter between cards
         PdfPCell wrap = new PdfPCell();
-        wrap.setBorder(Rectangle.NO_BORDER);
+        wrap.setBorder(Rectangle.BOX);
+        wrap.setBorderColor(HAIRLINE);
+        wrap.setBorderWidth(0.5f);
         wrap.setPadding(0);
-        wrap.setPaddingBottom(28);
-        wrap.setPaddingRight(14);
+        wrap.setPaddingBottom(20);
+        wrap.setPaddingRight(16);
 
         PdfPTable card = new PdfPTable(1);
         card.setWidthPercentage(100);
 
-        // Photos remain optional — only included when admin uploads one.
+        // ── Photo area (always present — real image or cream placeholder) ─────
+        // Approximate card pixel width for a 2-col A4 grid with 68pt margins
+        // and 16pt gutter: (595 - 68 - 68 - 16) / 2 ≈ 221pt
+        final float CARD_W = 221f;
+        final float PHOTO_H = 175f;
+
+        PdfPCell photoCell = new PdfPCell();
+        photoCell.setBorder(Rectangle.NO_BORDER);
+        photoCell.setFixedHeight(PHOTO_H);
+        photoCell.setPadding(0);
+        photoCell.setHorizontalAlignment(Element.ALIGN_CENTER);
+        photoCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
+
         Image img = tryLoadImage(item.getImagePath());
         if (img != null) {
-            PdfPCell photo = new PdfPCell();
-            photo.setBackgroundColor(CREAM);
-            photo.setBorder(Rectangle.BOX);
-            photo.setBorderColor(HAIRLINE);
-            photo.setBorderWidth(0.5f);
-            photo.setFixedHeight(170f);
-            photo.setPadding(2);
-            photo.setHorizontalAlignment(Element.ALIGN_CENTER);
-            photo.setVerticalAlignment(Element.ALIGN_MIDDLE);
+            // Cover scaling: scale so the image fills the cell entirely (crop excess).
+            // This is the equivalent of CSS object-fit:cover — no cream letterboxing.
+            float scaleX = CARD_W  / img.getWidth();
+            float scaleY = PHOTO_H / img.getHeight();
+            float scale  = Math.max(scaleX, scaleY);   // cover, not fit
+            img.scaleAbsolute(img.getWidth() * scale, img.getHeight() * scale);
             img.setAlignment(Image.ALIGN_CENTER | Image.ALIGN_MIDDLE);
-            img.scaleToFit(254, 160);
-            photo.setImage(img);
-            card.addCell(photo);
+            photoCell.setImage(img);
+        } else {
+            // Warm cream placeholder — card has visual weight even without a photo
+            photoCell.setBackgroundColor(new Color(0xEE, 0xE6, 0xD8));
         }
+        card.addCell(photoCell);
 
+        // 2pt saffron accent stripe — separates photo from text area
+        PdfPCell stripe = new PdfPCell();
+        stripe.setFixedHeight(2f);
+        stripe.setBackgroundColor(SAFFRON);
+        stripe.setBorder(Rectangle.NO_BORDER);
+        card.addCell(stripe);
+
+        // ── Fonts ─────────────────────────────────────────────────────────────
+        Font nameFont     = font(SERIF_BOLD,   13.5f, INK);
+        Font portionFont  = font(SANS_REG,      8.5f, MUTED);
+        Font priceFont    = font(SANS_BOLD,    12f,   SAFFRON_DEEP);
+        Font pillFont     = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
+        Font descFont     = font(SERIF_ITALIC,  9.5f, MUTED);
+        Font tagsFont     = font(SANS_ITALIC,   8f,   MUTED);
+        Font allergenFont = font(SANS_REG,      7.5f, MUTED);
+        Font optLabelFont = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
+        Font varNameFont  = font(SANS_REG,      9.5f, INK_SOFT);
+        Font varPriceFont = font(SANS_BOLD,     9.5f, SAFFRON_DEEP);
+        Font varSameFont  = font(SANS_ITALIC,   9f,   MUTED);
+
+        List<VariantEntry> variants = parseVariants(item);
+        boolean varPrices    = showPrices && hasVariantPrices(variants);
+        boolean showBasePrice = showPrices && !varPrices;
+
+        // ── Featured pill ─────────────────────────────────────────────────────
         if (item.isFeatured()) {
-            PdfPCell pill = new PdfPCell(new Phrase(spacedCaps("Chef's signature"),
-                    font(SANS_BOLD, 7.5f, SAFFRON_DEEP)));
+            PdfPCell pill = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
             pill.setBorder(Rectangle.NO_BORDER);
-            pill.setPaddingTop(img != null ? 14 : 0);
-            pill.setPaddingBottom(0);
+            pill.setPaddingTop(10);
+            pill.setPaddingLeft(10);
+            pill.setPaddingBottom(2);
             card.addCell(pill);
         }
 
-        // ── Fonts ────────────────────────────────────────────────────────────
-        Font nameFont      = font(SERIF_BOLD,   14,   INK);
-        Font portionFont   = font(SANS_REG,      9f,  MUTED);       // portion size inline
-        Font priceFont     = font(SANS_BOLD,    12.5f, SAFFRON_DEEP);
-        Font descFont      = font(SERIF_ITALIC, 10,   MUTED);        // italic — story-telling
-        Font tagsFont      = font(SANS_ITALIC,   8,   MUTED);
-        Font allergenFont  = font(SANS_REG,      7.5f, MUTED);
-        Font optLabelFont  = font(SANS_BOLD,     7,   SAFFRON_DEEP); // "OPTIONS"
-        Font varNameFont   = font(SANS_REG,      9.5f, INK_SOFT);
-        Font varPriceFont  = font(SANS_BOLD,     9.5f, SAFFRON_DEEP);
-        Font varSameFont   = font(SANS_ITALIC,   9f,  MUTED);        // "Small · Regular"
-
-        List<VariantEntry> variants   = parseVariants(item);
-        boolean varPrices             = showPrices && hasVariantPrices(variants);
-        boolean showBasePrice         = showPrices && !varPrices;
-
-        // ── 1. Name row (name + portionSize mixed phrase) + base price ────────
+        // ── 1. Name + price row ───────────────────────────────────────────────
         PdfPTable nameRow = new PdfPTable(showBasePrice ? 2 : 1);
         nameRow.setWidthPercentage(100);
-        try { if (showBasePrice) nameRow.setWidths(new float[]{5.4f, 2.6f}); }
+        try { if (showBasePrice) nameRow.setWidths(new float[]{5f, 2f}); }
         catch (DocumentException ignored) {}
-        nameRow.addCell(textCell(namePhrase(item, nameFont, portionFont), Element.ALIGN_LEFT));
+
+        PdfPCell nameCell = new PdfPCell(namePhrase(item, nameFont, portionFont));
+        nameCell.setBorder(Rectangle.NO_BORDER);
+        nameCell.setPaddingTop(item.isFeatured() ? 4 : 12);
+        nameCell.setPaddingLeft(10);
+        nameCell.setPaddingRight(6);
+        nameCell.setPaddingBottom(4);
+        nameRow.addCell(nameCell);
+
         if (showBasePrice) {
             PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
             pc.setBorder(Rectangle.NO_BORDER);
             pc.setHorizontalAlignment(Element.ALIGN_RIGHT);
             pc.setNoWrap(true);
+            pc.setPaddingTop(item.isFeatured() ? 4 : 12);
+            pc.setPaddingRight(10);
+            pc.setPaddingBottom(4);
             nameRow.addCell(pc);
         }
+
         PdfPCell nameWrap = new PdfPCell(nameRow);
         nameWrap.setBorder(Rectangle.NO_BORDER);
-        nameWrap.setPaddingTop(item.isFeatured() ? 4 : (img != null ? 14 : 0));
-        nameWrap.setPaddingBottom(2);
         card.addCell(nameWrap);
 
-        // thin hairline under the name
+        // hairline under name
         PdfPCell hair = new PdfPCell();
-        hair.setFixedHeight(0.6f);
+        hair.setFixedHeight(0.5f);
         hair.setBackgroundColor(HAIRLINE);
         hair.setBorder(Rectangle.NO_BORDER);
         card.addCell(hair);
 
-        // ── 2. Description (BEFORE variants — guest reads dish first) ─────────
+        // ── 2. Description (before options — read the dish first) ────────────
         String desc = chooseDescription(item);
         if (desc != null) {
             PdfPCell d = new PdfPCell(new Phrase(desc, descFont));
             d.setBorder(Rectangle.NO_BORDER);
-            d.setPaddingTop(7);
-            d.setPaddingBottom(2);
+            d.setPaddingTop(8);
+            d.setPaddingLeft(10);
+            d.setPaddingRight(10);
+            d.setPaddingBottom(4);
             d.setLeading(0, 1.35f);
             card.addCell(d);
         }
@@ -624,7 +684,10 @@ public class MenuPrintService {
         if (dietary != null) {
             PdfPCell c = new PdfPCell(new Phrase(dietary, tagsFont));
             c.setBorder(Rectangle.NO_BORDER);
-            c.setPaddingTop(5);
+            c.setPaddingTop(4);
+            c.setPaddingLeft(10);
+            c.setPaddingRight(10);
+            c.setPaddingBottom(2);
             card.addCell(c);
         }
         String allergen = renderAllergens(item);
@@ -632,18 +695,22 @@ public class MenuPrintService {
             PdfPCell c = new PdfPCell(new Phrase(allergen, allergenFont));
             c.setBorder(Rectangle.NO_BORDER);
             c.setPaddingTop(2);
+            c.setPaddingLeft(10);
+            c.setPaddingRight(10);
+            c.setPaddingBottom(4);
             card.addCell(c);
         }
 
-        // ── 4. Options section (AFTER description — selectable, not descriptive)
+        // ── 4. Options (after description — "choose your size" comes last) ────
         if (!variants.isEmpty()) {
-            // "OPTIONS" label with a partial saffron rule
             PdfPCell optLabel = new PdfPCell(new Phrase(spacedCaps("Options"), optLabelFont));
             optLabel.setBorder(Rectangle.NO_BORDER);
-            optLabel.setPaddingTop(10);
+            optLabel.setPaddingTop(8);
+            optLabel.setPaddingLeft(10);
             optLabel.setPaddingBottom(2);
             card.addCell(optLabel);
 
+            // thin saffron rule under "OPTIONS"
             PdfPCell optHair = new PdfPCell();
             optHair.setFixedHeight(0.5f);
             optHair.setBackgroundColor(SAFFRON);
@@ -651,16 +718,16 @@ public class MenuPrintService {
             card.addCell(optHair);
 
             if (varPrices) {
-                // Each option: name (left) + price (right)
                 for (VariantEntry v : variants) {
                     PdfPTable vRow = new PdfPTable(2);
                     vRow.setWidthPercentage(100);
-                    try { vRow.setWidths(new float[]{5.4f, 2.6f}); } catch (DocumentException ignored) {}
+                    try { vRow.setWidths(new float[]{5f, 2f}); } catch (DocumentException ignored) {}
 
                     PdfPCell vnc = new PdfPCell(new Phrase(v.name(), varNameFont));
                     vnc.setBorder(Rectangle.NO_BORDER);
-                    vnc.setPaddingTop(4);
-                    vnc.setPaddingLeft(4);
+                    vnc.setPaddingTop(3);
+                    vnc.setPaddingLeft(14);
+                    vnc.setPaddingBottom(2);
                     vRow.addCell(vnc);
 
                     BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
@@ -668,7 +735,9 @@ public class MenuPrintService {
                     vpc.setBorder(Rectangle.NO_BORDER);
                     vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
                     vpc.setNoWrap(true);
-                    vpc.setPaddingTop(4);
+                    vpc.setPaddingTop(3);
+                    vpc.setPaddingRight(10);
+                    vpc.setPaddingBottom(2);
                     vRow.addCell(vpc);
 
                     PdfPCell vWrap = new PdfPCell(vRow);
@@ -676,13 +745,20 @@ public class MenuPrintService {
                     card.addCell(vWrap);
                 }
             } else {
-                // Same price — name chips on one italic line
                 PdfPCell vLine = new PdfPCell(new Phrase(variantNamesLine(variants), varSameFont));
                 vLine.setBorder(Rectangle.NO_BORDER);
                 vLine.setPaddingTop(5);
+                vLine.setPaddingLeft(14);
+                vLine.setPaddingBottom(4);
                 card.addCell(vLine);
             }
         }
+
+        // bottom breathing room
+        PdfPCell foot = new PdfPCell(new Phrase(" "));
+        foot.setBorder(Rectangle.NO_BORDER);
+        foot.setFixedHeight(10f);
+        card.addCell(foot);
 
         wrap.addElement(card);
         return wrap;
