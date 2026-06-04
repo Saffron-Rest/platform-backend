@@ -234,21 +234,35 @@ public class MenuPrintService {
             drawHeritage(doc);
 
             for (int ci = 0; ci < categories.size(); ci++) {
-                MenuCategory cat   = categories.get(ci);
+                MenuCategory cat     = categories.get(ci);
                 List<MenuItem> items = itemsByCategory.get(cat.getId());
                 if (items == null || items.isEmpty()) continue;
 
                 if (ci == 0) {
-                    // First category: always on its own fresh page with full divider
                     doc.newPage();
                     drawSectionDivider(doc, cat.getName());
                 } else {
-                    // Subsequent categories: flow naturally — small categories share a page.
-                    // A compact header provides visual separation without wasting a full page.
-                    drawCompactSectionDivider(doc, cat.getName());
+                    // Compact divider: use available-space check to avoid orphaned heading.
+                    // Minimum required = compact divider (~80pt) + one grid row (~240pt).
+                    float avail = writer.getVerticalPosition(false) - doc.bottomMargin();
+                    if (avail < 340f) {
+                        // Not enough room — fresh page with full divider keeps heading+items together
+                        doc.newPage();
+                        drawSectionDivider(doc, cat.getName());
+                    } else {
+                        drawCompactSectionDivider(doc, cat.getName());
+                    }
                 }
 
-                switch (opt.layout()) {
+                // Auto-downgrade GRID → LIST when all items lack images AND descriptions.
+                // A grid of empty cream boxes looks broken; a dense list looks intentional.
+                boolean hasVisualContent = items.stream().anyMatch(
+                        i -> (i.getImagePath() != null && !i.getImagePath().isBlank())
+                             || chooseDescription(i) != null);
+                Layout effectiveLayout = (opt.layout() == Layout.GRID && !hasVisualContent)
+                        ? Layout.LIST : opt.layout();
+
+                switch (effectiveLayout) {
                     case GRID    -> drawGrid(doc, items, opt.showPrices(), opt.locale());
                     case LIST    -> drawList(doc, items, opt.showPrices(), opt.locale());
                     case COMPACT -> drawCompact(doc, items, opt.showPrices(), opt.locale());
@@ -582,6 +596,7 @@ public class MenuPrintService {
         table.setWidthPercentage(100);
         table.setSpacingBefore(8);
         table.setSplitLate(false);
+        table.setSplitRows(false);  // never split a grid row — keeps photo and text together
         table.getDefaultCell().setBorder(Rectangle.NO_BORDER);
         try { table.setWidths(new float[]{1f, 1f}); } catch (DocumentException ignored) {}
 
@@ -634,8 +649,12 @@ public class MenuPrintService {
         // ── Photo area (always present — real image or cream placeholder) ─────
         // Approximate card pixel width for a 2-col A4 grid with 68pt margins
         // and 16pt gutter: (595 - 68 - 68 - 16) / 2 ≈ 221pt
-        final float CARD_W = 221f;
-        final float PHOTO_H = 175f;
+        final float CARD_W  = 221f;
+        // Full-height for real images; compact placeholder for cards without photos
+        // so the page isn't dominated by large empty cream boxes.
+        Image img0 = tryLoadImage(item.getImagePath());
+        final float PHOTO_H = (img0 != null) ? 175f : 90f;
+        Image img = img0;  // reuse the loaded image reference
 
         PdfPCell photoCell = new PdfPCell();
         photoCell.setBorder(Rectangle.NO_BORDER);
@@ -644,7 +663,6 @@ public class MenuPrintService {
         photoCell.setHorizontalAlignment(Element.ALIGN_CENTER);
         photoCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
 
-        Image img = tryLoadImage(item.getImagePath());
         if (img != null) {
             // Cover scaling: scale so the image fills the cell entirely (crop excess).
             // This is the equivalent of CSS object-fit:cover — no cream letterboxing.
@@ -1252,7 +1270,7 @@ public class MenuPrintService {
         String canonical = switch (key) {
             case "zupy", "zupa"                           -> "soups";
             case "sałatki", "sałatka", "salaty", "salata" -> "salads";
-            case "przystawki", "przystawka"               -> "starters";
+            case "przystawki", "przystawka", "prystawki", "prystawka" -> "starters";
             case "dania główne", "dania glowne"           -> "mains";
             case "desery", "deser"                        -> "desserts";
             case "napoje", "napój"                        -> "drinks";
@@ -1291,7 +1309,7 @@ public class MenuPrintService {
             // Polish
             case "zupy", "zupa"                         -> "Do rozgrzania";
             case "sałatki", "sałatka", "salaty", "salata" -> "Świeże & wyraziste";
-            case "przystawki", "przystawka"             -> "Na początek";
+            case "przystawki", "przystawka", "prystawki", "prystawka" -> "Na początek";
             case "dania główne", "dania glowne"         -> "Z kuchni";
             case "desery", "deser"                      -> "Słodkie zakończenie";
             case "napoje", "napój"                      -> "Do picia";
@@ -1305,7 +1323,7 @@ public class MenuPrintService {
         if (name == null) return null;
         String key = name.trim().toLowerCase(Locale.ROOT);
         return switch (key) {
-            case "starters", "appetisers", "appetizers", "przystawki", "przystawka" ->
+            case "starters", "appetisers", "appetizers", "przystawki", "przystawka", "prystawki", "prystawka" ->
                     "Small plates to open the meal — eaten slowly, ideally with bread, while the table is being set.";
             case "salads", "salad", "sałatki", "sałatka" ->
                     "Fresh herbs, sumac, walnuts and pomegranate — the everyday Azerbaijani table at its most generous.";
@@ -1518,11 +1536,11 @@ public class MenuPrintService {
                 PdfContentByte cb = writer.getDirectContent();
                 Rectangle page = doc.getPageSize();
 
-                // Running brand mark — top right, in the top margin
-                Font fBrand = font(SANS_BOLD, 7f, new Color(0xC9, 0x6A, 0x1A)); // SAFFRON
+                // Running brand mark — top right, clean all-caps without excessive tracking
+                Font fBrand = font(SANS_BOLD, 7.5f, new Color(0xC9, 0x6A, 0x1A)); // SAFFRON
                 ColumnText.showTextAligned(
                         cb, Element.ALIGN_RIGHT,
-                        new Phrase(spacedCaps("Saffron"), fBrand),
+                        new Phrase("SAFFRON", fBrand),
                         page.getWidth() - 68f, page.getHeight() - 52f, 0);
 
                 // Page number — bottom centre
