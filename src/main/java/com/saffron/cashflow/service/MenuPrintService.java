@@ -550,7 +550,7 @@ public class MenuPrintService {
         Paragraph h = new Paragraph(name, head);
         h.setSpacingBefore(4);
         h.setSpacingAfter(0);
-        h.setKeepWithNext(true);   // never orphan the heading from its items
+        // keepWithNext not available in this iText version — rely on spacing to stay together
         doc.add(h);
 
         // Optional Azerbaijani translation
@@ -558,7 +558,6 @@ public class MenuPrintService {
         if (az != null) {
             Paragraph azP = new Paragraph(az, azFont);
             azP.setSpacingBefore(3);
-            azP.setKeepWithNext(true);
             doc.add(azP);
         }
 
