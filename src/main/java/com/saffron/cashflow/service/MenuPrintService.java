@@ -566,33 +566,34 @@ public class MenuPrintService {
             card.addCell(pill);
         }
 
-        Font nameFont    = font(SERIF_BOLD, 14, INK);
-        Font priceFont   = font(SANS_BOLD, 12.5f, SAFFRON_DEEP);
-        Font descFont    = font(SANS_REG, 9.5f, MUTED);
-        Font tagsFont    = font(SANS_ITALIC, 8, MUTED);
-        Font allergenFont = font(SANS_REG, 7.5f, MUTED);
-        Font varNameFont = font(SANS_REG, 10f, INK_SOFT);
-        Font varPriceFont = font(SANS_BOLD, 10f, SAFFRON_DEEP);
-        Font varNamesFont = font(SANS_ITALIC, 9f, MUTED);
+        // ── Fonts ────────────────────────────────────────────────────────────
+        Font nameFont      = font(SERIF_BOLD,   14,   INK);
+        Font portionFont   = font(SANS_REG,      9f,  MUTED);       // portion size inline
+        Font priceFont     = font(SANS_BOLD,    12.5f, SAFFRON_DEEP);
+        Font descFont      = font(SERIF_ITALIC, 10,   MUTED);        // italic — story-telling
+        Font tagsFont      = font(SANS_ITALIC,   8,   MUTED);
+        Font allergenFont  = font(SANS_REG,      7.5f, MUTED);
+        Font optLabelFont  = font(SANS_BOLD,     7,   SAFFRON_DEEP); // "OPTIONS"
+        Font varNameFont   = font(SANS_REG,      9.5f, INK_SOFT);
+        Font varPriceFont  = font(SANS_BOLD,     9.5f, SAFFRON_DEEP);
+        Font varSameFont   = font(SANS_ITALIC,   9f,  MUTED);        // "Small · Regular"
 
-        List<VariantEntry> variants = parseVariants(item);
-        boolean varPrices = showPrices && hasVariantPrices(variants);
-        // When variants carry their own prices, omit the base price from name row
-        boolean showBasePrice = showPrices && !varPrices;
+        List<VariantEntry> variants   = parseVariants(item);
+        boolean varPrices             = showPrices && hasVariantPrices(variants);
+        boolean showBasePrice         = showPrices && !varPrices;
 
+        // ── 1. Name row (name + portionSize mixed phrase) + base price ────────
         PdfPTable nameRow = new PdfPTable(showBasePrice ? 2 : 1);
         nameRow.setWidthPercentage(100);
-        try {
-            if (showBasePrice) nameRow.setWidths(new float[]{5.4f, 2.6f});
-        } catch (DocumentException ignored) {}
-        nameRow.addCell(textCell(new Phrase(displayName(item), nameFont), Element.ALIGN_LEFT));
+        try { if (showBasePrice) nameRow.setWidths(new float[]{5.4f, 2.6f}); }
+        catch (DocumentException ignored) {}
+        nameRow.addCell(textCell(namePhrase(item, nameFont, portionFont), Element.ALIGN_LEFT));
         if (showBasePrice) {
-            PdfPCell priceCell = new PdfPCell(
-                    new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
-            priceCell.setBorder(Rectangle.NO_BORDER);
-            priceCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
-            priceCell.setNoWrap(true);
-            nameRow.addCell(priceCell);
+            PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+            pc.setBorder(Rectangle.NO_BORDER);
+            pc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+            pc.setNoWrap(true);
+            nameRow.addCell(pc);
         }
         PdfPCell nameWrap = new PdfPCell(nameRow);
         nameWrap.setBorder(Rectangle.NO_BORDER);
@@ -600,55 +601,30 @@ public class MenuPrintService {
         nameWrap.setPaddingBottom(2);
         card.addCell(nameWrap);
 
+        // thin hairline under the name
         PdfPCell hair = new PdfPCell();
         hair.setFixedHeight(0.6f);
         hair.setBackgroundColor(HAIRLINE);
         hair.setBorder(Rectangle.NO_BORDER);
         card.addCell(hair);
 
-        // Variant rows
-        if (!variants.isEmpty()) {
-            if (varPrices) {
-                // Each variant on its own row: name (left) · price (right)
-                for (VariantEntry v : variants) {
-                    PdfPTable vRow = new PdfPTable(2);
-                    vRow.setWidthPercentage(100);
-                    try { vRow.setWidths(new float[]{5.4f, 2.6f}); } catch (DocumentException ignored) {}
-                    vRow.addCell(textCell(new Phrase("  " + v.name(), varNameFont), Element.ALIGN_LEFT));
-                    BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
-                    PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
-                    vpc.setBorder(Rectangle.NO_BORDER);
-                    vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                    vpc.setNoWrap(true);
-                    vRow.addCell(vpc);
-                    PdfPCell vWrap = new PdfPCell(vRow);
-                    vWrap.setBorder(Rectangle.NO_BORDER);
-                    vWrap.setPaddingTop(4);
-                    card.addCell(vWrap);
-                }
-            } else {
-                // Same price — just list the option names in one italic line
-                PdfPCell vNameLine = new PdfPCell(
-                        new Phrase(variantNamesLine(variants), varNamesFont));
-                vNameLine.setBorder(Rectangle.NO_BORDER);
-                vNameLine.setPaddingTop(4);
-                card.addCell(vNameLine);
-            }
-        }
-
+        // ── 2. Description (BEFORE variants — guest reads dish first) ─────────
         String desc = chooseDescription(item);
         if (desc != null) {
             PdfPCell d = new PdfPCell(new Phrase(desc, descFont));
             d.setBorder(Rectangle.NO_BORDER);
-            d.setPaddingTop(8);
+            d.setPaddingTop(7);
             d.setPaddingBottom(2);
+            d.setLeading(0, 1.35f);
             card.addCell(d);
         }
+
+        // ── 3. Dietary + allergens ────────────────────────────────────────────
         String dietary = renderDietary(item);
         if (dietary != null) {
             PdfPCell c = new PdfPCell(new Phrase(dietary, tagsFont));
             c.setBorder(Rectangle.NO_BORDER);
-            c.setPaddingTop(4);
+            c.setPaddingTop(5);
             card.addCell(c);
         }
         String allergen = renderAllergens(item);
@@ -659,6 +635,55 @@ public class MenuPrintService {
             card.addCell(c);
         }
 
+        // ── 4. Options section (AFTER description — selectable, not descriptive)
+        if (!variants.isEmpty()) {
+            // "OPTIONS" label with a partial saffron rule
+            PdfPCell optLabel = new PdfPCell(new Phrase(spacedCaps("Options"), optLabelFont));
+            optLabel.setBorder(Rectangle.NO_BORDER);
+            optLabel.setPaddingTop(10);
+            optLabel.setPaddingBottom(2);
+            card.addCell(optLabel);
+
+            PdfPCell optHair = new PdfPCell();
+            optHair.setFixedHeight(0.5f);
+            optHair.setBackgroundColor(SAFFRON);
+            optHair.setBorder(Rectangle.NO_BORDER);
+            card.addCell(optHair);
+
+            if (varPrices) {
+                // Each option: name (left) + price (right)
+                for (VariantEntry v : variants) {
+                    PdfPTable vRow = new PdfPTable(2);
+                    vRow.setWidthPercentage(100);
+                    try { vRow.setWidths(new float[]{5.4f, 2.6f}); } catch (DocumentException ignored) {}
+
+                    PdfPCell vnc = new PdfPCell(new Phrase(v.name(), varNameFont));
+                    vnc.setBorder(Rectangle.NO_BORDER);
+                    vnc.setPaddingTop(4);
+                    vnc.setPaddingLeft(4);
+                    vRow.addCell(vnc);
+
+                    BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                    PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
+                    vpc.setBorder(Rectangle.NO_BORDER);
+                    vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                    vpc.setNoWrap(true);
+                    vpc.setPaddingTop(4);
+                    vRow.addCell(vpc);
+
+                    PdfPCell vWrap = new PdfPCell(vRow);
+                    vWrap.setBorder(Rectangle.NO_BORDER);
+                    card.addCell(vWrap);
+                }
+            } else {
+                // Same price — name chips on one italic line
+                PdfPCell vLine = new PdfPCell(new Phrase(variantNamesLine(variants), varSameFont));
+                vLine.setBorder(Rectangle.NO_BORDER);
+                vLine.setPaddingTop(5);
+                card.addCell(vLine);
+            }
+        }
+
         wrap.addElement(card);
         return wrap;
     }
@@ -667,81 +692,62 @@ public class MenuPrintService {
 
     private void drawList(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
             throws DocumentException {
-        Font nameFont    = font(SERIF_BOLD, 14.5f, INK);
-        Font priceFont   = font(SANS_BOLD, 13, SAFFRON_DEEP);
-        Font pillFont    = font(SANS_BOLD, 7.5f, SAFFRON_DEEP);
-        Font descFont    = font(SANS_REG, 10.5f, MUTED);
-        Font tagsFont    = font(SANS_ITALIC, 9, MUTED);
-        Font allergenFont = font(SANS_REG, 8, MUTED);
-        Font varNameFont = font(SANS_REG, 10.5f, INK_SOFT);
-        Font varPriceFont = font(SANS_BOLD, 10.5f, SAFFRON_DEEP);
-        Font varNamesFont = font(SANS_ITALIC, 10f, MUTED);
+        // ── Fonts ────────────────────────────────────────────────────────────
+        Font nameFont      = font(SERIF_BOLD,   14.5f, INK);
+        Font portionFont   = font(SANS_REG,      9.5f, MUTED);
+        Font priceFont     = font(SANS_BOLD,    13,    SAFFRON_DEEP);
+        Font pillFont      = font(SANS_BOLD,     7.5f, SAFFRON_DEEP);
+        Font descFont      = font(SERIF_ITALIC, 11,    MUTED);        // italic serif — most readable in list
+        Font tagsFont      = font(SANS_ITALIC,   9,    MUTED);
+        Font allergenFont  = font(SANS_REG,      8,    MUTED);
+        Font optLabelFont  = font(SANS_BOLD,     7.5f, SAFFRON_DEEP);
+        Font varNameFont   = font(SANS_REG,     10.5f, INK_SOFT);
+        Font varPriceFont  = font(SANS_BOLD,    10.5f, SAFFRON_DEEP);
+        Font varSameFont   = font(SANS_ITALIC,  10f,   MUTED);
 
         for (int i = 0; i < items.size(); i++) {
-            MenuItem item = items.get(i);
+            MenuItem item       = items.get(i);
             List<VariantEntry> variants = parseVariants(item);
-            boolean varPrices = showPrices && hasVariantPrices(variants);
+            boolean varPrices   = showPrices && hasVariantPrices(variants);
             boolean showBasePrice = showPrices && !varPrices;
 
+            // ── 1. Featured pill ──────────────────────────────────────────────
             if (item.isFeatured()) {
                 Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
                 pill.setSpacingBefore(i == 0 ? 0 : 4);
                 doc.add(pill);
             }
 
+            // ── 2. Name row (mixed phrase) + base price ───────────────────────
             PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
             head.setWidthPercentage(100);
-            try {
-                if (showBasePrice) head.setWidths(new float[]{6.4f, 1.6f});
-            } catch (DocumentException ignored) {}
-            head.addCell(textCell(new Phrase(displayName(item), nameFont), Element.ALIGN_LEFT));
+            try { if (showBasePrice) head.setWidths(new float[]{6.4f, 1.6f}); }
+            catch (DocumentException ignored) {}
+            head.addCell(textCell(namePhrase(item, nameFont, portionFont), Element.ALIGN_LEFT));
             if (showBasePrice) {
-                PdfPCell priceCell = new PdfPCell(
-                        new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
-                priceCell.setBorder(Rectangle.NO_BORDER);
-                priceCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                priceCell.setNoWrap(true);
-                head.addCell(priceCell);
+                PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+                pc.setBorder(Rectangle.NO_BORDER);
+                pc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                pc.setNoWrap(true);
+                head.addCell(pc);
             }
             head.setSpacingBefore(item.isFeatured() ? 2 : 6);
             doc.add(head);
 
-            // Variant rows
-            if (!variants.isEmpty()) {
-                if (varPrices) {
-                    for (VariantEntry v : variants) {
-                        PdfPTable vRow = new PdfPTable(2);
-                        vRow.setWidthPercentage(100);
-                        try { vRow.setWidths(new float[]{6.4f, 1.6f}); } catch (DocumentException ignored) {}
-                        vRow.addCell(textCell(new Phrase("  " + v.name(), varNameFont), Element.ALIGN_LEFT));
-                        BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
-                        PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
-                        vpc.setBorder(Rectangle.NO_BORDER);
-                        vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                        vpc.setNoWrap(true);
-                        vRow.addCell(vpc);
-                        vRow.setSpacingBefore(3);
-                        doc.add(vRow);
-                    }
-                } else {
-                    Paragraph vLine = new Paragraph(variantNamesLine(variants), varNamesFont);
-                    vLine.setSpacingBefore(3);
-                    doc.add(vLine);
-                }
-            }
-
+            // ── 3. Description (before options — read the dish, then choose) ──
             String desc = chooseDescription(item);
             if (desc != null) {
                 Paragraph d = new Paragraph(desc, descFont);
-                d.setLeading(14.5f);
-                d.setSpacingBefore(3);
+                d.setLeading(15.5f);
+                d.setSpacingBefore(4);
                 doc.add(d);
             }
 
+            // ── 4. Dietary + allergens ────────────────────────────────────────
             String dietary = renderDietary(item);
             if (dietary != null) {
                 Paragraph d = new Paragraph(dietary, tagsFont);
-                d.setSpacingBefore(3);
+                d.setSpacingBefore(4);
                 doc.add(d);
             }
             String allergen = renderAllergens(item);
@@ -751,9 +757,47 @@ public class MenuPrintService {
                 doc.add(d);
             }
 
+            // ── 5. Options section (after description — price choices last) ────
+            if (!variants.isEmpty()) {
+                // "OPTIONS" label
+                Paragraph optLabel = new Paragraph(spacedCaps("Options"), optLabelFont);
+                optLabel.setSpacingBefore(9);
+                doc.add(optLabel);
+                // thin saffron rule
+                doc.add(new Chunk(new LineSeparator(0.5f, 40, SAFFRON, Element.ALIGN_LEFT, 0)));
+
+                if (varPrices) {
+                    for (VariantEntry v : variants) {
+                        PdfPTable vRow = new PdfPTable(2);
+                        vRow.setWidthPercentage(100);
+                        try { vRow.setWidths(new float[]{6.4f, 1.6f}); } catch (DocumentException ignored) {}
+
+                        PdfPCell vnc = new PdfPCell(new Phrase(v.name(), varNameFont));
+                        vnc.setBorder(Rectangle.NO_BORDER);
+                        vnc.setPaddingTop(4);
+                        vnc.setPaddingLeft(6);
+                        vRow.addCell(vnc);
+
+                        BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                        PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
+                        vpc.setBorder(Rectangle.NO_BORDER);
+                        vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                        vpc.setNoWrap(true);
+                        vpc.setPaddingTop(4);
+                        vRow.addCell(vpc);
+                        doc.add(vRow);
+                    }
+                } else {
+                    Paragraph vLine = new Paragraph(variantNamesLine(variants), varSameFont);
+                    vLine.setSpacingBefore(4);
+                    doc.add(vLine);
+                }
+            }
+
+            // ── Item separator ────────────────────────────────────────────────
             if (i < items.size() - 1) {
                 Paragraph pad = new Paragraph(" ");
-                pad.setSpacingBefore(8);
+                pad.setSpacingBefore(10);
                 doc.add(pad);
                 LineSeparator sep = new LineSeparator(0.4f, 100, HAIRLINE, Element.ALIGN_LEFT, 0);
                 doc.add(new Chunk(sep));
@@ -788,53 +832,85 @@ public class MenuPrintService {
         PdfPTable col = new PdfPTable(1);
         col.setWidthPercentage(100);
 
-        Font nameFont    = font(SERIF_BOLD, 12.5f, INK);
-        Font priceFont   = font(SANS_BOLD, 11.5f, SAFFRON_DEEP);
-        Font pillFont    = font(SANS_BOLD, 7, SAFFRON_DEEP);
-        Font descFont    = font(SANS_REG, 9.5f, MUTED);
-        Font tagsFont    = font(SANS_ITALIC, 8, MUTED);
-        Font varNameFont = font(SANS_REG, 9f, INK_SOFT);
-        Font varPriceFont = font(SANS_BOLD, 9f, SAFFRON_DEEP);
-        Font varNamesFont = font(SANS_ITALIC, 8.5f, MUTED);
+        // ── Fonts ────────────────────────────────────────────────────────────
+        Font nameFont      = font(SERIF_BOLD,   12.5f, INK);
+        Font portionFont   = font(SANS_REG,      8.5f, MUTED);
+        Font priceFont     = font(SANS_BOLD,    11.5f, SAFFRON_DEEP);
+        Font pillFont      = font(SANS_BOLD,     7,    SAFFRON_DEEP);
+        Font descFont      = font(SERIF_ITALIC,  9.5f, MUTED);
+        Font tagsFont      = font(SANS_ITALIC,   8,    MUTED);
+        Font optLabelFont  = font(SANS_BOLD,     6.5f, SAFFRON_DEEP);
+        Font varNameFont   = font(SANS_REG,      9f,   INK_SOFT);
+        Font varPriceFont  = font(SANS_BOLD,     9f,   SAFFRON_DEEP);
+        Font varSameFont   = font(SANS_ITALIC,   8.5f, MUTED);
 
         for (int i = 0; i < items.size(); i++) {
-            MenuItem item = items.get(i);
+            MenuItem item       = items.get(i);
             List<VariantEntry> variants = parseVariants(item);
-            boolean varPrices = showPrices && hasVariantPrices(variants);
+            boolean varPrices   = showPrices && hasVariantPrices(variants);
             boolean showBasePrice = showPrices && !varPrices;
 
+            // ── 1. Featured pill ──────────────────────────────────────────────
             if (item.isFeatured()) {
                 PdfPCell p = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
                 p.setBorder(Rectangle.NO_BORDER);
                 col.addCell(p);
             }
 
+            // ── 2. Name row + base price ──────────────────────────────────────
             PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
             head.setWidthPercentage(100);
-            try {
-                if (showBasePrice) head.setWidths(new float[]{4.6f, 2.4f});
-            } catch (DocumentException ignored) {}
-            head.addCell(textCell(new Phrase(displayName(item), nameFont), Element.ALIGN_LEFT));
+            try { if (showBasePrice) head.setWidths(new float[]{4.6f, 2.4f}); }
+            catch (DocumentException ignored) {}
+            head.addCell(textCell(namePhrase(item, nameFont, portionFont), Element.ALIGN_LEFT));
             if (showBasePrice) {
-                PdfPCell priceCell = new PdfPCell(
-                        new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
-                priceCell.setBorder(Rectangle.NO_BORDER);
-                priceCell.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                priceCell.setNoWrap(true);
-                head.addCell(priceCell);
+                PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+                pc.setBorder(Rectangle.NO_BORDER);
+                pc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                pc.setNoWrap(true);
+                head.addCell(pc);
             }
             PdfPCell headWrap = new PdfPCell(head);
             headWrap.setBorder(Rectangle.NO_BORDER);
             col.addCell(headWrap);
 
-            // Variant rows
+            // ── 3. Description first ──────────────────────────────────────────
+            String desc = chooseDescription(item);
+            if (desc != null) {
+                PdfPCell d = new PdfPCell(new Phrase(desc, descFont));
+                d.setBorder(Rectangle.NO_BORDER);
+                d.setPaddingTop(2);
+                d.setPaddingBottom(2);
+                d.setLeading(0, 1.3f);
+                col.addCell(d);
+            }
+
+            // ── 4. Dietary ────────────────────────────────────────────────────
+            String dietary = renderDietary(item);
+            if (dietary != null) {
+                PdfPCell c = new PdfPCell(new Phrase(dietary, tagsFont));
+                c.setBorder(Rectangle.NO_BORDER);
+                c.setPaddingBottom(2);
+                col.addCell(c);
+            }
+
+            // ── 5. Options after description ──────────────────────────────────
             if (!variants.isEmpty()) {
+                PdfPCell optLabel = new PdfPCell(new Phrase(spacedCaps("Options"), optLabelFont));
+                optLabel.setBorder(Rectangle.NO_BORDER);
+                optLabel.setPaddingTop(5);
+                optLabel.setPaddingBottom(2);
+                col.addCell(optLabel);
+
                 if (varPrices) {
                     for (VariantEntry v : variants) {
                         PdfPTable vRow = new PdfPTable(2);
                         vRow.setWidthPercentage(100);
                         try { vRow.setWidths(new float[]{4.6f, 2.4f}); } catch (DocumentException ignored) {}
-                        vRow.addCell(textCell(new Phrase("  " + v.name(), varNameFont), Element.ALIGN_LEFT));
+                        PdfPCell vnc = new PdfPCell(new Phrase(v.name(), varNameFont));
+                        vnc.setBorder(Rectangle.NO_BORDER);
+                        vnc.setPaddingLeft(4);
+                        vRow.addCell(vnc);
                         BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
                         PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
                         vpc.setBorder(Rectangle.NO_BORDER);
@@ -846,30 +922,17 @@ public class MenuPrintService {
                         col.addCell(vWrap);
                     }
                 } else {
-                    PdfPCell vLine = new PdfPCell(new Phrase(variantNamesLine(variants), varNamesFont));
+                    PdfPCell vLine = new PdfPCell(new Phrase(variantNamesLine(variants), varSameFont));
                     vLine.setBorder(Rectangle.NO_BORDER);
                     col.addCell(vLine);
                 }
             }
 
-            String desc = chooseDescription(item);
-            if (desc != null) {
-                PdfPCell d = new PdfPCell(new Phrase(desc, descFont));
-                d.setBorder(Rectangle.NO_BORDER);
-                d.setPaddingBottom(2);
-                col.addCell(d);
-            }
-            String dietary = renderDietary(item);
-            if (dietary != null) {
-                PdfPCell c = new PdfPCell(new Phrase(dietary, tagsFont));
-                c.setBorder(Rectangle.NO_BORDER);
-                col.addCell(c);
-            }
-
+            // ── Item gap ──────────────────────────────────────────────────────
             if (i < items.size() - 1) {
                 PdfPCell pad = new PdfPCell(new Phrase(" "));
                 pad.setBorder(Rectangle.NO_BORDER);
-                pad.setFixedHeight(14f);
+                pad.setFixedHeight(16f);
                 col.addCell(pad);
             }
         }
@@ -1134,7 +1197,7 @@ public class MenuPrintService {
         }
     }
 
-    // ── Variant helpers ───────────────────────────────────────────────────────
+    // ── Variant & portion helpers ─────────────────────────────────────────────
 
     private record VariantEntry(String name, BigDecimal price) {}
 
@@ -1161,20 +1224,25 @@ public class MenuPrintService {
         }
     }
 
-    /** True if at least one variant carries its own price (different from base). */
+    /** True if at least one variant carries its own price. */
     private static boolean hasVariantPrices(List<VariantEntry> variants) {
         return variants.stream().anyMatch(v -> v.price() != null);
     }
 
-    /** Returns item name with optional portion-size label, e.g. "Lamb Plov  (500g)". */
-    private static String displayName(MenuItem item) {
+    /**
+     * Mixed phrase: dish name in bold serif + portion size in small muted sans.
+     * e.g. "Lamb Plov" [14pt bold] + "  500g" [9pt muted regular]
+     */
+    private static Phrase namePhrase(MenuItem item, Font nameFont, Font portionFont) {
+        Phrase p = new Phrase(item.getName(), nameFont);
         String ps = item.getPortionSize();
-        return (ps == null || ps.isBlank())
-                ? item.getName()
-                : item.getName() + "  (" + ps.trim() + ")";
+        if (ps != null && !ps.isBlank()) {
+            p.add(new Chunk("   " + ps.trim(), portionFont));
+        }
+        return p;
     }
 
-    /** "Small  ·  Large" — used when all variants share the parent's price. */
+    /** "Small  ·  Regular" — used when all variants share the parent's price. */
     private static String variantNamesLine(List<VariantEntry> variants) {
         return variants.stream().map(VariantEntry::name).collect(Collectors.joining("  ·  "));
     }
