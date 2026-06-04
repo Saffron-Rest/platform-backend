@@ -25,6 +25,8 @@ import com.saffron.cashflow.domain.MenuItem;
 import com.saffron.cashflow.web.BadRequestException;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -39,6 +41,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Editorial, asymmetric, typography-led restaurant menu PDF.
@@ -563,21 +566,27 @@ public class MenuPrintService {
             card.addCell(pill);
         }
 
-        Font nameFont = font(SERIF_BOLD, 14, INK);
-        Font priceFont = font(SANS_BOLD, 12.5f, SAFFRON_DEEP);
-        Font descFont = font(SANS_REG, 9.5f, MUTED);
-        Font tagsFont = font(SANS_ITALIC, 8, MUTED);
+        Font nameFont    = font(SERIF_BOLD, 14, INK);
+        Font priceFont   = font(SANS_BOLD, 12.5f, SAFFRON_DEEP);
+        Font descFont    = font(SANS_REG, 9.5f, MUTED);
+        Font tagsFont    = font(SANS_ITALIC, 8, MUTED);
         Font allergenFont = font(SANS_REG, 7.5f, MUTED);
+        Font varNameFont = font(SANS_REG, 10f, INK_SOFT);
+        Font varPriceFont = font(SANS_BOLD, 10f, SAFFRON_DEEP);
+        Font varNamesFont = font(SANS_ITALIC, 9f, MUTED);
 
-        // Top row: name · price. Drop the numeric index — diners don't say
-        // "I'll have number 03", they say "the lamb plov".
-        PdfPTable nameRow = new PdfPTable(showPrices ? 2 : 1);
+        List<VariantEntry> variants = parseVariants(item);
+        boolean varPrices = showPrices && hasVariantPrices(variants);
+        // When variants carry their own prices, omit the base price from name row
+        boolean showBasePrice = showPrices && !varPrices;
+
+        PdfPTable nameRow = new PdfPTable(showBasePrice ? 2 : 1);
         nameRow.setWidthPercentage(100);
         try {
-            if (showPrices) nameRow.setWidths(new float[]{5.4f, 2.6f});
+            if (showBasePrice) nameRow.setWidths(new float[]{5.4f, 2.6f});
         } catch (DocumentException ignored) {}
-        nameRow.addCell(textCell(new Phrase(item.getName(), nameFont), Element.ALIGN_LEFT));
-        if (showPrices) {
+        nameRow.addCell(textCell(new Phrase(displayName(item), nameFont), Element.ALIGN_LEFT));
+        if (showBasePrice) {
             PdfPCell priceCell = new PdfPCell(
                     new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
             priceCell.setBorder(Rectangle.NO_BORDER);
@@ -596,6 +605,36 @@ public class MenuPrintService {
         hair.setBackgroundColor(HAIRLINE);
         hair.setBorder(Rectangle.NO_BORDER);
         card.addCell(hair);
+
+        // Variant rows
+        if (!variants.isEmpty()) {
+            if (varPrices) {
+                // Each variant on its own row: name (left) · price (right)
+                for (VariantEntry v : variants) {
+                    PdfPTable vRow = new PdfPTable(2);
+                    vRow.setWidthPercentage(100);
+                    try { vRow.setWidths(new float[]{5.4f, 2.6f}); } catch (DocumentException ignored) {}
+                    vRow.addCell(textCell(new Phrase("  " + v.name(), varNameFont), Element.ALIGN_LEFT));
+                    BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                    PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
+                    vpc.setBorder(Rectangle.NO_BORDER);
+                    vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                    vpc.setNoWrap(true);
+                    vRow.addCell(vpc);
+                    PdfPCell vWrap = new PdfPCell(vRow);
+                    vWrap.setBorder(Rectangle.NO_BORDER);
+                    vWrap.setPaddingTop(4);
+                    card.addCell(vWrap);
+                }
+            } else {
+                // Same price — just list the option names in one italic line
+                PdfPCell vNameLine = new PdfPCell(
+                        new Phrase(variantNamesLine(variants), varNamesFont));
+                vNameLine.setBorder(Rectangle.NO_BORDER);
+                vNameLine.setPaddingTop(4);
+                card.addCell(vNameLine);
+            }
+        }
 
         String desc = chooseDescription(item);
         if (desc != null) {
@@ -628,15 +667,21 @@ public class MenuPrintService {
 
     private void drawList(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
             throws DocumentException {
-        Font nameFont = font(SERIF_BOLD, 14.5f, INK);
-        Font priceFont = font(SANS_BOLD, 13, SAFFRON_DEEP);
-        Font pillFont = font(SANS_BOLD, 7.5f, SAFFRON_DEEP);
-        Font descFont = font(SANS_REG, 10.5f, MUTED);
-        Font tagsFont = font(SANS_ITALIC, 9, MUTED);
+        Font nameFont    = font(SERIF_BOLD, 14.5f, INK);
+        Font priceFont   = font(SANS_BOLD, 13, SAFFRON_DEEP);
+        Font pillFont    = font(SANS_BOLD, 7.5f, SAFFRON_DEEP);
+        Font descFont    = font(SANS_REG, 10.5f, MUTED);
+        Font tagsFont    = font(SANS_ITALIC, 9, MUTED);
         Font allergenFont = font(SANS_REG, 8, MUTED);
+        Font varNameFont = font(SANS_REG, 10.5f, INK_SOFT);
+        Font varPriceFont = font(SANS_BOLD, 10.5f, SAFFRON_DEEP);
+        Font varNamesFont = font(SANS_ITALIC, 10f, MUTED);
 
         for (int i = 0; i < items.size(); i++) {
             MenuItem item = items.get(i);
+            List<VariantEntry> variants = parseVariants(item);
+            boolean varPrices = showPrices && hasVariantPrices(variants);
+            boolean showBasePrice = showPrices && !varPrices;
 
             if (item.isFeatured()) {
                 Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
@@ -644,13 +689,13 @@ public class MenuPrintService {
                 doc.add(pill);
             }
 
-            PdfPTable head = new PdfPTable(showPrices ? 2 : 1);
+            PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
             head.setWidthPercentage(100);
             try {
-                if (showPrices) head.setWidths(new float[]{6.4f, 1.6f});
+                if (showBasePrice) head.setWidths(new float[]{6.4f, 1.6f});
             } catch (DocumentException ignored) {}
-            head.addCell(textCell(new Phrase(item.getName(), nameFont), Element.ALIGN_LEFT));
-            if (showPrices) {
+            head.addCell(textCell(new Phrase(displayName(item), nameFont), Element.ALIGN_LEFT));
+            if (showBasePrice) {
                 PdfPCell priceCell = new PdfPCell(
                         new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
                 priceCell.setBorder(Rectangle.NO_BORDER);
@@ -660,6 +705,30 @@ public class MenuPrintService {
             }
             head.setSpacingBefore(item.isFeatured() ? 2 : 6);
             doc.add(head);
+
+            // Variant rows
+            if (!variants.isEmpty()) {
+                if (varPrices) {
+                    for (VariantEntry v : variants) {
+                        PdfPTable vRow = new PdfPTable(2);
+                        vRow.setWidthPercentage(100);
+                        try { vRow.setWidths(new float[]{6.4f, 1.6f}); } catch (DocumentException ignored) {}
+                        vRow.addCell(textCell(new Phrase("  " + v.name(), varNameFont), Element.ALIGN_LEFT));
+                        BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                        PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
+                        vpc.setBorder(Rectangle.NO_BORDER);
+                        vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                        vpc.setNoWrap(true);
+                        vRow.addCell(vpc);
+                        vRow.setSpacingBefore(3);
+                        doc.add(vRow);
+                    }
+                } else {
+                    Paragraph vLine = new Paragraph(variantNamesLine(variants), varNamesFont);
+                    vLine.setSpacingBefore(3);
+                    doc.add(vLine);
+                }
+            }
 
             String desc = chooseDescription(item);
             if (desc != null) {
@@ -719,14 +788,20 @@ public class MenuPrintService {
         PdfPTable col = new PdfPTable(1);
         col.setWidthPercentage(100);
 
-        Font nameFont = font(SERIF_BOLD, 12.5f, INK);
-        Font priceFont = font(SANS_BOLD, 11.5f, SAFFRON_DEEP);
-        Font pillFont = font(SANS_BOLD, 7, SAFFRON_DEEP);
-        Font descFont = font(SANS_REG, 9.5f, MUTED);
-        Font tagsFont = font(SANS_ITALIC, 8, MUTED);
+        Font nameFont    = font(SERIF_BOLD, 12.5f, INK);
+        Font priceFont   = font(SANS_BOLD, 11.5f, SAFFRON_DEEP);
+        Font pillFont    = font(SANS_BOLD, 7, SAFFRON_DEEP);
+        Font descFont    = font(SANS_REG, 9.5f, MUTED);
+        Font tagsFont    = font(SANS_ITALIC, 8, MUTED);
+        Font varNameFont = font(SANS_REG, 9f, INK_SOFT);
+        Font varPriceFont = font(SANS_BOLD, 9f, SAFFRON_DEEP);
+        Font varNamesFont = font(SANS_ITALIC, 8.5f, MUTED);
 
         for (int i = 0; i < items.size(); i++) {
             MenuItem item = items.get(i);
+            List<VariantEntry> variants = parseVariants(item);
+            boolean varPrices = showPrices && hasVariantPrices(variants);
+            boolean showBasePrice = showPrices && !varPrices;
 
             if (item.isFeatured()) {
                 PdfPCell p = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
@@ -734,13 +809,13 @@ public class MenuPrintService {
                 col.addCell(p);
             }
 
-            PdfPTable head = new PdfPTable(showPrices ? 2 : 1);
+            PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
             head.setWidthPercentage(100);
             try {
-                if (showPrices) head.setWidths(new float[]{4.6f, 2.4f});
+                if (showBasePrice) head.setWidths(new float[]{4.6f, 2.4f});
             } catch (DocumentException ignored) {}
-            head.addCell(textCell(new Phrase(item.getName(), nameFont), Element.ALIGN_LEFT));
-            if (showPrices) {
+            head.addCell(textCell(new Phrase(displayName(item), nameFont), Element.ALIGN_LEFT));
+            if (showBasePrice) {
                 PdfPCell priceCell = new PdfPCell(
                         new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
                 priceCell.setBorder(Rectangle.NO_BORDER);
@@ -751,6 +826,31 @@ public class MenuPrintService {
             PdfPCell headWrap = new PdfPCell(head);
             headWrap.setBorder(Rectangle.NO_BORDER);
             col.addCell(headWrap);
+
+            // Variant rows
+            if (!variants.isEmpty()) {
+                if (varPrices) {
+                    for (VariantEntry v : variants) {
+                        PdfPTable vRow = new PdfPTable(2);
+                        vRow.setWidthPercentage(100);
+                        try { vRow.setWidths(new float[]{4.6f, 2.4f}); } catch (DocumentException ignored) {}
+                        vRow.addCell(textCell(new Phrase("  " + v.name(), varNameFont), Element.ALIGN_LEFT));
+                        BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                        PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
+                        vpc.setBorder(Rectangle.NO_BORDER);
+                        vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                        vpc.setNoWrap(true);
+                        vRow.addCell(vpc);
+                        PdfPCell vWrap = new PdfPCell(vRow);
+                        vWrap.setBorder(Rectangle.NO_BORDER);
+                        col.addCell(vWrap);
+                    }
+                } else {
+                    PdfPCell vLine = new PdfPCell(new Phrase(variantNamesLine(variants), varNamesFont));
+                    vLine.setBorder(Rectangle.NO_BORDER);
+                    col.addCell(vLine);
+                }
+            }
 
             String desc = chooseDescription(item);
             if (desc != null) {
@@ -1032,6 +1132,51 @@ public class MenuPrintService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    // ── Variant helpers ───────────────────────────────────────────────────────
+
+    private record VariantEntry(String name, BigDecimal price) {}
+
+    private static final ObjectMapper VARIANT_MAPPER = new ObjectMapper();
+
+    private static List<VariantEntry> parseVariants(MenuItem item) {
+        String json = item.getVariants();
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            JsonNode arr = VARIANT_MAPPER.readTree(json);
+            if (!arr.isArray()) return List.of();
+            List<VariantEntry> out = new ArrayList<>();
+            for (JsonNode node : arr) {
+                String name = node.path("name").asText(null);
+                if (name == null || name.isBlank()) continue;
+                JsonNode pNode = node.path("price");
+                BigDecimal price = (!pNode.isMissingNode() && !pNode.isNull())
+                        ? new BigDecimal(pNode.asText()) : null;
+                out.add(new VariantEntry(name.trim(), price));
+            }
+            return out;
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /** True if at least one variant carries its own price (different from base). */
+    private static boolean hasVariantPrices(List<VariantEntry> variants) {
+        return variants.stream().anyMatch(v -> v.price() != null);
+    }
+
+    /** Returns item name with optional portion-size label, e.g. "Lamb Plov  (500g)". */
+    private static String displayName(MenuItem item) {
+        String ps = item.getPortionSize();
+        return (ps == null || ps.isBlank())
+                ? item.getName()
+                : item.getName() + "  (" + ps.trim() + ")";
+    }
+
+    /** "Small  ·  Large" — used when all variants share the parent's price. */
+    private static String variantNamesLine(List<VariantEntry> variants) {
+        return variants.stream().map(VariantEntry::name).collect(Collectors.joining("  ·  "));
     }
 
     private static String chooseDescription(MenuItem item) {
