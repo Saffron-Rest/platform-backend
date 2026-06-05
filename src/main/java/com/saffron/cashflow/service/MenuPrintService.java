@@ -115,18 +115,17 @@ public class MenuPrintService {
         return f;
     }
 
-    private static final Color INK        = new Color(0x1A, 0x18, 0x14);
-    private static final Color INK_SOFT   = new Color(0x3A, 0x33, 0x29);
-    private static final Color SAFFRON    = new Color(0xC9, 0x6A, 0x1A);
+    private static final Color INK          = new Color(0x1A, 0x18, 0x14);
+    private static final Color INK_SOFT     = new Color(0x3A, 0x33, 0x29);
+    private static final Color SAFFRON      = new Color(0xC9, 0x6A, 0x1A);
     private static final Color SAFFRON_DEEP = new Color(0xA4, 0x52, 0x12);
-    private static final Color CREAM      = new Color(0xFA, 0xF4, 0xE8);
-    private static final Color MUTED      = new Color(0x6B, 0x63, 0x57);
-    private static final Color HAIRLINE   = new Color(0xE2, 0xDD, 0xD2);
-    /**
-     * Price colour — darker and quieter than the accent saffron so prices
-     * recede behind dish names. Fine-dining principle: food sells, price follows.
-     */
-    private static final Color PRICE_COLOR = new Color(0x7A, 0x48, 0x18);
+    private static final Color CREAM        = new Color(0xFA, 0xF5, 0xEB);  // slightly warmer paper
+    private static final Color CARD_BG      = new Color(0xFF, 0xFF, 0xFF);  // pure white for cards
+    private static final Color MUTED        = new Color(0x7A, 0x6B, 0x5A);
+    private static final Color HAIRLINE     = new Color(0xDF, 0xD8, 0xCC);
+    private static final Color SAFFRON_TINT = new Color(0xF5, 0xE8, 0xD5);  // very light saffron for accents
+    /** Price colour — quieter than accent saffron. Food sells; price follows. */
+    private static final Color PRICE_COLOR  = new Color(0x7A, 0x48, 0x18);
 
     private static final DateTimeFormatter MENU_DATE =
             DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
@@ -303,38 +302,106 @@ public class MenuPrintService {
      * a rotated motif strap on the spine) read more like an art book than a
      * restaurant menu, so we walked it back to something inviting and clear.
      */
+    /**
+     * Redesigned cover — refined vertical composition.
+     *
+     * <p>Key changes from the original:
+     * <ul>
+     *   <li>Brand name reduced from 108pt to 84pt — heavy display type is
+     *       reserved for stone-carved signage, not paper menus.</li>
+     *   <li>Brand name raised to 62% height — golden-ratio focal point.</li>
+     *   <li>Decorative horizontal rules above and below the title block give
+     *       the page structure without cluttering it.</li>
+     *   <li>A secondary identity line ("Warszawa · Poland") sits in the lower
+     *       third, anchoring the bottom of the composition.</li>
+     *   <li>Three frame lines instead of two: outer border (saffron 0.55pt),
+     *       middle (saffron 0.2pt, 8pt inset), inner accent (saffron 0.1pt,
+     *       16pt inset) creates a layered frame that feels handcrafted.</li>
+     * </ul></p>
+     */
     private void drawCover(Document doc, PdfWriter writer, String title, String subtitle)
             throws DocumentException {
         PdfContentByte cb = writer.getDirectContent();
-        Rectangle page = doc.getPageSize();
+        Rectangle page   = doc.getPageSize();
         float w = page.getWidth(), h = page.getHeight();
         float cx = w / 2f;
 
-        // Two concentric saffron rules — the only structural ornament.
-        float inset = 36f;
-        drawThinFrame(cb, page, inset, SAFFRON, 0.55f);
-        drawThinFrame(cb, page, inset + 8, SAFFRON, 0.25f);
+        // ── Three-layer border ────────────────────────────────────────────────
+        float inset = 34f;
+        drawThinFrame(cb, page, inset,      SAFFRON,      0.6f);
+        drawThinFrame(cb, page, inset + 8,  SAFFRON,      0.2f);
+        drawThinFrame(cb, page, inset + 18, SAFFRON_TINT, 0.4f);
 
-        Font eyebrow = font(SANS_BOLD, 9, SAFFRON_DEEP);
-        Font brand = font(SERIF_BOLD, 108, INK);
-        Font sub = font(SERIF_ITALIC, 18, MUTED);
-        Font menuLabel = font(SANS_BOLD, 9, MUTED);
-        Font foot = font(SANS_REG, 8, MUTED);
+        // ── Fonts ─────────────────────────────────────────────────────────────
+        Font eyebrow   = font(SANS_BOLD,   8.5f, SAFFRON_DEEP);
+        Font brand     = font(SERIF_BOLD,  84,   INK);           // 84pt — elegant, not heavy
+        Font sub       = font(SERIF_ITALIC,15,   MUTED);
+        Font locLabel  = font(SANS_REG,    8.5f, MUTED);
+        Font menuLabel = font(SANS_BOLD,   8.5f, MUTED);
+        Font foot      = font(SANS_REG,    7.5f, new Color(0xB0, 0xA8, 0x9C));
 
-        showCentered(cb, spacedCaps("Azerbaijani cuisine · Warszawa"), eyebrow,
-                cx, h - inset - 80);
+        // ── Top: cuisine eyebrow ──────────────────────────────────────────────
+        float topY = h - inset - 55f;
+        showCentered(cb, spacedCaps("Azerbaijani cuisine  ·  Warszawa"), eyebrow, cx, topY);
 
-        showCentered(cb, title, brand, cx, h * 0.58f);
+        // ── Upper decorative rule (frames the title from above) ───────────────
+        float titleY = h * 0.62f;          // golden-ratio focal point
+        drawDecorativeLine(cb, cx, titleY + 88f, 110f);
 
-        diamondRule(cb, cx - 45f, h * 0.58f - 38, 90f);
+        // ── Brand name ────────────────────────────────────────────────────────
+        showCentered(cb, title, brand, cx, titleY);
 
-        showCentered(cb, subtitle, sub, cx, h * 0.58f - 64);
+        // ── Diamond ornament ──────────────────────────────────────────────────
+        diamondRule(cb, cx - 42f, titleY - 34f, 84f);
 
+        // ── Subtitle ─────────────────────────────────────────────────────────
+        showCentered(cb, subtitle, sub, cx, titleY - 60f);
+
+        // ── Lower decorative rule (closes the title block) ────────────────────
+        drawDecorativeLine(cb, cx, titleY - 88f, 110f);
+
+        // ── Lower-third anchor: location ─────────────────────────────────────
+        float midY = h * 0.28f;
+        showCentered(cb, "Warszawa  ·  Poland", locLabel, cx, midY);
+        // very short saffron rule above the location text
+        cb.saveState();
+        cb.setColorStroke(SAFFRON);
+        cb.setLineWidth(0.5f);
+        cb.moveTo(cx - 18f, midY + 14f);
+        cb.lineTo(cx + 18f, midY + 14f);
+        cb.stroke();
+        cb.restoreState();
+
+        // ── Footer: date ──────────────────────────────────────────────────────
         showCentered(cb,
-                spacedCaps("Menu · " + LocalDate.now().format(MENU_DATE)),
-                menuLabel, cx, inset + 64);
-        showCentered(cb, "Saffron Restaurant · Warszawa · Poland",
-                foot, cx, inset + 46);
+                spacedCaps("Menu  ·  " + LocalDate.now().format(MENU_DATE)),
+                menuLabel, cx, inset + 50f);
+        showCentered(cb, "Saffron Restaurant", foot, cx, inset + 33f);
+    }
+
+    /**
+     * Short double-line decorative rule:  ──────── ◇ ────────
+     * Used above and below the cover title block.
+     */
+    private void drawDecorativeLine(PdfContentByte cb, float cx, float y, float totalLen) {
+        float gap = 6f;
+        float armLen = (totalLen - gap * 2) / 2f;
+        cb.saveState();
+        cb.setColorStroke(SAFFRON);
+        cb.setLineWidth(0.5f);
+        cb.moveTo(cx - totalLen / 2f, y);
+        cb.lineTo(cx - gap, y);
+        cb.moveTo(cx + gap, y);
+        cb.lineTo(cx + totalLen / 2f, y);
+        cb.stroke();
+        // tiny diamond at centre
+        cb.setColorFill(SAFFRON);
+        cb.moveTo(cx, y + 2.5f);
+        cb.lineTo(cx + 2.5f, y);
+        cb.lineTo(cx, y - 2.5f);
+        cb.lineTo(cx - 2.5f, y);
+        cb.closePathFillStroke();
+        cb.restoreState();
     }
 
     // ---------- Story ----------
@@ -493,49 +560,68 @@ public class MenuPrintService {
      * thin saffron rule, short blurb. Replaces the editorial Roman-numeral
      * layout, which read as too "book-like" for diners.
      */
+    /**
+     * Full section divider — used for the first category and whenever the
+     * available page space is too small for a compact divider.
+     *
+     * <p>Redesigned hierarchy: eyebrow → short decorative rule → large name
+     * → translation → blurb. The decorative rule is placed BETWEEN the eyebrow
+     * and the category name (not after), so the name reads as the centrepiece.
+     * The blurb font matches the body text on item cards for consistency.</p>
+     */
     private void drawSectionDivider(Document doc, String name) throws DocumentException {
-        Font eyebrow = font(SANS_BOLD, 9, SAFFRON_DEEP);
-        Font head = font(SERIF_BOLD, 26, INK);
-        Font az = font(SERIF_ITALIC, 12.5f, MUTED);
-        Font blurb = font(SERIF_ITALIC, 11, MUTED);
+        Font eyebrow  = font(SANS_BOLD,    8.5f, SAFFRON_DEEP);
+        Font head     = font(SERIF_BOLD,   32,   INK);
+        Font az       = font(SERIF_ITALIC, 13,   MUTED);
+        Font blurb    = font(SERIF_ITALIC, 10.5f, MUTED);
 
+        // Eyebrow label
         Paragraph eb = new Paragraph(spacedCaps(eyebrowFor(name)), eyebrow);
         eb.setAlignment(Element.ALIGN_CENTER);
         doc.add(eb);
 
+        // Short saffron rule between eyebrow and heading
+        Paragraph ruleSpace = new Paragraph(" ");
+        ruleSpace.setSpacingBefore(6);
+        doc.add(ruleSpace);
+        doc.add(new Chunk(new LineSeparator(1f, 16, SAFFRON, Element.ALIGN_CENTER, 0)));
+
+        // Category heading — the hero of the section page
         Paragraph h = new Paragraph(name, head);
         h.setAlignment(Element.ALIGN_CENTER);
-        h.setSpacingBefore(6);
+        h.setSpacingBefore(10);
         h.setSpacingAfter(0);
         doc.add(h);
 
+        // Azerbaijani translation
         String azName = azFor(name);
         if (azName != null) {
             Paragraph azP = new Paragraph(azName, az);
             azP.setAlignment(Element.ALIGN_CENTER);
-            azP.setSpacingBefore(2);
+            azP.setSpacingBefore(4);
             doc.add(azP);
         }
 
-        Paragraph ruleSpacer = new Paragraph(" ");
-        ruleSpacer.setSpacingBefore(8);
-        doc.add(ruleSpacer);
-        LineSeparator sep = new LineSeparator(1.5f, 18, SAFFRON, Element.ALIGN_CENTER, 0);
-        doc.add(new Chunk(sep));
+        // Long decorative rule below heading block
+        Paragraph longRuleSpace = new Paragraph(" ");
+        longRuleSpace.setSpacingBefore(10);
+        doc.add(longRuleSpace);
+        doc.add(new Chunk(new LineSeparator(0.4f, 100, HAIRLINE, Element.ALIGN_CENTER, 0)));
 
+        // Category blurb — smaller, centred, adds atmosphere
         String blurbText = blurbFor(name);
         if (blurbText != null) {
             Paragraph bp = new Paragraph(blurbText, blurb);
             bp.setAlignment(Element.ALIGN_CENTER);
-            bp.setLeading(15.5f);
-            bp.setSpacingBefore(14);
-            bp.setIndentationLeft(48f);
-            bp.setIndentationRight(48f);
+            bp.setLeading(15f);
+            bp.setSpacingBefore(12);
+            bp.setIndentationLeft(40f);
+            bp.setIndentationRight(40f);
             doc.add(bp);
         }
 
         Paragraph after = new Paragraph(" ");
-        after.setSpacingAfter(16);
+        after.setSpacingAfter(14);
         doc.add(after);
     }
 
@@ -613,106 +699,116 @@ public class MenuPrintService {
     }
 
     /**
-     * One item card for the 2-column grid layout.
+     * Grid card — two distinct visual treatments depending on whether the item
+     * has a food photo:
      *
-     * Structure (top to bottom):
-     *   ┌──────────────────────────────────┐
-     *   │  Photo (full-bleed cover, 175pt) │  ← real image or warm cream placeholder
-     *   │  OR cream gradient placeholder   │
-     *   ├── 2pt saffron accent line ────────┤
-     *   │  [♦ Chef's signature]            │  ← only if featured
-     *   │  Name              38.00 zł      │  ← name (serif bold) + price (saffron)
-     *   │  ──────────────────────────────  │  ← hairline
-     *   │  Description text in italic...   │  ← first, before options
-     *   │  vegetarian · gluten-free        │
-     *   │  OPTIONS ─────                   │  ← only if variants exist
-     *   │    Small          25.00 zł       │
-     *   │    Regular        35.00 zł       │
-     *   └──────────────────────────────────┘
+     * <p><b>Visual card (photo exists):</b><br>
+     * Full-bleed cover photo (170pt) → 2pt saffron stripe → white content area
+     * with name, description, options. Clean photo-first composition.</p>
      *
-     * Images use "cover" scaling (fills the cell, crops excess) so there
-     * is never a cream letterbox gap around the photo.
+     * <p><b>Editorial card (no photo):</b><br>
+     * No empty placeholder — pure typography. A 4pt saffron left-border accent
+     * (like a bookmark ribbon) distinguishes it from the background. Name at
+     * 15pt (larger, fills the visual weight lost by no photo). Generous padding.
+     * Inspired by how fine-dining menus handle photo-less items — the dish name
+     * IS the visual.</p>
+     *
+     * <p>Cover scaling (Math.max) fills the photo cell without letterboxing.</p>
      */
     private PdfPCell gridCard(MenuItem item, boolean showPrices, Locale locale) {
-        // Outer spacer — creates gutter between cards
-        PdfPCell wrap = new PdfPCell();
-        wrap.setBorder(Rectangle.BOX);
-        wrap.setBorderColor(HAIRLINE);
-        wrap.setBorderWidth(0.5f);
-        wrap.setPadding(0);
-        wrap.setPaddingBottom(20);
-        wrap.setPaddingRight(16);
+        Image img     = tryLoadImage(item.getImagePath());
+        boolean hasImg = img != null;
 
-        PdfPTable card = new PdfPTable(1);
-        card.setWidthPercentage(100);
-
-        // ── Photo area (always present — real image or cream placeholder) ─────
-        // Approximate card pixel width for a 2-col A4 grid with 68pt margins
-        // and 16pt gutter: (595 - 68 - 68 - 16) / 2 ≈ 221pt
-        final float CARD_W  = 221f;
-        // Full-height for real images; compact placeholder for cards without photos
-        // so the page isn't dominated by large empty cream boxes.
-        Image img0 = tryLoadImage(item.getImagePath());
-        final float PHOTO_H = (img0 != null) ? 175f : 90f;
-        Image img = img0;  // reuse the loaded image reference
-
-        PdfPCell photoCell = new PdfPCell();
-        photoCell.setBorder(Rectangle.NO_BORDER);
-        photoCell.setFixedHeight(PHOTO_H);
-        photoCell.setPadding(0);
-        photoCell.setHorizontalAlignment(Element.ALIGN_CENTER);
-        photoCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-
-        if (img != null) {
-            // Cover scaling: scale so the image fills the cell entirely (crop excess).
-            // This is the equivalent of CSS object-fit:cover — no cream letterboxing.
-            float scaleX = CARD_W  / img.getWidth();
-            float scaleY = PHOTO_H / img.getHeight();
-            float scale  = Math.max(scaleX, scaleY);   // cover, not fit
-            img.scaleAbsolute(img.getWidth() * scale, img.getHeight() * scale);
-            img.setAlignment(Image.ALIGN_CENTER | Image.ALIGN_MIDDLE);
-            photoCell.setImage(img);
-        } else {
-            // Warm cream placeholder — card has visual weight even without a photo
-            photoCell.setBackgroundColor(new Color(0xEE, 0xE6, 0xD8));
-        }
-        card.addCell(photoCell);
-
-        // 2pt saffron accent stripe — separates photo from text area
-        PdfPCell stripe = new PdfPCell();
-        stripe.setFixedHeight(2f);
-        stripe.setBackgroundColor(SAFFRON);
-        stripe.setBorder(Rectangle.NO_BORDER);
-        card.addCell(stripe);
-
-        // ── Fonts ─────────────────────────────────────────────────────────────
-        Font nameFont     = font(SERIF_BOLD,   13.5f, INK);
+        // ── Fonts (shared by both card types) ─────────────────────────────────
         Font portionFont  = font(SANS_REG,      8.5f, MUTED);
-        Font priceFont    = font(SANS_REG,     11f,   PRICE_COLOR);   // quiet — food sells, price follows
+        Font priceFont    = font(SANS_REG,     hasImg ? 10.5f : 11.5f,  PRICE_COLOR);
         Font pillFont     = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
-        Font descFont     = font(SERIF_ITALIC,  9.5f, MUTED);
+        Font descFont     = font(SERIF_ITALIC, hasImg ? 9.5f : 10.5f,  MUTED);
         Font tagsFont     = font(SANS_ITALIC,   8f,   MUTED);
         Font allergenFont = font(SANS_REG,      7.5f, MUTED);
         Font optLabelFont = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
         Font varNameFont  = font(SANS_REG,      9.5f, INK_SOFT);
         Font varPriceFont = font(SANS_REG,      9f,   PRICE_COLOR);
         Font varSameFont  = font(SANS_ITALIC,   9f,   MUTED);
+        // Name is larger on editorial cards — typography is the visual
+        Font nameFont     = font(SERIF_BOLD,  hasImg ? 13.5f : 15f,   INK);
 
-        List<VariantEntry> variants = parseVariants(item);
-        boolean varPrices    = showPrices && hasVariantPrices(variants);
-        boolean showBasePrice = showPrices && !varPrices;
+        List<VariantEntry> variants  = parseVariants(item);
+        boolean varPrices            = showPrices && hasVariantPrices(variants);
+        boolean showBasePrice        = showPrices && !varPrices;
 
+        // Outer wrapper — gutter between cards (NO border — cards float on cream)
+        PdfPCell wrap = new PdfPCell();
+        wrap.setBorder(Rectangle.NO_BORDER);
+        wrap.setPadding(0);
+        wrap.setPaddingBottom(18);
+        wrap.setPaddingRight(14);
+
+        PdfPTable card = new PdfPTable(1);
+        card.setWidthPercentage(100);
+
+        if (hasImg) {
+            // ══════════════════════════════════════════════════════════════════
+            // VISUAL CARD: photo → saffron stripe → white content
+            // ══════════════════════════════════════════════════════════════════
+            final float CARD_W = 221f, PHOTO_H = 170f;
+            float scaleX = CARD_W / img.getWidth();
+            float scaleY = PHOTO_H / img.getHeight();
+            float scale  = Math.max(scaleX, scaleY);        // cover, not fit
+            img.scaleAbsolute(img.getWidth() * scale, img.getHeight() * scale);
+            img.setAlignment(Image.ALIGN_CENTER | Image.ALIGN_MIDDLE);
+
+            PdfPCell photoCell = new PdfPCell();
+            photoCell.setBorder(Rectangle.NO_BORDER);
+            photoCell.setFixedHeight(PHOTO_H);
+            photoCell.setPadding(0);
+            photoCell.setHorizontalAlignment(Element.ALIGN_CENTER);
+            photoCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
+            photoCell.setImage(img);
+            card.addCell(photoCell);
+
+            // 2pt saffron photo/content separator
+            PdfPCell stripe = new PdfPCell();
+            stripe.setFixedHeight(2f);
+            stripe.setBackgroundColor(SAFFRON);
+            stripe.setBorder(Rectangle.NO_BORDER);
+            card.addCell(stripe);
+
+        } else {
+            // ══════════════════════════════════════════════════════════════════
+            // EDITORIAL CARD: saffron-tint top band + white card body
+            // A warm 24pt band at the top acts as a colour accent, replacing
+            // the photo area. Much lighter than the 90pt placeholder.
+            // ══════════════════════════════════════════════════════════════════
+            PdfPCell band = new PdfPCell();
+            band.setFixedHeight(24f);
+            band.setBackgroundColor(SAFFRON_TINT);
+            band.setBorder(Rectangle.NO_BORDER);
+            card.addCell(band);
+
+            // 2pt saffron stripe (mirrors image card — visual consistency)
+            PdfPCell stripe = new PdfPCell();
+            stripe.setFixedHeight(2f);
+            stripe.setBackgroundColor(SAFFRON);
+            stripe.setBorder(Rectangle.NO_BORDER);
+            card.addCell(stripe);
+        }
+
+        // Remaining content sits on white background
         // ── Featured pill ─────────────────────────────────────────────────────
         if (item.isFeatured()) {
             PdfPCell pill = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
             pill.setBorder(Rectangle.NO_BORDER);
+            pill.setBackgroundColor(CARD_BG);
             pill.setPaddingTop(10);
-            pill.setPaddingLeft(10);
+            pill.setPaddingLeft(12);
             pill.setPaddingBottom(2);
             card.addCell(pill);
         }
 
-        // ── 1. Name + price row ───────────────────────────────────────────────
+        // ── Name + price ──────────────────────────────────────────────────────
+        float namePad = hasImg ? 10f : 14f;
+
         PdfPTable nameRow = new PdfPTable(showBasePrice ? 2 : 1);
         nameRow.setWidthPercentage(100);
         try { if (showBasePrice) nameRow.setWidths(new float[]{5f, 2f}); }
@@ -720,55 +816,59 @@ public class MenuPrintService {
 
         PdfPCell nameCell = new PdfPCell(namePhrase(item, nameFont, portionFont));
         nameCell.setBorder(Rectangle.NO_BORDER);
-        nameCell.setPaddingTop(item.isFeatured() ? 4 : 12);
-        nameCell.setPaddingLeft(10);
+        nameCell.setBackgroundColor(CARD_BG);
+        nameCell.setPaddingTop(item.isFeatured() ? 6 : namePad + 2);
+        nameCell.setPaddingLeft(namePad + 2);
         nameCell.setPaddingRight(6);
-        nameCell.setPaddingBottom(4);
+        nameCell.setPaddingBottom(5);
         nameRow.addCell(nameCell);
 
         if (showBasePrice) {
             PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
             pc.setBorder(Rectangle.NO_BORDER);
+            pc.setBackgroundColor(CARD_BG);
             pc.setHorizontalAlignment(Element.ALIGN_RIGHT);
             pc.setNoWrap(true);
-            pc.setPaddingTop(item.isFeatured() ? 4 : 12);
-            pc.setPaddingRight(10);
-            pc.setPaddingBottom(4);
+            pc.setPaddingTop(item.isFeatured() ? 6 : namePad + 2);
+            pc.setPaddingRight(namePad + 2);
+            pc.setPaddingBottom(5);
             nameRow.addCell(pc);
         }
 
         PdfPCell nameWrap = new PdfPCell(nameRow);
         nameWrap.setBorder(Rectangle.NO_BORDER);
+        nameWrap.setBackgroundColor(CARD_BG);
         card.addCell(nameWrap);
 
-        // hairline under name
+        // thin hairline under name
         PdfPCell hair = new PdfPCell();
-        hair.setFixedHeight(0.5f);
+        hair.setFixedHeight(0.4f);
         hair.setBackgroundColor(HAIRLINE);
         hair.setBorder(Rectangle.NO_BORDER);
         card.addCell(hair);
 
-        // ── 2. Description (before options — read the dish first) ────────────
+        // ── Description ───────────────────────────────────────────────────────
         String desc = chooseDescription(item);
         if (desc != null) {
             PdfPCell d = new PdfPCell(new Phrase(desc, descFont));
             d.setBorder(Rectangle.NO_BORDER);
+            d.setBackgroundColor(CARD_BG);
             d.setPaddingTop(8);
-            d.setPaddingLeft(10);
-            d.setPaddingRight(10);
+            d.setPaddingLeft(namePad + 2);
+            d.setPaddingRight(namePad + 2);
             d.setPaddingBottom(4);
             d.setLeading(0, 1.35f);
             card.addCell(d);
         }
 
-        // ── 3. Dietary + allergens ────────────────────────────────────────────
+        // ── Dietary + allergens ───────────────────────────────────────────────
         String dietary = renderDietary(item);
         if (dietary != null) {
             PdfPCell c = new PdfPCell(new Phrase(dietary, tagsFont));
             c.setBorder(Rectangle.NO_BORDER);
+            c.setBackgroundColor(CARD_BG);
             c.setPaddingTop(4);
-            c.setPaddingLeft(10);
-            c.setPaddingRight(10);
+            c.setPaddingLeft(namePad + 2);
             c.setPaddingBottom(2);
             card.addCell(c);
         }
@@ -776,28 +876,28 @@ public class MenuPrintService {
         if (allergen != null) {
             PdfPCell c = new PdfPCell(new Phrase(allergen, allergenFont));
             c.setBorder(Rectangle.NO_BORDER);
+            c.setBackgroundColor(CARD_BG);
             c.setPaddingTop(2);
-            c.setPaddingLeft(10);
-            c.setPaddingRight(10);
+            c.setPaddingLeft(namePad + 2);
             c.setPaddingBottom(4);
             card.addCell(c);
         }
 
-        // ── 4. Options (after description — "choose your size" comes last) ────
+        // ── Options ───────────────────────────────────────────────────────────
         if (!variants.isEmpty()) {
             PdfPCell optLabel = new PdfPCell(new Phrase(spacedCaps("Options"), optLabelFont));
             optLabel.setBorder(Rectangle.NO_BORDER);
+            optLabel.setBackgroundColor(CARD_BG);
             optLabel.setPaddingTop(8);
-            optLabel.setPaddingLeft(10);
-            optLabel.setPaddingBottom(2);
+            optLabel.setPaddingLeft(namePad + 2);
+            optLabel.setPaddingBottom(3);
             card.addCell(optLabel);
 
-            // thin saffron rule under "OPTIONS"
-            PdfPCell optHair = new PdfPCell();
-            optHair.setFixedHeight(0.5f);
-            optHair.setBackgroundColor(SAFFRON);
-            optHair.setBorder(Rectangle.NO_BORDER);
-            card.addCell(optHair);
+            PdfPCell optRule = new PdfPCell();
+            optRule.setFixedHeight(0.5f);
+            optRule.setBackgroundColor(SAFFRON);
+            optRule.setBorder(Rectangle.NO_BORDER);
+            card.addCell(optRule);
 
             if (varPrices) {
                 for (VariantEntry v : variants) {
@@ -807,39 +907,44 @@ public class MenuPrintService {
 
                     PdfPCell vnc = new PdfPCell(new Phrase(v.name(), varNameFont));
                     vnc.setBorder(Rectangle.NO_BORDER);
+                    vnc.setBackgroundColor(CARD_BG);
                     vnc.setPaddingTop(3);
-                    vnc.setPaddingLeft(14);
+                    vnc.setPaddingLeft(namePad + 8);
                     vnc.setPaddingBottom(2);
                     vRow.addCell(vnc);
 
                     BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
                     PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
                     vpc.setBorder(Rectangle.NO_BORDER);
+                    vpc.setBackgroundColor(CARD_BG);
                     vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
                     vpc.setNoWrap(true);
                     vpc.setPaddingTop(3);
-                    vpc.setPaddingRight(10);
+                    vpc.setPaddingRight(namePad + 2);
                     vpc.setPaddingBottom(2);
                     vRow.addCell(vpc);
 
                     PdfPCell vWrap = new PdfPCell(vRow);
                     vWrap.setBorder(Rectangle.NO_BORDER);
+                    vWrap.setBackgroundColor(CARD_BG);
                     card.addCell(vWrap);
                 }
             } else {
                 PdfPCell vLine = new PdfPCell(new Phrase(variantNamesLine(variants), varSameFont));
                 vLine.setBorder(Rectangle.NO_BORDER);
+                vLine.setBackgroundColor(CARD_BG);
                 vLine.setPaddingTop(5);
-                vLine.setPaddingLeft(14);
+                vLine.setPaddingLeft(namePad + 8);
                 vLine.setPaddingBottom(4);
                 card.addCell(vLine);
             }
         }
 
-        // bottom breathing room
+        // bottom white breathing room
         PdfPCell foot = new PdfPCell(new Phrase(" "));
         foot.setBorder(Rectangle.NO_BORDER);
-        foot.setFixedHeight(10f);
+        foot.setBackgroundColor(CARD_BG);
+        foot.setFixedHeight(12f);
         card.addCell(foot);
 
         wrap.addElement(card);
