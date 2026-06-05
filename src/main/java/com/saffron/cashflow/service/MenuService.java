@@ -401,6 +401,47 @@ public class MenuService {
         return map;
     }
 
+    /**
+     * Find-or-create a MenuItem from an incoming POS sale when no existing
+     * item matched by SKU, name, or ID. Called without a security context
+     * (webhook path) so no auth check is performed — the caller (PosIngestService)
+     * is responsible for ensuring the integration is authenticated.
+     *
+     * <p>If a MenuItem with the same name already exists it is returned as-is
+     * so repeated ingests of the same product never create duplicates. When the
+     * SKU conflicts with an existing item the new item is saved without a SKU;
+     * an admin can assign one later.</p>
+     */
+    @Transactional
+    public MenuItem autoCreateFromPos(String name, String sku, BigDecimal sellPrice) {
+        if (name == null || name.isBlank()) return null;
+        Optional<MenuItem> existing = itemRepository.findFirstByNameIgnoreCase(name.trim());
+        if (existing.isPresent()) return existing.get();
+
+        MenuCategory cat = categoryRepository.findFirstByNameIgnoreCase("POS Imported")
+                .orElseGet(() -> {
+                    MenuCategory c = new MenuCategory();
+                    c.setName("POS Imported");
+                    c.setSortOrder(9999);
+                    c.setActive(true);
+                    return categoryRepository.save(c);
+                });
+
+        String cleanSku = (sku != null && !sku.isBlank()) ? sku.trim() : null;
+        if (cleanSku != null && itemRepository.findFirstBySkuIgnoreCase(cleanSku).isPresent()) {
+            cleanSku = null;
+        }
+
+        MenuItem item = new MenuItem();
+        item.setName(name.trim());
+        item.setSku(cleanSku);
+        item.setCategoryId(cat.getId());
+        item.setSellPrice(sellPrice != null && sellPrice.signum() >= 0 ? sellPrice : BigDecimal.ZERO);
+        item.setVatRatePct(DEFAULT_VAT);
+        item.setActive(true);
+        return itemRepository.save(item);
+    }
+
     // ---------- Helpers ----------
 
     private MenuCategory resolveCategory(String categoryId) {

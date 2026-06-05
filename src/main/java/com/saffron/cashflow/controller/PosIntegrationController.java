@@ -9,6 +9,7 @@ import com.saffron.cashflow.repository.PosSaleRepository;
 import com.saffron.cashflow.security.AuthHelper;
 import com.saffron.cashflow.service.PosIngestService;
 import com.saffron.cashflow.service.PosIntegrationService;
+import com.saffron.cashflow.service.PosPendingService;
 import com.saffron.cashflow.web.NotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -33,18 +34,21 @@ public class PosIntegrationController {
     private final PosSaleRepository saleRepository;
     private final PosIntegrationRepository integrationRepository;
     private final PosIngestService ingestService;
+    private final PosPendingService pendingService;
 
     public PosIntegrationController(
             PosIntegrationService service,
             DotykackaSyncService dotykackaSync,
             PosSaleRepository saleRepository,
             PosIntegrationRepository integrationRepository,
-            PosIngestService ingestService) {
+            PosIngestService ingestService,
+            PosPendingService pendingService) {
         this.service = service;
         this.dotykackaSync = dotykackaSync;
         this.saleRepository = saleRepository;
         this.integrationRepository = integrationRepository;
         this.ingestService = ingestService;
+        this.pendingService = pendingService;
     }
 
     @GetMapping
@@ -234,6 +238,36 @@ public class PosIntegrationController {
                 req.dryRun() != null && req.dryRun());
         return ingestService.simulate(id, simReq);
     }
+
+    // -------------------------------------------------------------------------
+    // Pending-items approval queue
+    // -------------------------------------------------------------------------
+
+    /** List of unmatched POS items waiting for admin review. */
+    @GetMapping("/pending-items")
+    public List<Map<String, Object>> listPendingItems() {
+        return pendingService.listPending();
+    }
+
+    /** Approve a pending item: create a MenuItem and/or StockItem. */
+    @PostMapping("/pending-items/approve")
+    public Map<String, Object> approvePendingItem(@RequestBody ApprovePendingRequest req) {
+        return pendingService.approve(
+                req.name(), req.sku(), req.unitPrice(),
+                Boolean.TRUE.equals(req.addToMenu()),
+                Boolean.TRUE.equals(req.addToStock()));
+    }
+
+    /** Dismiss a pending item so it no longer appears in the queue. */
+    @PostMapping("/pending-items/dismiss")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void dismissPendingItem(@RequestBody DismissPendingRequest req) {
+        pendingService.dismiss(req.name(), req.sku());
+    }
+
+    public record ApprovePendingRequest(String name, String sku, BigDecimal unitPrice,
+                                        Boolean addToMenu, Boolean addToStock) {}
+    public record DismissPendingRequest(String name, String sku) {}
 
     public record IntegrationRequest(String name, String vendor) {}
     public record DotykackaConfigRequest(

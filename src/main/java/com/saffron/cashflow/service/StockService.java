@@ -97,6 +97,27 @@ public class StockService {
     // CRUD
     // ========================================================================
 
+    /**
+     * Create a bare StockItem from an incoming POS sale when no existing item
+     * was linked to the sold menu item. Called without a security context so
+     * no auth check is done — the POS ingest path is already authenticated.
+     *
+     * <p>The item starts with {@code onHand = 0}; the caller immediately
+     * applies a SALE movement so it will go negative. An admin can correct
+     * the balance with a physical count adjustment later.</p>
+     */
+    @Transactional
+    public StockItem autoCreateFromPos(String menuItemId, String name, String sku) {
+        StockItem item = new StockItem();
+        item.setName(name != null && !name.isBlank() ? name.trim() : "POS Item");
+        item.setSku(sku != null && !sku.isBlank() ? sku.trim() : null);
+        item.setMenuItemId(menuItemId);
+        item.setUnit("pcs");
+        item.setOnHand(BigDecimal.ZERO);
+        item.setActive(true);
+        return itemRepository.save(item);
+    }
+
     @Transactional
     public Map<String, Object> create(Map<String, Object> body) {
         AuthHelper.requireOperations();

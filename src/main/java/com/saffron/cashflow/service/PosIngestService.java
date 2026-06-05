@@ -191,7 +191,7 @@ public class PosIngestService {
                 sale.setCategoryId(item.getCategoryId());
                 sale.setFoodCost(item.getFoodCost());
                 if (sale.getItemName() == null) sale.setItemName(item.getName());
-            }, () -> { /* leave null — surface as Unmatched */ });
+            }, () -> { /* leave null — surfaces in pending-items queue for admin review */ });
 
             PosSale persisted = saleRepository.save(sale);
             postHandler.afterSaleSaved(persisted);
