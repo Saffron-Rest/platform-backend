@@ -8,8 +8,10 @@ import com.saffron.cashflow.domain.MenuItem;
 import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.PosIntegration;
 import com.saffron.cashflow.domain.PosSale;
+import com.saffron.cashflow.domain.PosWebhookLog;
 import com.saffron.cashflow.domain.StockItem;
 import com.saffron.cashflow.repository.PosIntegrationRepository;
+import com.saffron.cashflow.repository.PosWebhookLogRepository;
 import com.saffron.cashflow.repository.PosSaleRepository;
 import com.saffron.cashflow.repository.StockItemRepository;
 import com.saffron.cashflow.security.AuthHelper;
@@ -78,6 +80,7 @@ public class PosIngestService {
     private final MenuService menuService;
     private final PosSalePostHandler postHandler;
     private final StockItemRepository stockItemRepository;
+    private final PosWebhookLogRepository webhookLogRepository;
     private final ZoneId zoneId;
 
     public PosIngestService(
@@ -87,6 +90,7 @@ public class PosIngestService {
             MenuService menuService,
             PosSalePostHandler postHandler,
             StockItemRepository stockItemRepository,
+            PosWebhookLogRepository webhookLogRepository,
             @Value("${app.timezone:Europe/Warsaw}") String timezone) {
         this.integrationRepository = integrationRepository;
         this.saleRepository = saleRepository;
@@ -94,6 +98,7 @@ public class PosIngestService {
         this.menuService = menuService;
         this.postHandler = postHandler;
         this.stockItemRepository = stockItemRepository;
+        this.webhookLogRepository = webhookLogRepository;
         this.zoneId = ZoneId.of(timezone);
     }
 
@@ -117,7 +122,38 @@ public class PosIngestService {
             throw new BadRequestException("Invalid JSON: " + e.getMessage());
         }
 
-        return ingestPayload(integration, payload);
+        Map<String, Object> result = ingestPayload(integration, payload);
+
+        // Store the raw body so admins can inspect the full webhook payload.
+        // Best-effort — a failure here must never block a real POS sale.
+        try {
+            String baseExternalId = (String) result.get("externalId");
+            PosWebhookLog log = new PosWebhookLog();
+            log.setIntegrationId(integrationId);
+            log.setExternalId(baseExternalId);
+            log.setRawBody(rawBody);
+            log.setInserted(((Number) result.getOrDefault("inserted", 0)).intValue());
+            log.setSkipped(((Number) result.getOrDefault("skipped", 0)).intValue());
+            log.setUnmatched(((Number) result.getOrDefault("unmatched", 0)).intValue());
+            webhookLogRepository.save(log);
+
+            // Keep only the most recent 200 raw logs per integration to
+            // avoid unbounded growth.
+            pruneWebhookLog(integrationId);
+        } catch (Exception ex) {
+            LOG.warn("Failed to save raw webhook log for integration {}: {}", integrationId, ex.getMessage());
+        }
+
+        return result;
+    }
+
+    private void pruneWebhookLog(String integrationId) {
+        List<PosWebhookLog> all = webhookLogRepository.findRecentByIntegrationId(
+                integrationId, org.springframework.data.domain.PageRequest.of(0, 1000));
+        if (all.size() > 200) {
+            List<PosWebhookLog> toDelete = all.subList(200, all.size());
+            webhookLogRepository.deleteAll(toDelete);
+        }
     }
 
     /**

@@ -7,6 +7,7 @@ import com.saffron.cashflow.integration.dotykacka.DotykackaSyncService;
 import com.saffron.cashflow.repository.PosIntegrationRepository;
 import com.saffron.cashflow.repository.PosSaleRepository;
 import com.saffron.cashflow.security.AuthHelper;
+import com.saffron.cashflow.repository.PosWebhookLogRepository;
 import com.saffron.cashflow.service.PosIngestService;
 import com.saffron.cashflow.service.PosIntegrationService;
 import com.saffron.cashflow.service.PosPendingService;
@@ -38,6 +39,7 @@ public class PosIntegrationController {
     private final PosIntegrationRepository integrationRepository;
     private final PosIngestService ingestService;
     private final PosPendingService pendingService;
+    private final PosWebhookLogRepository webhookLogRepository;
 
     public PosIntegrationController(
             PosIntegrationService service,
@@ -45,13 +47,15 @@ public class PosIntegrationController {
             PosSaleRepository saleRepository,
             PosIntegrationRepository integrationRepository,
             PosIngestService ingestService,
-            PosPendingService pendingService) {
+            PosPendingService pendingService,
+            PosWebhookLogRepository webhookLogRepository) {
         this.service = service;
         this.dotykackaSync = dotykackaSync;
         this.saleRepository = saleRepository;
         this.integrationRepository = integrationRepository;
         this.ingestService = ingestService;
         this.pendingService = pendingService;
+        this.webhookLogRepository = webhookLogRepository;
     }
 
     @GetMapping
@@ -271,6 +275,15 @@ public class PosIntegrationController {
             byReceipt.computeIfAbsent(base, k -> new ArrayList<>()).add(s);
         }
 
+        // Load raw webhook logs for this integration so we can attach the full
+        // payload body to each receipt.
+        List<com.saffron.cashflow.domain.PosWebhookLog> rawLogs =
+                webhookLogRepository.findRecentByIntegrationId(id, PageRequest.of(0, 500));
+        Map<String, String> rawByExternalId = new java.util.HashMap<>();
+        for (com.saffron.cashflow.domain.PosWebhookLog log : rawLogs) {
+            if (log.getExternalId() != null) rawByExternalId.put(log.getExternalId(), log.getRawBody());
+        }
+
         List<Map<String, Object>> receipts = new ArrayList<>();
         for (Map.Entry<String, List<PosSale>> entry : byReceipt.entrySet()) {
             List<PosSale> lines = entry.getValue();
@@ -307,6 +320,9 @@ public class PosIntegrationController {
             receipt.put("total", receiptTotal.setScale(2, RoundingMode.HALF_UP));
             receipt.put("hasUnmatched", lines.stream().anyMatch(l -> l.getMenuItemId() == null));
             receipt.put("items", itemsOut);
+            // Attach the raw payload if we captured it — null for old receipts
+            // that arrived before this feature was added, or for simulator runs.
+            receipt.put("rawBody", rawByExternalId.get(entry.getKey()));
             receipts.add(receipt);
         }
         return receipts;
