@@ -29,4 +29,8 @@ public interface PosSaleRepository extends JpaRepository<PosSale, String> {
     long countByIntegrationIdAndReceivedAtAfter(String integrationId, Instant cutoff);
 
     List<PosSale> findTop5ByIntegrationIdOrderByReceivedAtDesc(String integrationId);
+
+    @Query("select s from PosSale s where s.integrationId = :integrationId order by s.receivedAt desc")
+    List<PosSale> findRecentByIntegrationId(@Param("integrationId") String integrationId,
+                                            org.springframework.data.domain.Pageable pageable);
 }

@@ -14,7 +14,10 @@ import com.saffron.cashflow.web.NotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
+import org.springframework.data.domain.PageRequest;
+
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -237,6 +240,88 @@ public class PosIntegrationController {
                 occurredAt,
                 req.dryRun() != null && req.dryRun());
         return ingestService.simulate(id, simReq);
+    }
+
+    // -------------------------------------------------------------------------
+    // Webhook log — receipts grouped with all line items
+    // -------------------------------------------------------------------------
+
+    /**
+     * Returns recent webhook receipts for an integration, each with all its
+     * line items. Lines are grouped by stripping the {@code #N} line-index
+     * suffix that {@link com.saffron.cashflow.service.PosIngestService} appends
+     * to make every externalId unique.
+     *
+     * <p>Receipts are ordered newest-first. {@code limit} caps the number of
+     * individual sale rows fetched before grouping — so 200 rows may collapse
+     * into fewer receipts depending on line-item count per receipt.</p>
+     */
+    @GetMapping("/{id}/webhook-log")
+    public List<Map<String, Object>> webhookLog(
+            @PathVariable String id,
+            @RequestParam(defaultValue = "200") int limit) {
+        AuthHelper.requireOperations();
+        List<PosSale> rows = saleRepository.findRecentByIntegrationId(
+                id, PageRequest.of(0, Math.min(limit, 500)));
+
+        // Group lines by their base receipt id (strip the trailing #N suffix).
+        Map<String, List<PosSale>> byReceipt = new LinkedHashMap<>();
+        for (PosSale s : rows) {
+            String base = baseReceiptId(s.getExternalId());
+            byReceipt.computeIfAbsent(base, k -> new ArrayList<>()).add(s);
+        }
+
+        List<Map<String, Object>> receipts = new ArrayList<>();
+        for (Map.Entry<String, List<PosSale>> entry : byReceipt.entrySet()) {
+            List<PosSale> lines = entry.getValue();
+            PosSale first = lines.get(0);
+
+            BigDecimal receiptTotal = BigDecimal.ZERO;
+            List<Map<String, Object>> itemsOut = new ArrayList<>();
+            for (PosSale line : lines) {
+                BigDecimal lineQty = line.getQuantity() != null ? line.getQuantity() : BigDecimal.ONE;
+                BigDecimal linePrice = line.getUnitPrice() != null ? line.getUnitPrice() : BigDecimal.ZERO;
+                BigDecimal lineDiscount = line.getDiscountAmount() != null ? line.getDiscountAmount() : BigDecimal.ZERO;
+                BigDecimal lineTotal = lineQty.multiply(linePrice.subtract(lineDiscount));
+                receiptTotal = receiptTotal.add(lineTotal);
+
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("name", line.getItemName());
+                item.put("sku", line.getSku());
+                item.put("quantity", line.getQuantity());
+                item.put("unitPrice", line.getUnitPrice());
+                item.put("discount", line.getDiscountAmount());
+                item.put("lineTotal", lineTotal.setScale(2, RoundingMode.HALF_UP));
+                item.put("matched", line.getMenuItemId() != null);
+                item.put("menuItemId", line.getMenuItemId());
+                item.put("categoryId", line.getCategoryId());
+                itemsOut.add(item);
+            }
+
+            Map<String, Object> receipt = new LinkedHashMap<>();
+            receipt.put("receiptId", entry.getKey());
+            receipt.put("receivedAt", first.getReceivedAt() != null ? first.getReceivedAt().toString() : null);
+            receipt.put("occurredAt", first.getOccurredAt() != null ? first.getOccurredAt().toString() : null);
+            receipt.put("paymentMethod", first.getPaymentMethod());
+            receipt.put("itemCount", lines.size());
+            receipt.put("total", receiptTotal.setScale(2, RoundingMode.HALF_UP));
+            receipt.put("hasUnmatched", lines.stream().anyMatch(l -> l.getMenuItemId() == null));
+            receipt.put("items", itemsOut);
+            receipts.add(receipt);
+        }
+        return receipts;
+    }
+
+    /** Strip the {@code #N} line-index suffix to recover the original receipt id. */
+    private static String baseReceiptId(String externalId) {
+        if (externalId == null) return "";
+        int hash = externalId.lastIndexOf('#');
+        if (hash < 0) return externalId;
+        String suffix = externalId.substring(hash + 1);
+        for (char c : suffix.toCharArray()) {
+            if (!Character.isDigit(c)) return externalId; // not a line index — keep as-is
+        }
+        return externalId.substring(0, hash);
     }
 
     // -------------------------------------------------------------------------
