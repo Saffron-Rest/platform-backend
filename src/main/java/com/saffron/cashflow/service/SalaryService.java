@@ -230,6 +230,7 @@ public class SalaryService {
             emp.put("name", cashier.getName());
             emp.put("email", cashier.getEmail());
             emp.put("active", cashier.isActive());
+            emp.put("canViewEarnings", cashier.isCanViewEarnings());
             emp.put("payType", currentPayType.name());
             emp.put("payTypeLabel", SalaryCalculator.payTypeLabel(currentPayType));
             emp.put("payAmount", toDouble(currentPayAmount));
