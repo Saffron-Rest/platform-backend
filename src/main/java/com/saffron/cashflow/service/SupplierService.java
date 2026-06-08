@@ -150,6 +150,9 @@ public class SupplierService {
         if (s.getAddress() != null) m.put("address", s.getAddress());
         m.put("paymentTermsDays", s.getPaymentTermsDays());
         if (s.getNotes() != null) m.put("notes", s.getNotes());
+        if (s.getBankAccountNumber() != null) m.put("bankAccountNumber", s.getBankAccountNumber());
+        if (s.getBankName() != null) m.put("bankName", s.getBankName());
+        if (s.getBankBicSwift() != null) m.put("bankBicSwift", s.getBankBicSwift());
         m.put("active", s.isActive());
         if (s.getCreatedAt() != null) m.put("createdAt", s.getCreatedAt().toString());
         if (s.getUpdatedAt() != null) m.put("updatedAt", s.getUpdatedAt().toString());
@@ -176,6 +179,9 @@ public class SupplierService {
         if (body.containsKey("vatId")) s.setVatId(stringOrNull(body.get("vatId")));
         if (body.containsKey("address")) s.setAddress(stringOrNull(body.get("address")));
         if (body.containsKey("notes")) s.setNotes(stringOrNull(body.get("notes")));
+        if (body.containsKey("bankAccountNumber")) s.setBankAccountNumber(stringOrNull(body.get("bankAccountNumber")));
+        if (body.containsKey("bankName")) s.setBankName(stringOrNull(body.get("bankName")));
+        if (body.containsKey("bankBicSwift")) s.setBankBicSwift(stringOrNull(body.get("bankBicSwift")));
         if (body.containsKey("paymentTermsDays")) {
             Object v = body.get("paymentTermsDays");
             if (v == null) {

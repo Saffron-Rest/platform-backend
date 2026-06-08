@@ -23,9 +23,13 @@ import com.saffron.cashflow.web.NotFoundException;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -520,15 +524,40 @@ public class PayableService {
         }
         line.setUnitCost(unitCost.setScale(4, RoundingMode.HALF_UP));
 
+        // Gross = quantity × unitCost (before discount)
+        BigDecimal gross = line.getQuantity().multiply(line.getUnitCost());
+
+        // Discount
+        String discountType = stringOrNull(raw.get("discountType"));
+        BigDecimal discountValue = parseOptionalAmount(raw.get("discountValue"));
+        BigDecimal discountAmount = BigDecimal.ZERO;
+        if (discountType != null && discountValue != null && discountValue.signum() > 0) {
+            if ("PERCENTAGE".equals(discountType)) {
+                if (discountValue.compareTo(BigDecimal.valueOf(100)) > 0)
+                    throw new BadRequestException("Discount percentage cannot exceed 100%");
+                discountAmount = gross.multiply(discountValue)
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+            } else if ("AMOUNT".equals(discountType)) {
+                discountAmount = discountValue.min(gross).setScale(2, RoundingMode.HALF_UP);
+            } else {
+                throw new BadRequestException("discountType must be PERCENTAGE or AMOUNT");
+            }
+            line.setDiscountType(discountType);
+            line.setDiscountValue(discountValue.setScale(4, RoundingMode.HALF_UP));
+            line.setDiscountAmount(discountAmount);
+        }
+
+        // Net line total = gross − discount (explicit override accepted for rounding)
         BigDecimal lineTotal = parseOptionalAmount(raw.get("lineTotal"));
         if (lineTotal == null) {
-            lineTotal = line.getQuantity().multiply(line.getUnitCost());
+            lineTotal = gross.subtract(discountAmount);
         }
         if (lineTotal.signum() < 0) {
             throw new BadRequestException("Line total cannot be negative");
         }
         line.setLineTotal(lineTotal.setScale(2, RoundingMode.HALF_UP));
 
+        // VAT on post-discount net
         BigDecimal vatPct = parseOptionalAmount(raw.get("vatPct"));
         if (vatPct != null) {
             if (vatPct.signum() < 0) throw new BadRequestException("VAT rate cannot be negative");
@@ -743,6 +772,11 @@ public class PayableService {
             lm.put("quantity", line.getQuantity());
             lm.put("unit", line.getUnit());
             lm.put("unitCost", line.getUnitCost());
+            if (line.getDiscountType() != null) {
+                lm.put("discountType", line.getDiscountType());
+                lm.put("discountValue", line.getDiscountValue());
+                lm.put("discountAmount", line.getDiscountAmount());
+            }
             lm.put("lineTotal", line.getLineTotal());
             if (line.getVatPct() != null) lm.put("vatPct", line.getVatPct());
             if (line.getVatAmount() != null) lm.put("vatAmount", line.getVatAmount());
@@ -764,6 +798,70 @@ public class PayableService {
             payments.add(pm);
         }
         m.put("payments", payments);
+
+        // Attachment metadata
+        if (inv.getInvoiceFilePath() != null) {
+            m.put("attachment", Map.of(
+                    "filename", inv.getInvoiceFilename() != null ? inv.getInvoiceFilename() : "invoice",
+                    "filePath", inv.getInvoiceFilePath()));
+        }
+
+        // Supplier bank details — shown on the payment screen
+        Supplier sup = inv.getSupplier();
+        if (sup.getBankAccountNumber() != null || sup.getBankName() != null) {
+            Map<String, Object> bank = new LinkedHashMap<>();
+            if (sup.getBankAccountNumber() != null) bank.put("accountNumber", sup.getBankAccountNumber());
+            if (sup.getBankName() != null) bank.put("bankName", sup.getBankName());
+            if (sup.getBankBicSwift() != null) bank.put("bicSwift", sup.getBankBicSwift());
+            m.put("supplierBank", bank);
+        }
+
         return m;
+    }
+
+    // ─── Invoice file attachment ──────────────────────────────────────────────
+
+    @Transactional
+    public Map<String, Object> attachFile(String id, MultipartFile file,
+                                          FileStorageService fileStorageService) throws IOException {
+        AuthHelper.requireAdminOr(Permission.PAYABLES_MANAGE);
+        SupplierInvoice inv = require(id);
+        if (inv.getStatus() == SupplierInvoiceStatus.VOID) {
+            throw new BadRequestException("Cannot attach a file to a voided invoice");
+        }
+        // Remove old file if one exists
+        if (inv.getInvoiceFilePath() != null) {
+            Path old = fileStorageService.resolveOperationsFile(inv.getInvoiceFilePath());
+            if (old != null) Files.deleteIfExists(old);
+        }
+        String path = fileStorageService.storeUnderPrefix(file, "payable-invoices");
+        inv.setInvoiceFilePath(path);
+        inv.setInvoiceFilename(file.getOriginalFilename());
+        invoiceRepository.save(inv);
+        return Map.of("filename", file.getOriginalFilename(), "filePath", path);
+    }
+
+    @Transactional
+    public void removeAttachment(String id, FileStorageService fileStorageService) throws IOException {
+        AuthHelper.requireAdminOr(Permission.PAYABLES_MANAGE);
+        SupplierInvoice inv = require(id);
+        if (inv.getInvoiceFilePath() == null) return;
+        Path old = fileStorageService.resolveOperationsFile(inv.getInvoiceFilePath());
+        if (old != null) Files.deleteIfExists(old);
+        inv.setInvoiceFilePath(null);
+        inv.setInvoiceFilename(null);
+        invoiceRepository.save(inv);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> resolveAttachment(String id) {
+        AuthHelper.requireOperations();
+        SupplierInvoice inv = require(id);
+        if (inv.getInvoiceFilePath() == null) {
+            throw new NotFoundException("No attachment on this invoice");
+        }
+        return Map.of(
+                "filename", inv.getInvoiceFilename() != null ? inv.getInvoiceFilename() : "invoice",
+                "filePath", inv.getInvoiceFilePath());
     }
 }

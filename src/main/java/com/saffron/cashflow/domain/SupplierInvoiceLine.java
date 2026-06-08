@@ -60,8 +60,21 @@ public class SupplierInvoiceLine {
     @Column(name = "line_total", nullable = false, precision = 12, scale = 2)
     private BigDecimal lineTotal = BigDecimal.ZERO;
 
+    /** Discount type: {@code "PERCENTAGE"} or {@code "AMOUNT"}. Null = no discount. */
+    @Column(name = "discount_type", length = 12)
+    private String discountType;
+
+    /** The discount rate (%) or flat amount (PLN) entered by the user. */
+    @Column(name = "discount_value", precision = 12, scale = 4)
+    private BigDecimal discountValue;
+
+    /** Computed discount in PLN = lineGross × discountPct/100 or = discountValue.
+     *  Stored so the UI can show the saving without recomputing. */
+    @Column(name = "discount_amount", precision = 12, scale = 2)
+    private BigDecimal discountAmount;
+
     /** VAT rate for this line in percent (e.g. 8.00 for 8%, 23.00 for 23%).
-     *  Null means VAT is not tracked per-line (legacy invoices). */
+     *  VAT is applied on the post-discount net. Null = not tracked per-line. */
     @Column(name = "vat_pct", precision = 5, scale = 2)
     private BigDecimal vatPct;
 
@@ -103,6 +116,12 @@ public class SupplierInvoiceLine {
     public void setUnitCost(BigDecimal unitCost) { this.unitCost = unitCost; }
     public BigDecimal getLineTotal() { return lineTotal; }
     public void setLineTotal(BigDecimal lineTotal) { this.lineTotal = lineTotal; }
+    public String getDiscountType() { return discountType; }
+    public void setDiscountType(String discountType) { this.discountType = discountType; }
+    public BigDecimal getDiscountValue() { return discountValue; }
+    public void setDiscountValue(BigDecimal discountValue) { this.discountValue = discountValue; }
+    public BigDecimal getDiscountAmount() { return discountAmount; }
+    public void setDiscountAmount(BigDecimal discountAmount) { this.discountAmount = discountAmount; }
     public BigDecimal getVatPct() { return vatPct; }
     public void setVatPct(BigDecimal vatPct) { this.vatPct = vatPct; }
     public BigDecimal getVatAmount() { return vatAmount; }

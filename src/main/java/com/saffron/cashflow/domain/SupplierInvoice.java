@@ -97,6 +97,15 @@ public class SupplierInvoice {
     @Column(columnDefinition = "text")
     private String notes;
 
+    /** Relative file path under the upload directory (e.g. {@code payable-invoices/...pdf}).
+     *  Null when no scan has been attached yet. */
+    @Column(name = "invoice_file_path", length = 200)
+    private String invoiceFilePath;
+
+    /** Original filename shown to the user (e.g. {@code INV-2026-042.pdf}). */
+    @Column(name = "invoice_filename", length = 200)
+    private String invoiceFilename;
+
     @OneToMany(mappedBy = "invoice", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("sortOrder ASC")
     private List<SupplierInvoiceLine> lines = new ArrayList<>();
@@ -164,6 +173,10 @@ public class SupplierInvoice {
     public void setStatus(SupplierInvoiceStatus status) { this.status = status; }
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+    public String getInvoiceFilePath() { return invoiceFilePath; }
+    public void setInvoiceFilePath(String invoiceFilePath) { this.invoiceFilePath = invoiceFilePath; }
+    public String getInvoiceFilename() { return invoiceFilename; }
+    public void setInvoiceFilename(String invoiceFilename) { this.invoiceFilename = invoiceFilename; }
     public List<SupplierInvoiceLine> getLines() { return lines; }
     public List<SupplierInvoicePayment> getPayments() { return payments; }
     public String getCreatedBy() { return createdBy; }
