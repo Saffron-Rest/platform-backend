@@ -3,9 +3,13 @@ package com.saffron.cashflow.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.saffron.cashflow.domain.PosIntegration;
+import com.saffron.cashflow.domain.PosWebhookLog;
 import com.saffron.cashflow.integration.dotykacka.DotykackaSyncService;
+import com.saffron.cashflow.repository.PosWebhookLogRepository;
 import com.saffron.cashflow.service.PosIntegrationService;
 import com.saffron.cashflow.web.BadRequestException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -38,16 +42,20 @@ import java.util.Map;
 @RequestMapping({"/api/pos/push", "/api/pos/dotypos-webhook"})
 public class DotyposWebhookController {
 
+    private static final Logger LOG = LoggerFactory.getLogger(DotyposWebhookController.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final PosIntegrationService integrationService;
     private final DotykackaSyncService syncService;
+    private final PosWebhookLogRepository webhookLogRepository;
 
     public DotyposWebhookController(
             PosIntegrationService integrationService,
-            DotykackaSyncService syncService) {
+            DotykackaSyncService syncService,
+            PosWebhookLogRepository webhookLogRepository) {
         this.integrationService = integrationService;
         this.syncService = syncService;
+        this.webhookLogRepository = webhookLogRepository;
     }
 
     @PostMapping("/{id}")
@@ -64,7 +72,22 @@ public class DotyposWebhookController {
         } catch (Exception e) {
             throw new BadRequestException("Invalid JSON payload");
         }
-        return syncService.ingestWebhook(integration, payload);
+        Map<String, Object> result = syncService.ingestWebhook(integration, payload);
+
+        // Save the raw body so admins can inspect the full Dotypos payload.
+        try {
+            PosWebhookLog log = new PosWebhookLog();
+            log.setIntegrationId(id);
+            log.setRawBody(body != null ? body : "");
+            log.setInserted(((Number) result.getOrDefault("inserted", 0)).intValue());
+            log.setSkipped(((Number) result.getOrDefault("skipped", 0)).intValue());
+            log.setUnmatched(((Number) result.getOrDefault("unmatched", 0)).intValue());
+            webhookLogRepository.save(log);
+        } catch (Exception ex) {
+            LOG.warn("Failed to save raw webhook log for integration {}: {}", id, ex.getMessage());
+        }
+
+        return result;
     }
 
     /**

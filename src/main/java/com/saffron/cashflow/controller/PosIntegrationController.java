@@ -340,6 +340,26 @@ public class PosIntegrationController {
         return externalId.substring(0, hash);
     }
 
+    /** Raw webhook calls log — every POST that arrived, with the full body. */
+    @GetMapping("/{id}/raw-calls")
+    public List<Map<String, Object>> rawCalls(
+            @PathVariable String id,
+            @RequestParam(defaultValue = "50") int limit) {
+        AuthHelper.requireOperations();
+        return webhookLogRepository.findRecentByIntegrationId(
+                id, PageRequest.of(0, Math.min(limit, 200))).stream()
+                .map(log -> {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("id", log.getId());
+                    row.put("receivedAt", log.getReceivedAt() != null ? log.getReceivedAt().toString() : null);
+                    row.put("inserted", log.getInserted());
+                    row.put("skipped", log.getSkipped());
+                    row.put("unmatched", log.getUnmatched());
+                    row.put("rawBody", log.getRawBody());
+                    return row;
+                }).toList();
+    }
+
     // -------------------------------------------------------------------------
     // Pending-items approval queue
     // -------------------------------------------------------------------------
