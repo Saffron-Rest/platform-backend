@@ -41,6 +41,7 @@ public class DatabaseMigrationRunner {
             migrateOwnerExpenses(jdbc);
             migratePosSchema(jdbc);
             migrateExpenseCategoryConstraint(jdbc);
+            migrateRecentFeatures(jdbc);
         };
     }
 
@@ -941,6 +942,71 @@ public class DatabaseMigrationRunner {
         if (renamed > 0) {
             System.out.println("Database: renamed " + renamed + " duplicate username(s)");
         }
+    }
+
+    /**
+     * All schema additions introduced in the June 2026 feature sprints.
+     * Idempotent — every statement uses ADD COLUMN IF NOT EXISTS or
+     * CREATE TABLE IF NOT EXISTS.
+     */
+    private static void migrateRecentFeatures(JdbcTemplate jdbc) {
+
+        // ── Cashier earnings access flag ──────────────────────────────────────
+        jdbc.execute("ALTER TABLE app_user ADD COLUMN IF NOT EXISTS can_view_earnings BOOLEAN NOT NULL DEFAULT false");
+
+        // ── Supplier bank account details ─────────────────────────────────────
+        jdbc.execute("ALTER TABLE supplier ADD COLUMN IF NOT EXISTS bank_account_number VARCHAR(40)");
+        jdbc.execute("ALTER TABLE supplier ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100)");
+        jdbc.execute("ALTER TABLE supplier ADD COLUMN IF NOT EXISTS bank_bic_swift VARCHAR(16)");
+
+        // ── Supplier invoice file attachment ──────────────────────────────────
+        jdbc.execute("ALTER TABLE supplier_invoice ADD COLUMN IF NOT EXISTS invoice_file_path VARCHAR(200)");
+        jdbc.execute("ALTER TABLE supplier_invoice ADD COLUMN IF NOT EXISTS invoice_filename VARCHAR(200)");
+
+        // ── Supplier invoice line: per-line discount and VAT ─────────────────
+        jdbc.execute("ALTER TABLE supplier_invoice_line ADD COLUMN IF NOT EXISTS discount_type VARCHAR(12)");
+        jdbc.execute("ALTER TABLE supplier_invoice_line ADD COLUMN IF NOT EXISTS discount_value NUMERIC(12,4)");
+        jdbc.execute("ALTER TABLE supplier_invoice_line ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(12,2)");
+        jdbc.execute("ALTER TABLE supplier_invoice_line ADD COLUMN IF NOT EXISTS vat_pct NUMERIC(5,2)");
+        jdbc.execute("ALTER TABLE supplier_invoice_line ADD COLUMN IF NOT EXISTS vat_amount NUMERIC(12,2)");
+
+        // ── Stock movement: widen reference_id to fit invoiceId:lineId ────────
+        jdbc.execute("ALTER TABLE stock_movement ALTER COLUMN reference_id TYPE VARCHAR(100)");
+
+        // ── POS webhook raw payload log ───────────────────────────────────────
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS pos_webhook_log (
+                  id VARCHAR(36) PRIMARY KEY,
+                  integration_id VARCHAR(36) NOT NULL,
+                  external_id VARCHAR(128),
+                  raw_body TEXT NOT NULL,
+                  inserted INTEGER NOT NULL DEFAULT 0,
+                  skipped INTEGER NOT NULL DEFAULT 0,
+                  unmatched INTEGER NOT NULL DEFAULT 0,
+                  received_at TIMESTAMPTZ NOT NULL
+                )""");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_pos_webhook_log_integration ON pos_webhook_log (integration_id, received_at DESC)");
+
+        // ── Payout requests (cashier self-service salary requests) ────────────
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS payout_request (
+                  id VARCHAR(36) PRIMARY KEY,
+                  user_id VARCHAR(36) NOT NULL,
+                  requested_amount NUMERIC(12,2) NOT NULL,
+                  requested_date DATE NOT NULL,
+                  notes VARCHAR(500),
+                  status VARCHAR(12) NOT NULL DEFAULT 'PENDING',
+                  admin_notes VARCHAR(500),
+                  reviewed_by VARCHAR(36),
+                  reviewed_at TIMESTAMPTZ,
+                  salary_payment_id VARCHAR(36),
+                  created_at TIMESTAMPTZ NOT NULL
+                )""");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_payout_request_user ON payout_request (user_id, created_at DESC)");
+        jdbc.execute("CREATE INDEX IF NOT EXISTS ix_payout_request_status ON payout_request (status, created_at DESC)");
+
+        // ── salary_payment: exclude_from_treasury flag (if missing) ──────────
+        jdbc.execute("ALTER TABLE salary_payment ADD COLUMN IF NOT EXISTS exclude_from_treasury BOOLEAN NOT NULL DEFAULT false");
     }
 
     private static void migrateRoleConstraint(JdbcTemplate jdbc) {
