@@ -160,14 +160,29 @@ public class AnalyticsService {
         List<DailyEntry> locked = entryRepository.findLockedBetween(lookbackFrom, lookbackTo, EntryStatus.LOCKED);
         List<ManualDeliveryIncome> manual = manualDeliveryService.findBetween(lookbackFrom, lookbackTo);
 
-        // Aggregate sales by date (locked entry sales + manual delivery)
+        // Aggregate total + channel sales by date
         Map<LocalDate, Double> salesByDate = new HashMap<>();
+        Map<LocalDate, Double> cashByDate  = new HashMap<>();
+        Map<LocalDate, Double> cardByDate  = new HashMap<>();
+        Map<LocalDate, Double> delivByDate = new HashMap<>();
         for (DailyEntry e : locked) {
-            salesByDate.merge(e.getDate(), EntryCalculator.toDouble(EntryCalculator.totalSales(e)), Double::sum);
+            LocalDate d = e.getDate();
+            salesByDate.merge(d, EntryCalculator.toDouble(EntryCalculator.totalSales(e)), Double::sum);
+            cashByDate .merge(d, EntryCalculator.toDouble(e.getCashSales()),                Double::sum);
+            cardByDate .merge(d, EntryCalculator.toDouble(e.getCardSales()),                Double::sum);
+            double plat = EntryCalculator.toDouble(e.getWoltSales())
+                        + EntryCalculator.toDouble(e.getBoltSales())
+                        + EntryCalculator.toDouble(e.getUberEatsSales())
+                        + EntryCalculator.toDouble(e.getGlovoSales())
+                        + EntryCalculator.toDouble(e.getOtherPlatformSales());
+            delivByDate.merge(d, plat, Double::sum);
         }
         for (ManualDeliveryIncome m : manual) {
-            if (salesByDate.containsKey(m.getEffectiveDate())) {
-                salesByDate.merge(m.getEffectiveDate(), EntryCalculator.toDouble(m.getGrossAmount()), Double::sum);
+            LocalDate d = m.getEffectiveDate();
+            if (salesByDate.containsKey(d)) {
+                double gross = EntryCalculator.toDouble(m.getGrossAmount());
+                salesByDate.merge(d, gross, Double::sum);
+                delivByDate.merge(d, gross, Double::sum);
             }
         }
 
@@ -176,11 +191,14 @@ public class AnalyticsService {
             LocalDate target = today.plusDays(i);
             DayOfWeek dow = target.getDayOfWeek();
 
-            // Same-weekday samples, newest first
-            List<Double> samples = salesByDate.entrySet().stream()
+            // Same-weekday entries sorted newest-first
+            List<LocalDate> sameDates = salesByDate.entrySet().stream()
                     .filter(e -> e.getKey().getDayOfWeek() == dow)
                     .sorted(Map.Entry.<LocalDate, Double>comparingByKey().reversed())
-                    .map(Map.Entry::getValue)
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toList());
+            List<Double> samples = sameDates.stream()
+                    .map(salesByDate::get)
                     .collect(Collectors.toList());
 
             Map<String, Object> day = new LinkedHashMap<>();
@@ -194,26 +212,50 @@ public class AnalyticsService {
                 continue;
             }
 
-            double avg = samples.stream().mapToDouble(d -> d).average().orElse(0);
-            double low = samples.stream().mapToDouble(d -> d).min().orElse(0);
+            double low  = samples.stream().mapToDouble(d -> d).min().orElse(0);
             double high = samples.stream().mapToDouble(d -> d).max().orElse(0);
 
-            // Trend: newest half vs oldest half — signals whether this weekday is growing or shrinking
+            // Exponential weighted average — most recent week gets 2^(n-1) weight
+            double totalWeight = 0, weightedSum = 0;
+            for (int k = 0; k < samples.size(); k++) {
+                double w = Math.pow(2, samples.size() - 1 - k);
+                weightedSum += samples.get(k) * w;
+                totalWeight += w;
+            }
+            double predictedSales = totalWeight > 0 ? weightedSum / totalWeight : 0;
+
+            // Trend: newest half avg vs oldest half avg
             int half = samples.size() / 2;
             double recentAvg = samples.subList(0, half).stream().mapToDouble(d -> d).average().orElse(0);
-            double olderAvg = samples.subList(samples.size() - half, samples.size()).stream().mapToDouble(d -> d).average().orElse(0);
-            String trend;
-            if (olderAvg == 0) {
-                trend = "FLAT";
-            } else {
+            double olderAvg  = samples.subList(samples.size() - half, samples.size()).stream().mapToDouble(d -> d).average().orElse(0);
+            String trend = "FLAT";
+            if (olderAvg > 0) {
                 double change = (recentAvg - olderAvg) / olderAvg;
                 trend = change > 0.05 ? "UP" : change < -0.05 ? "DOWN" : "FLAT";
             }
 
-            day.put("predictedSales", avg);
-            day.put("low", low);
-            day.put("high", high);
-            day.put("trend", trend);
+            // Confidence: coefficient of variation on the raw samples
+            double mean = samples.stream().mapToDouble(d -> d).average().orElse(0);
+            double variance = samples.stream().mapToDouble(d -> (d - mean) * (d - mean)).average().orElse(0);
+            double cv = mean > 0 ? Math.sqrt(variance) / mean : 1.0;
+            String confidence = cv < 0.10 ? "HIGH" : cv < 0.20 ? "MEDIUM" : "LOW";
+
+            // Channel split: average cash/card/delivery percentages across same-weekday dates
+            double avgCash  = sameDates.stream().mapToDouble(d -> cashByDate .getOrDefault(d, 0.0)).average().orElse(0);
+            double avgCard  = sameDates.stream().mapToDouble(d -> cardByDate .getOrDefault(d, 0.0)).average().orElse(0);
+            double avgDeliv = sameDates.stream().mapToDouble(d -> delivByDate.getOrDefault(d, 0.0)).average().orElse(0);
+            double chanTotal = avgCash + avgCard + avgDeliv;
+            if (chanTotal > 0) {
+                day.put("cashPct",     (int) Math.round(avgCash  / chanTotal * 100));
+                day.put("cardPct",     (int) Math.round(avgCard  / chanTotal * 100));
+                day.put("deliveryPct", (int) Math.round(avgDeliv / chanTotal * 100));
+            }
+
+            day.put("predictedSales", predictedSales);
+            day.put("low",        low);
+            day.put("high",       high);
+            day.put("trend",      trend);
+            day.put("confidence", confidence);
             result.add(day);
         }
 
