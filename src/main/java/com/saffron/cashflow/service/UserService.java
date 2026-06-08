@@ -283,6 +283,7 @@ public class UserService {
         m.put("mustChangePassword", u.isMustChangePassword());
         m.put("role", u.getRole().name());
         m.put("active", u.isActive());
+        m.put("canViewEarnings", u.isCanViewEarnings());
         m.put("payType", u.getPayType() != null ? u.getPayType().name() : PayType.HOURLY.name());
         m.put("payAmount", u.getPayAmount() != null ? u.getPayAmount().doubleValue() : null);
         m.put("hourlyRate", u.getPayAmount() != null ? u.getPayAmount().doubleValue() : null);

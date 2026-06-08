@@ -277,6 +277,134 @@ public class SalaryService {
         return result;
     }
 
+    /**
+     * Same as {@link #calculate} but scoped to a single user and skips the
+     * SALARIES_VIEW permission check — the caller must verify
+     * {@code canViewEarnings} instead. Mirrors the inner loop of calculate()
+     * exactly so the numbers are identical.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Object> calculateForUser(String fromParam, String toParam, String userId) {
+        LocalDate from = LocalDate.parse(fromParam);
+        LocalDate to = LocalDate.parse(toParam);
+        User cashier = userRepository.findById(userId)
+                .orElseThrow(() -> new com.saffron.cashflow.web.NotFoundException("User not found"));
+
+        WeeklyOperatingHours restaurantHours = settingsService.loadWeeklyHours();
+        long calendarDays = java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
+
+        List<WorkShift> userShifts = workShiftRepository.findWorkingBetween(from, to).stream()
+                .filter(s -> s.getUserId().equals(userId))
+                .sorted(Comparator.comparing(WorkShift::getDate))
+                .toList();
+
+        List<SalaryPayment> periodPayments = salaryPaymentRepository.findApplicableToPayrollPeriod(from, to);
+        Map<String, BigDecimal> paidByUser = SalaryPaymentPeriod.sumPaidByUser(periodPayments, from, to);
+        Map<String, List<SalaryPayment>> paymentsByUser = SalaryPaymentPeriod.paymentsByUser(periodPayments, from, to);
+
+        // --- Mirror the main per-cashier loop ---
+        BigDecimal totalHours = BigDecimal.ZERO;
+        List<Map<String, Object>> shiftRows = new ArrayList<>();
+        BigDecimal shiftPaySum = BigDecimal.ZERO;
+        Map<String, Integer> monthlyDaysByRate = new LinkedHashMap<>();
+        Map<String, BigDecimal> monthlyBandTotals = new HashMap<>();
+
+        for (WorkShift shift : userShifts) {
+            PayRateService.ResolvedPay rate = payRateService.resolve(cashier.getId(), shift.getDate(), cashier);
+            PayType payType = rate.payType() != null ? rate.payType() : PayType.HOURLY;
+            BigDecimal payAmount = rateOrZero(rate.payAmount());
+            BigDecimal hours = SalaryCalculator.hoursWorked(shift, restaurantHours);
+            totalHours = totalHours.add(hours);
+            BigDecimal dayPay = SalaryCalculator.payForShift(shift, payType, payAmount, restaurantHours);
+            if (payType == PayType.MONTHLY) {
+                monthlyDaysByRate.merge(rateKey(payType, payAmount), 1, Integer::sum);
+            } else {
+                shiftPaySum = shiftPaySum.add(dayPay);
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", shift.getDate().toString());
+            row.put("hours", toDouble(hours));
+            row.put("hoursLabel", WorkShiftService.hoursLabel(shift));
+            row.put("pay", toDouble(payType == PayType.MONTHLY ? BigDecimal.ZERO : dayPay));
+            row.put("payNote", shiftPayNote(payType, hours, payAmount, shift, restaurantHours));
+            row.put("payType", payType.name());
+            row.put("payAmount", toDouble(payAmount));
+            row.put("tillCloseAssumed", shift.getEndTime() == null);
+            if (rate.effectiveFrom() != null) row.put("rateEffectiveFrom", rate.effectiveFrom().toString());
+            shiftRows.add(row);
+        }
+
+        for (Map.Entry<String, Integer> band : monthlyDaysByRate.entrySet()) {
+            BigDecimal amount = parseRateKeyAmount(band.getKey());
+            BigDecimal bandTotal = SalaryCalculator.monthlyPayForPeriod(band.getValue(), from, to, amount);
+            monthlyBandTotals.put(band.getKey(), bandTotal);
+            shiftPaySum = shiftPaySum.add(bandTotal);
+        }
+
+        // Back-fill monthly per-day amounts into rows (same logic as original)
+        for (int i = 0; i < userShifts.size(); i++) {
+            WorkShift shift = userShifts.get(i);
+            PayRateService.ResolvedPay rate = payRateService.resolve(cashier.getId(), shift.getDate(), cashier);
+            if (rate.payType() != PayType.MONTHLY) continue;
+            String key = rateKey(rate.payType(), rate.payAmount());
+            int daysInBand = monthlyDaysByRate.getOrDefault(key, 1);
+            BigDecimal bandTotal = monthlyBandTotals.getOrDefault(key, BigDecimal.ZERO);
+            BigDecimal perDay = bandTotal.divide(BigDecimal.valueOf(daysInBand), 2, RoundingMode.HALF_UP);
+            shiftRows.get(i).put("pay", toDouble(perDay));
+        }
+
+        BigDecimal totalPay = shiftPaySum.setScale(2, RoundingMode.HALF_UP);
+        BigDecimal paidAmount = paidByUser.getOrDefault(userId, BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal remainingPay = totalPay.subtract(paidAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+
+        // earnedToDate — same logic as original
+        LocalDate today = LocalDate.now();
+        BigDecimal earnedToDate;
+        if (today.isBefore(from)) {
+            earnedToDate = BigDecimal.ZERO;
+        } else if (today.isAfter(to)) {
+            earnedToDate = totalPay;
+        } else {
+            BigDecimal sum = BigDecimal.ZERO;
+            for (int i = 0; i < userShifts.size(); i++) {
+                if (userShifts.get(i).getDate().isAfter(today)) continue;
+                Object pay = shiftRows.get(i).get("pay");
+                if (pay instanceof Number n) sum = sum.add(BigDecimal.valueOf(n.doubleValue()));
+            }
+            earnedToDate = sum.setScale(2, RoundingMode.HALF_UP);
+        }
+        BigDecimal owedNow = earnedToDate.subtract(paidAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+
+        // Payment history for this user in the period
+        List<Map<String, Object>> paymentRows = paymentsByUser.getOrDefault(userId, List.of()).stream()
+                .map(p -> {
+                    Map<String, Object> pm = new LinkedHashMap<>();
+                    pm.put("id", p.getId());
+                    pm.put("amount", p.getAmount().doubleValue());
+                    pm.put("paidDate", p.getPaidDate().toString());
+                    pm.put("source", p.getPaymentSource().name());
+                    if (p.getNotes() != null) pm.put("notes", p.getNotes());
+                    return pm;
+                }).toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("from", from.toString());
+        result.put("to", to.toString());
+        result.put("name", cashier.getName());
+        result.put("payType", (cashier.getPayType() != null ? cashier.getPayType() : PayType.HOURLY).name());
+        result.put("payAmount", toDouble(rateOrZero(cashier.getPayAmount())));
+        result.put("totalHours", toDouble(totalHours));
+        result.put("totalPay", toDouble(totalPay));
+        result.put("earnedToDate", toDouble(earnedToDate));
+        result.put("paidAmount", toDouble(paidAmount));
+        result.put("remainingPay", toDouble(remainingPay));
+        result.put("owedNow", toDouble(owedNow));
+        result.put("fullyPaid", remainingPay.compareTo(BigDecimal.ZERO) == 0 && totalPay.compareTo(BigDecimal.ZERO) > 0);
+        result.put("shifts", shiftRows);
+        result.put("payments", paymentRows);
+        return result;
+    }
+
     private List<Map<String, Object>> paymentMaps(List<SalaryPayment> payments) {
         if (payments.isEmpty()) return List.of();
         Map<String, List<Map<String, Object>>> tagsByPayment = tagService.tagsForBulk(

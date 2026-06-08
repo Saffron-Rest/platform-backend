@@ -35,6 +35,10 @@ public class User {
     @Column(nullable = false)
     private boolean mustChangePassword = true;
 
+    /** When true the cashier can see their own earnings page and submit payout requests. */
+    @Column(name = "can_view_earnings", nullable = false)
+    private boolean canViewEarnings = false;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "pay_type")
     private PayType payType = PayType.HOURLY;
@@ -97,6 +101,8 @@ public class User {
     public void setEmail(String email) { this.email = email; }
     public boolean isMustChangePassword() { return mustChangePassword; }
     public void setMustChangePassword(boolean mustChangePassword) { this.mustChangePassword = mustChangePassword; }
+    public boolean isCanViewEarnings() { return canViewEarnings; }
+    public void setCanViewEarnings(boolean canViewEarnings) { this.canViewEarnings = canViewEarnings; }
     public String getPasswordHash() { return passwordHash; }
     public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
     public String getName() { return name; }
