@@ -1,7 +1,7 @@
 package com.saffron.cashflow.service;
 
 import com.saffron.cashflow.domain.DailyEntry;
-import com.saffron.cashflow.domain.EntryStatus;
+import com.saffron.cashflow.domain.DailyEntry;
 import com.saffron.cashflow.domain.ManualDeliveryIncome;
 import com.saffron.cashflow.domain.Role;
 import com.saffron.cashflow.repository.DailyEntryRepository;
@@ -11,7 +11,6 @@ import com.saffron.cashflow.util.EntryCalculator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.*;
 
@@ -101,50 +100,6 @@ public class DashboardService {
         result.put("netCashFlow", netCashFlow);
         result.put("difference", difference);
         result.put("entries", entrySummaries);
-        if (user.role() != Role.CASHIER) {
-            Map<String, Object> forecast = computeForecast(today);
-            if (forecast != null) result.put("forecast", forecast);
-        }
         return result;
-    }
-
-    private Map<String, Object> computeForecast(LocalDate today) {
-        DayOfWeek dow = today.getDayOfWeek();
-        LocalDate lookbackFrom = today.minusWeeks(8);
-        LocalDate lookbackTo = today.minusDays(1);
-
-        // One query for all locked entries in the 8-week window
-        List<DailyEntry> locked = entryRepository.findLockedBetween(lookbackFrom, lookbackTo, EntryStatus.LOCKED);
-
-        // Sum sales per date, keeping only matching weekday dates
-        Map<LocalDate, Double> salesByDate = new TreeMap<>();
-        for (DailyEntry e : locked) {
-            if (e.getDate().getDayOfWeek() == dow) {
-                salesByDate.merge(e.getDate(),
-                        EntryCalculator.toDouble(EntryCalculator.totalSales(e)), Double::sum);
-            }
-        }
-
-        // Add manual delivery income for the same weekday dates
-        for (ManualDeliveryIncome m : manualDeliveryService.findBetween(lookbackFrom, lookbackTo)) {
-            if (salesByDate.containsKey(m.getEffectiveDate())) {
-                salesByDate.merge(m.getEffectiveDate(),
-                        EntryCalculator.toDouble(m.getGrossAmount()), Double::sum);
-            }
-        }
-
-        if (salesByDate.size() < 3) return null;
-
-        List<Double> samples = new ArrayList<>(salesByDate.values());
-        double avg = samples.stream().mapToDouble(d -> d).average().orElse(0);
-        double low = samples.stream().mapToDouble(d -> d).min().orElse(0);
-        double high = samples.stream().mapToDouble(d -> d).max().orElse(0);
-
-        Map<String, Object> forecast = new LinkedHashMap<>();
-        forecast.put("predictedSales", avg);
-        forecast.put("low", low);
-        forecast.put("high", high);
-        forecast.put("sampleSize", samples.size());
-        return forecast;
     }
 }

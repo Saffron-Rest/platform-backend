@@ -16,9 +16,13 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.format.TextStyle;
 import java.util.*;
+import java.util.stream.Collectors;
+import java.util.Locale;
 
 @Service
 public class AnalyticsService {
@@ -141,6 +145,79 @@ public class AnalyticsService {
                 .map(SystemSetting::getValue)
                 .map(TreasurySettings::fromMap)
                 .orElseGet(TreasurySettings::new);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> forecastDays(int days) {
+        AuthHelper.requireOperations();
+        if (days < 1 || days > 14) days = 7;
+
+        LocalDate today = LocalDate.now();
+        LocalDate lookbackFrom = today.minusWeeks(8);
+        LocalDate lookbackTo = today.minusDays(1);
+
+        // Single query for all locked entries + all manual delivery in the window
+        List<DailyEntry> locked = entryRepository.findLockedBetween(lookbackFrom, lookbackTo, EntryStatus.LOCKED);
+        List<ManualDeliveryIncome> manual = manualDeliveryService.findBetween(lookbackFrom, lookbackTo);
+
+        // Aggregate sales by date (locked entry sales + manual delivery)
+        Map<LocalDate, Double> salesByDate = new HashMap<>();
+        for (DailyEntry e : locked) {
+            salesByDate.merge(e.getDate(), EntryCalculator.toDouble(EntryCalculator.totalSales(e)), Double::sum);
+        }
+        for (ManualDeliveryIncome m : manual) {
+            if (salesByDate.containsKey(m.getEffectiveDate())) {
+                salesByDate.merge(m.getEffectiveDate(), EntryCalculator.toDouble(m.getGrossAmount()), Double::sum);
+            }
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (int i = 0; i < days; i++) {
+            LocalDate target = today.plusDays(i);
+            DayOfWeek dow = target.getDayOfWeek();
+
+            // Same-weekday samples, newest first
+            List<Double> samples = salesByDate.entrySet().stream()
+                    .filter(e -> e.getKey().getDayOfWeek() == dow)
+                    .sorted(Map.Entry.<LocalDate, Double>comparingByKey().reversed())
+                    .map(Map.Entry::getValue)
+                    .collect(Collectors.toList());
+
+            Map<String, Object> day = new LinkedHashMap<>();
+            day.put("date", target.toString());
+            day.put("dayName", dow.getDisplayName(TextStyle.FULL, Locale.ENGLISH));
+            day.put("isToday", i == 0);
+            day.put("sampleSize", samples.size());
+
+            if (samples.size() < 3) {
+                result.add(day);
+                continue;
+            }
+
+            double avg = samples.stream().mapToDouble(d -> d).average().orElse(0);
+            double low = samples.stream().mapToDouble(d -> d).min().orElse(0);
+            double high = samples.stream().mapToDouble(d -> d).max().orElse(0);
+
+            // Trend: newest half vs oldest half — signals whether this weekday is growing or shrinking
+            int half = samples.size() / 2;
+            double recentAvg = samples.subList(0, half).stream().mapToDouble(d -> d).average().orElse(0);
+            double olderAvg = samples.subList(samples.size() - half, samples.size()).stream().mapToDouble(d -> d).average().orElse(0);
+            String trend;
+            if (olderAvg == 0) {
+                trend = "FLAT";
+            } else {
+                double change = (recentAvg - olderAvg) / olderAvg;
+                trend = change > 0.05 ? "UP" : change < -0.05 ? "DOWN" : "FLAT";
+            }
+
+            day.put("predictedSales", avg);
+            day.put("low", low);
+            day.put("high", high);
+            day.put("trend", trend);
+            result.add(day);
+        }
+
+        return Map.of("days", result);
     }
 
     private static LocalDate parseDate(String s, LocalDate fallback) {

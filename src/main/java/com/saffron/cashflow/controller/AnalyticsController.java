@@ -29,6 +29,12 @@ public class AnalyticsController {
         return analyticsService.cashflow(from, to, cashierId, status);
     }
 
+    @GetMapping("/forecast")
+    public Map<String, Object> forecast(
+            @RequestParam(required = false, defaultValue = "7") int days) {
+        return analyticsService.forecastDays(days);
+    }
+
     @GetMapping("/profit-loss")
     public Map<String, Object> profitLoss(
             @RequestParam(required = false) String from,
