@@ -58,7 +58,7 @@ public class StockMovement {
     @Column(name = "reference_type", length = 40)
     private String referenceType;
 
-    @Column(name = "reference_id", length = 64)
+    @Column(name = "reference_id", length = 100)
     private String referenceId;
 
     @Column(length = 500)
