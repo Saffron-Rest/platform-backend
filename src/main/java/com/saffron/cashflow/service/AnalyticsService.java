@@ -187,6 +187,9 @@ public class AnalyticsService {
         }
 
         List<Map<String, Object>> result = new ArrayList<>();
+        double weekTotal = 0, weekCash = 0, weekCard = 0, weekDeliv = 0;
+        int daysWithData = 0;
+
         for (int i = 0; i < days; i++) {
             LocalDate target = today.plusDays(i);
             DayOfWeek dow = target.getDayOfWeek();
@@ -201,19 +204,21 @@ public class AnalyticsService {
                     .map(salesByDate::get)
                     .collect(Collectors.toList());
 
+            // History oldest-first for the sparkline
+            List<Double> history = new ArrayList<>(samples);
+            Collections.reverse(history);
+
             Map<String, Object> day = new LinkedHashMap<>();
             day.put("date", target.toString());
             day.put("dayName", dow.getDisplayName(TextStyle.FULL, Locale.ENGLISH));
             day.put("isToday", i == 0);
             day.put("sampleSize", samples.size());
+            day.put("history", history);
 
             if (samples.size() < 3) {
                 result.add(day);
                 continue;
             }
-
-            double low  = samples.stream().mapToDouble(d -> d).min().orElse(0);
-            double high = samples.stream().mapToDouble(d -> d).max().orElse(0);
 
             // Exponential weighted average — most recent week gets 2^(n-1) weight
             double totalWeight = 0, weightedSum = 0;
@@ -223,6 +228,15 @@ public class AnalyticsService {
                 totalWeight += w;
             }
             double predictedSales = totalWeight > 0 ? weightedSum / totalWeight : 0;
+
+            // Percentile stats on sorted samples
+            List<Double> sorted = new ArrayList<>(samples);
+            Collections.sort(sorted);
+            double p25    = percentile(sorted, 25);
+            double median = percentile(sorted, 50);
+            double p75    = percentile(sorted, 75);
+            double low    = sorted.get(0);
+            double high   = sorted.get(sorted.size() - 1);
 
             // Trend: newest half avg vs oldest half avg
             int half = samples.size() / 2;
@@ -237,10 +251,12 @@ public class AnalyticsService {
             // Confidence: coefficient of variation on the raw samples
             double mean = samples.stream().mapToDouble(d -> d).average().orElse(0);
             double variance = samples.stream().mapToDouble(d -> (d - mean) * (d - mean)).average().orElse(0);
-            double cv = mean > 0 ? Math.sqrt(variance) / mean : 1.0;
+            double stddev = Math.sqrt(variance);
+            double cv = mean > 0 ? stddev / mean : 1.0;
             String confidence = cv < 0.10 ? "HIGH" : cv < 0.20 ? "MEDIUM" : "LOW";
+            double errorPct = predictedSales > 0 ? Math.round(stddev / predictedSales * 100 * 10.0) / 10.0 : 0;
 
-            // Channel split: average cash/card/delivery percentages across same-weekday dates
+            // Channel split: average cash/card/delivery across same-weekday dates
             double avgCash  = sameDates.stream().mapToDouble(d -> cashByDate .getOrDefault(d, 0.0)).average().orElse(0);
             double avgCard  = sameDates.stream().mapToDouble(d -> cardByDate .getOrDefault(d, 0.0)).average().orElse(0);
             double avgDeliv = sameDates.stream().mapToDouble(d -> delivByDate.getOrDefault(d, 0.0)).average().orElse(0);
@@ -249,17 +265,47 @@ public class AnalyticsService {
                 day.put("cashPct",     (int) Math.round(avgCash  / chanTotal * 100));
                 day.put("cardPct",     (int) Math.round(avgCard  / chanTotal * 100));
                 day.put("deliveryPct", (int) Math.round(avgDeliv / chanTotal * 100));
+                weekCash  += predictedSales * avgCash  / chanTotal;
+                weekCard  += predictedSales * avgCard  / chanTotal;
+                weekDeliv += predictedSales * avgDeliv / chanTotal;
             }
 
             day.put("predictedSales", predictedSales);
+            day.put("median",     median);
+            day.put("p25",        p25);
+            day.put("p75",        p75);
             day.put("low",        low);
             day.put("high",       high);
+            day.put("errorPct",   errorPct);
             day.put("trend",      trend);
             day.put("confidence", confidence);
             result.add(day);
+
+            weekTotal += predictedSales;
+            daysWithData++;
         }
 
-        return Map.of("days", result);
+        Map<String, Object> weekSummary = new LinkedHashMap<>();
+        weekSummary.put("total",        weekTotal);
+        weekSummary.put("cash",         weekCash);
+        weekSummary.put("card",         weekCard);
+        weekSummary.put("delivery",     weekDeliv);
+        weekSummary.put("daysWithData", daysWithData);
+        weekSummary.put("avgPerDay",    daysWithData > 0 ? weekTotal / daysWithData : 0);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("days", result);
+        response.put("weekSummary", weekSummary);
+        return response;
+    }
+
+    private static double percentile(List<Double> sorted, double p) {
+        if (sorted.isEmpty()) return 0;
+        double index = (p / 100.0) * (sorted.size() - 1);
+        int lower = (int) index;
+        int upper = Math.min(lower + 1, sorted.size() - 1);
+        double frac = index - lower;
+        return sorted.get(lower) * (1 - frac) + sorted.get(upper) * frac;
     }
 
     private static LocalDate parseDate(String s, LocalDate fallback) {
