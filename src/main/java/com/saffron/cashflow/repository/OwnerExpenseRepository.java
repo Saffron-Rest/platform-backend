@@ -40,4 +40,11 @@ public interface OwnerExpenseRepository extends JpaRepository<OwnerExpense, Stri
             + ") "
             + "AND e.ownerUserId = :ownerId")
     BigDecimal outstandingForOwner(@Param("ownerId") String ownerId);
+
+    @Query("SELECT COUNT(e), COALESCE(SUM(e.total - e.amountReimbursed), 0) FROM OwnerExpense e "
+            + "WHERE e.status IN ("
+            + "  com.saffron.cashflow.domain.OwnerExpenseStatus.PENDING, "
+            + "  com.saffron.cashflow.domain.OwnerExpenseStatus.PARTIAL"
+            + ")")
+    Object[] countAndSumOutstanding();
 }

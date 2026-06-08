@@ -52,6 +52,9 @@ public interface DailyEntryRepository extends JpaRepository<DailyEntry, String>,
     @Query("SELECT COUNT(e) > 0 FROM DailyEntry e WHERE e.cashier.id = :cashierId AND e.date = :date AND e.deletedAt IS NULL AND e.status = :status")
     boolean existsByCashierIdAndDateAndDeletedAtIsNullAndStatus(String cashierId, LocalDate date, EntryStatus status);
 
+    @Query("SELECT COUNT(e) FROM DailyEntry e WHERE e.date < :before AND e.deletedAt IS NULL AND e.status = com.saffron.cashflow.domain.EntryStatus.DRAFT")
+    long countDraftBefore(@org.springframework.data.repository.query.Param("before") LocalDate before);
+
     /** Batch-fetch entries with cashier in one query. Used by list() to avoid N+1 loads. */
     @Query("SELECT DISTINCT e FROM DailyEntry e LEFT JOIN FETCH e.cashier WHERE e.id IN :ids AND e.deletedAt IS NULL")
     List<DailyEntry> findAllByIdsWithCashier(@org.springframework.data.repository.query.Param("ids") List<String> ids);
