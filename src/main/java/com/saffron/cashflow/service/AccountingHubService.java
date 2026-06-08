@@ -77,7 +77,8 @@ public class AccountingHubService {
         long oldDrafts = entryRepository.countDraftBefore(today);
 
         // ── Owner expenses pending reimbursement ──────────────────────────────
-        Object[] ownerRow = ownerExpenseRepository.countAndSumOutstanding();
+        List<Object[]> ownerRows = ownerExpenseRepository.countAndSumOutstanding();
+        Object[] ownerRow = (ownerRows != null && !ownerRows.isEmpty()) ? ownerRows.get(0) : null;
         long ownerCount = ownerRow != null && ownerRow[0] != null
                 ? ((Number) ownerRow[0]).longValue() : 0;
         BigDecimal ownerAmt = ownerRow != null && ownerRow[1] != null

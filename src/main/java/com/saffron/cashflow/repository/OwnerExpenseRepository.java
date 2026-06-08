@@ -46,5 +46,5 @@ public interface OwnerExpenseRepository extends JpaRepository<OwnerExpense, Stri
             + "  com.saffron.cashflow.domain.OwnerExpenseStatus.PENDING, "
             + "  com.saffron.cashflow.domain.OwnerExpenseStatus.PARTIAL"
             + ")")
-    Object[] countAndSumOutstanding();
+    List<Object[]> countAndSumOutstanding();
 }
