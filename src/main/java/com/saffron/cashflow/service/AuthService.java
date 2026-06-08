@@ -138,6 +138,7 @@ public class AuthService {
         m.put("role", user.getRole().name());
         m.put("name", user.getName());
         m.put("mustChangePassword", user.isMustChangePassword());
+        m.put("canViewEarnings", user.isCanViewEarnings());
         // Ship the effective permission set so the frontend can gate UI
         // (buttons, nav items, etc.) without a separate fetch and
         // without going stale between admin grants and the next login.
