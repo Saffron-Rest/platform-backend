@@ -60,6 +60,16 @@ public class SupplierInvoiceLine {
     @Column(name = "line_total", nullable = false, precision = 12, scale = 2)
     private BigDecimal lineTotal = BigDecimal.ZERO;
 
+    /** VAT rate for this line in percent (e.g. 8.00 for 8%, 23.00 for 23%).
+     *  Null means VAT is not tracked per-line (legacy invoices). */
+    @Column(name = "vat_pct", precision = 5, scale = 2)
+    private BigDecimal vatPct;
+
+    /** VAT amount = lineTotal × vatPct / 100. Stored so the invoice-level
+     *  VAT total is just a sum — no need to recompute. */
+    @Column(name = "vat_amount", precision = 12, scale = 2)
+    private BigDecimal vatAmount;
+
     /** Set when a {@link StockMovement} was posted for this line.
      *  Used by void to revert exactly that one movement. */
     @Column(name = "stock_movement_id", length = 36)
@@ -93,6 +103,10 @@ public class SupplierInvoiceLine {
     public void setUnitCost(BigDecimal unitCost) { this.unitCost = unitCost; }
     public BigDecimal getLineTotal() { return lineTotal; }
     public void setLineTotal(BigDecimal lineTotal) { this.lineTotal = lineTotal; }
+    public BigDecimal getVatPct() { return vatPct; }
+    public void setVatPct(BigDecimal vatPct) { this.vatPct = vatPct; }
+    public BigDecimal getVatAmount() { return vatAmount; }
+    public void setVatAmount(BigDecimal vatAmount) { this.vatAmount = vatAmount; }
     public String getStockMovementId() { return stockMovementId; }
     public void setStockMovementId(String stockMovementId) { this.stockMovementId = stockMovementId; }
     public int getSortOrder() { return sortOrder; }

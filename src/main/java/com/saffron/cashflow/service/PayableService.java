@@ -238,8 +238,20 @@ public class PayableService {
         inv.getLines().addAll(attachedLines);
         inv.setSubtotal(subtotal.setScale(2, RoundingMode.HALF_UP));
 
-        BigDecimal vat = parseOptionalAmount(body.get("vat"));
-        inv.setVat(vat == null ? BigDecimal.ZERO : vat);
+        // If any line carries a vatPct, compute invoice VAT as Σ line vatAmounts
+        // (this is the standard per-line VAT model). Otherwise fall back to the
+        // explicit flat PLN amount the legacy form supplies.
+        boolean hasLineVat = attachedLines.stream().anyMatch(l -> l.getVatPct() != null);
+        BigDecimal vat;
+        if (hasLineVat) {
+            vat = attachedLines.stream()
+                    .map(l -> l.getVatAmount() != null ? l.getVatAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+        } else {
+            BigDecimal explicit = parseOptionalAmount(body.get("vat"));
+            vat = explicit != null ? explicit : BigDecimal.ZERO;
+        }
+        inv.setVat(vat.setScale(2, RoundingMode.HALF_UP));
 
         // Total can be supplied explicitly (handles supplier rounding /
         // discounts that don't match Σ lines + VAT exactly). Otherwise
@@ -516,6 +528,14 @@ public class PayableService {
             throw new BadRequestException("Line total cannot be negative");
         }
         line.setLineTotal(lineTotal.setScale(2, RoundingMode.HALF_UP));
+
+        BigDecimal vatPct = parseOptionalAmount(raw.get("vatPct"));
+        if (vatPct != null) {
+            if (vatPct.signum() < 0) throw new BadRequestException("VAT rate cannot be negative");
+            line.setVatPct(vatPct.setScale(2, RoundingMode.HALF_UP));
+            line.setVatAmount(lineTotal.multiply(vatPct)
+                    .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+        }
         return line;
     }
 
@@ -724,6 +744,8 @@ public class PayableService {
             lm.put("unit", line.getUnit());
             lm.put("unitCost", line.getUnitCost());
             lm.put("lineTotal", line.getLineTotal());
+            if (line.getVatPct() != null) lm.put("vatPct", line.getVatPct());
+            if (line.getVatAmount() != null) lm.put("vatAmount", line.getVatAmount());
             if (line.getStockMovementId() != null) lm.put("stockMovementId", line.getStockMovementId());
             lines.add(lm);
         }
