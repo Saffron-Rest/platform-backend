@@ -79,6 +79,13 @@ public class PayableController {
         return payableService.update(id, body);
     }
 
+    @PutMapping("/{id}/lines")
+    public Map<String, Object> updateLines(
+            @PathVariable String id,
+            @RequestBody Map<String, Object> body) {
+        return payableService.updateLines(id, body);
+    }
+
     @PostMapping("/{id}/void")
     public Map<String, Object> voidInvoice(
             @PathVariable String id,

@@ -353,6 +353,97 @@ public class PayableService {
         return toDetailMap(inv);
     }
 
+    /**
+     * Replace the full lines collection of a non-void, unpaid invoice.
+     *
+     * <p>Rules:
+     * <ul>
+     *   <li>Refused once any payment is on file — reverse payments first.</li>
+     *   <li>Old stock-PURCHASE movements are reverted before new ones are posted,
+     *       so inventory stays consistent.</li>
+     *   <li>Invoice subtotal / VAT / total are recomputed from the new lines
+     *       (same logic as {@link #create}).</li>
+     * </ul></p>
+     */
+    @Transactional
+    public Map<String, Object> updateLines(String id, Map<String, Object> body) {
+        AuthHelper.requireAdminOr(Permission.PAYABLES_MANAGE);
+        AuthUser user = AuthHelper.currentUser();
+        SupplierInvoice inv = require(id);
+
+        if (inv.getStatus() == SupplierInvoiceStatus.VOID) {
+            throw new ConflictException("Cannot edit a voided invoice");
+        }
+        if (inv.getAmountPaid().signum() > 0) {
+            throw new ConflictException(
+                    "Cannot change lines after a payment has been recorded. Reverse payments first.");
+        }
+
+        List<Map<String, Object>> rawLines = asLineList(body.get("lines"));
+        if (rawLines.isEmpty()) {
+            throw new BadRequestException("At least one line is required");
+        }
+
+        // Revert stock purchases for every line that posted a movement.
+        for (SupplierInvoiceLine line : inv.getLines()) {
+            if (line.getStockMovementId() != null) {
+                revertStockPurchase(line, inv, user.id(), "Line edit");
+            }
+        }
+
+        // Orphan-remove the old lines.
+        inv.getLines().clear();
+
+        // Build and attach the replacement lines.
+        BigDecimal subtotal = BigDecimal.ZERO;
+        int order = 0;
+        List<SupplierInvoiceLine> newLines = new ArrayList<>();
+        for (Map<String, Object> raw : rawLines) {
+            SupplierInvoiceLine line = buildLine(raw, order++);
+            line.setInvoice(inv);
+            newLines.add(line);
+            subtotal = subtotal.add(line.getLineTotal());
+        }
+        inv.getLines().addAll(newLines);
+        inv.setSubtotal(subtotal.setScale(2, RoundingMode.HALF_UP));
+
+        // VAT: per-line if any line carries a vatPct, flat PLN override otherwise.
+        boolean hasLineVat = newLines.stream().anyMatch(l -> l.getVatPct() != null);
+        BigDecimal vat;
+        if (hasLineVat) {
+            vat = newLines.stream()
+                    .map(l -> l.getVatAmount() != null ? l.getVatAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+        } else {
+            BigDecimal explicit = parseOptionalAmount(body.get("vat"));
+            vat = explicit != null ? explicit : BigDecimal.ZERO;
+        }
+        inv.setVat(vat.setScale(2, RoundingMode.HALF_UP));
+
+        // Total: explicit override or subtotal + VAT.
+        BigDecimal explicitTotal = parseOptionalAmount(body.get("total"));
+        BigDecimal total = explicitTotal != null ? explicitTotal : inv.getSubtotal().add(inv.getVat());
+        if (total.signum() <= 0) {
+            throw new BadRequestException("Invoice total must be greater than zero");
+        }
+        inv.setTotal(total.setScale(2, RoundingMode.HALF_UP));
+
+        inv = invoiceRepository.save(inv);
+
+        // Post new stock PURCHASE movements (after save so line IDs are assigned).
+        for (SupplierInvoiceLine line : inv.getLines()) {
+            if (line.getStockItemId() == null) continue;
+            postStockPurchase(line, inv, user.id());
+        }
+
+        auditService.log(user.id(), AuditAction.UPDATE, "SupplierInvoice", inv.getId(),
+                Map.of("action", "lines_updated",
+                        "invoiceNumber", String.valueOf(inv.getInvoiceNumber()),
+                        "lineCount", inv.getLines().size(),
+                        "newTotal", inv.getTotal()));
+        return toDetailMap(inv);
+    }
+
     @Transactional
     public Map<String, Object> voidInvoice(String id, String reason) {
         AuthHelper.requireAdminOr(Permission.PAYABLES_MANAGE);
