@@ -2,6 +2,7 @@ package com.saffron.cashflow.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.saffron.cashflow.domain.PosIntegration;
+import com.saffron.cashflow.domain.PosWebhookLog;
 import com.saffron.cashflow.domain.PosSale;
 import com.saffron.cashflow.integration.dotykacka.DotykackaSyncService;
 import com.saffron.cashflow.repository.PosIntegrationRepository;
@@ -183,21 +184,44 @@ public class PosIntegrationController {
         PosIntegration integration = integrationRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Integration not found"));
         String externalId = "saffron-test-" + UUID.randomUUID();
-        // Minimal payload — ingestOrder pulls items from the canonical array.
+        // Minimal Dotypos-format payload with two example items so the raw
+        // log shows a realistic invoice with items.
         String json = "[{"
                 + "\"orderid\":\"" + externalId + "\","
                 + "\"branchid\":0,"
                 + "\"completed\":\"" + Instant.now().toString() + "\","
                 + "\"versiondate\":" + Instant.now().toEpochMilli() + ","
+                + "\"paymentType\":\"CASH\","
                 + "\"items\":[{"
                 + "\"productid\":null,"
-                + "\"name\":\"Saffron self-test\","
+                + "\"name\":\"Saffron self-test item\","
+                + "\"quantity\":\"2\","
+                + "\"pricewithvat\":\"12.50\","
+                + "\"discount\":\"0.00\""
+                + "},{"
+                + "\"productid\":null,"
+                + "\"name\":\"Saffron self-test drink\","
                 + "\"quantity\":\"1\","
-                + "\"pricewithvat\":\"1.00\""
+                + "\"pricewithvat\":\"8.00\","
+                + "\"discount\":\"0.00\""
                 + "}]"
                 + "}]";
         try {
-            return dotykackaSync.ingestWebhook(integration, MAPPER.readTree(json));
+            Map<String, Object> result = dotykackaSync.ingestWebhook(integration, MAPPER.readTree(json));
+            // Save a raw log entry so the test payload appears in the raw calls tab.
+            try {
+                PosWebhookLog log = new PosWebhookLog();
+                log.setIntegrationId(id);
+                log.setExternalId(externalId);
+                log.setRawBody(json);
+                log.setInserted(((Number) result.getOrDefault("inserted", 0)).intValue());
+                log.setSkipped(((Number) result.getOrDefault("skipped", 0)).intValue());
+                log.setUnmatched(((Number) result.getOrDefault("unmatched", 0)).intValue());
+                webhookLogRepository.save(log);
+            } catch (Exception logEx) {
+                // Non-fatal — don't let log failure break the test response.
+            }
+            return result;
         } catch (Exception e) {
             Map<String, Object> err = new LinkedHashMap<>();
             err.put("ok", false);

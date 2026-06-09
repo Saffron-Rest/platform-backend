@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.saffron.cashflow.domain.MenuItem;
 import com.saffron.cashflow.domain.PosIntegration;
 import com.saffron.cashflow.domain.PosSale;
+import com.saffron.cashflow.domain.PosWebhookLog;
 import com.saffron.cashflow.repository.PosIntegrationRepository;
+import com.saffron.cashflow.repository.PosWebhookLogRepository;
 import com.saffron.cashflow.repository.PosSaleRepository;
 import com.saffron.cashflow.service.MenuService;
 import com.saffron.cashflow.service.PosSalePostHandler;
@@ -51,6 +53,7 @@ public class DotykackaSyncService {
 
     private final PosIntegrationRepository integrationRepository;
     private final PosSaleRepository saleRepository;
+    private final PosWebhookLogRepository webhookLogRepository;
     private final MenuService menuService;
     private final DotykackaClient client;
     private final PosSalePostHandler postHandler;
@@ -59,12 +62,14 @@ public class DotykackaSyncService {
     public DotykackaSyncService(
             PosIntegrationRepository integrationRepository,
             PosSaleRepository saleRepository,
+            PosWebhookLogRepository webhookLogRepository,
             MenuService menuService,
             DotykackaClient client,
             PosSalePostHandler postHandler,
             @Value("${app.timezone:Europe/Warsaw}") String timezone) {
         this.integrationRepository = integrationRepository;
         this.saleRepository = saleRepository;
+        this.webhookLogRepository = webhookLogRepository;
         this.menuService = menuService;
         this.client = client;
         this.postHandler = postHandler;
@@ -149,6 +154,7 @@ public class DotykackaSyncService {
                 inserted += s.inserted;
                 skipped += s.skipped;
                 unmatched += s.unmatched;
+                saveOrderLog(integration.getId(), order, s);
             }
 
             if (data.size() < PAGE_SIZE) break;
@@ -217,6 +223,21 @@ public class DotykackaSyncService {
     }
 
     // ---------- Per-order ingest ----------
+
+    private void saveOrderLog(String integrationId, JsonNode order, IngestStats s) {
+        try {
+            PosWebhookLog log = new PosWebhookLog();
+            log.setIntegrationId(integrationId);
+            log.setExternalId(order.path("id").asText(null));
+            log.setRawBody(order.toString());
+            log.setInserted(s.inserted);
+            log.setSkipped(s.skipped);
+            log.setUnmatched(s.unmatched);
+            webhookLogRepository.save(log);
+        } catch (Exception e) {
+            LOG.warn("Failed to save poll log for order {}: {}", order.path("id").asText("?"), e.getMessage());
+        }
+    }
 
     private IngestStats ingestOrder(PosIntegration integration, JsonNode order) {
         IngestStats stats = new IngestStats();
