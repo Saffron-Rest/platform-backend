@@ -22,6 +22,10 @@ public class MenuCategory {
     @Column(name = "sort_order", nullable = false)
     private int sortOrder;
 
+    /** Optional parent category ID — null means this is a top-level category. */
+    @Column(name = "parent_id", length = 36)
+    private String parentId;
+
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
@@ -40,6 +44,8 @@ public class MenuCategory {
     public void setName(String name) { this.name = name; }
     public int getSortOrder() { return sortOrder; }
     public void setSortOrder(int sortOrder) { this.sortOrder = sortOrder; }
+    public String getParentId() { return parentId; }
+    public void setParentId(String parentId) { this.parentId = parentId; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public Instant getCreatedAt() { return createdAt; }

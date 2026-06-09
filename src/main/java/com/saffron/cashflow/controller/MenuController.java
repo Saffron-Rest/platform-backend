@@ -43,12 +43,12 @@ public class MenuController {
     @PostMapping("/categories")
     @ResponseStatus(HttpStatus.CREATED)
     public Map<String, Object> createCategory(@RequestBody CategoryRequest req) {
-        return menuService.createCategory(req.name(), req.sortOrder());
+        return menuService.createCategory(req.name(), req.sortOrder(), req.parentId());
     }
 
     @PutMapping("/categories/{id}")
     public Map<String, Object> updateCategory(@PathVariable String id, @RequestBody CategoryRequest req) {
-        return menuService.updateCategory(id, req.name(), req.sortOrder(), req.active());
+        return menuService.updateCategory(id, req.name(), req.sortOrder(), req.active(), req.parentId());
     }
 
     @DeleteMapping("/categories/{id}")
@@ -140,5 +140,5 @@ public class MenuController {
         return new ResponseEntity<>(pdf, headers, HttpStatus.OK);
     }
 
-    public record CategoryRequest(String name, Integer sortOrder, Boolean active) {}
+    public record CategoryRequest(String name, Integer sortOrder, Boolean active, String parentId) {}
 }

@@ -69,15 +69,23 @@ public class MenuService {
     }
 
     @Transactional
-    public Map<String, Object> createCategory(String name, Integer sortOrder) {
+    public Map<String, Object> createCategory(String name, Integer sortOrder, String parentId) {
         AuthHelper.requireOperations();
         String clean = requireName(name, 80, "Category name");
         categoryRepository.findFirstByNameIgnoreCase(clean).ifPresent(existing -> {
             throw new BadRequestException("Category \"" + existing.getName() + "\" already exists");
         });
+        if (parentId != null && !parentId.isBlank()) {
+            MenuCategory parent = categoryRepository.findById(parentId)
+                    .orElseThrow(() -> new BadRequestException("Parent category not found"));
+            if (parent.getParentId() != null) {
+                throw new BadRequestException("Nesting deeper than one level is not allowed");
+            }
+        }
         MenuCategory c = new MenuCategory();
         c.setName(clean);
         c.setSortOrder(sortOrder != null ? sortOrder : nextSortOrder());
+        c.setParentId(parentId != null && !parentId.isBlank() ? parentId : null);
         c.setActive(true);
         c = categoryRepository.save(c);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.CREATE, "MenuCategory", c.getId(),
@@ -86,7 +94,7 @@ public class MenuService {
     }
 
     @Transactional
-    public Map<String, Object> updateCategory(String id, String name, Integer sortOrder, Boolean active) {
+    public Map<String, Object> updateCategory(String id, String name, Integer sortOrder, Boolean active, String parentId) {
         AuthHelper.requireOperations();
         MenuCategory c = categoryRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Category not found"));
@@ -105,6 +113,22 @@ public class MenuService {
         }
         if (sortOrder != null) c.setSortOrder(sortOrder);
         if (active != null) c.setActive(active);
+        // parentId="" means "make top-level"; null means "don't change"
+        if (parentId != null) {
+            if (parentId.isBlank()) {
+                c.setParentId(null);
+            } else {
+                if (parentId.equals(id)) throw new BadRequestException("A category cannot be its own parent");
+                MenuCategory parent = categoryRepository.findById(parentId)
+                        .orElseThrow(() -> new BadRequestException("Parent category not found"));
+                if (parent.getParentId() != null) throw new BadRequestException("Nesting deeper than one level is not allowed");
+                // Prevent making a parent a child of one of its existing children
+                boolean wouldCycle = categoryRepository.findAllByOrderBySortOrderAscNameAsc()
+                        .stream().anyMatch(ch -> id.equals(ch.getParentId()) && ch.getId().equals(parentId));
+                if (wouldCycle) throw new BadRequestException("Cannot create circular category hierarchy");
+                c.setParentId(parentId);
+            }
+        }
         c = categoryRepository.save(c);
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "MenuCategory", c.getId(),
                 before, Map.of("name", c.getName(), "sortOrder", c.getSortOrder(), "active", c.isActive()), null);
@@ -117,6 +141,13 @@ public class MenuService {
         AuthHelper.requireOperations();
         MenuCategory c = categoryRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Category not found"));
+        long children = categoryRepository.findAllByOrderBySortOrderAscNameAsc()
+                .stream().filter(ch -> id.equals(ch.getParentId())).count();
+        if (children > 0) {
+            throw new BadRequestException(
+                    "Category has " + children + " sub-categor" + (children == 1 ? "y" : "ies")
+                            + ". Remove them first.");
+        }
         long items = itemRepository.findAllByCategoryIdOrderByNameAsc(id).size();
         if (items > 0) {
             throw new BadRequestException(
@@ -134,7 +165,19 @@ public class MenuService {
     public List<Map<String, Object>> listItems(String categoryId, boolean includeArchived) {
         List<MenuItem> items;
         if (categoryId != null && !categoryId.isBlank()) {
-            items = itemRepository.findAllByCategoryIdOrderByNameAsc(categoryId);
+            // Build the set of category IDs to include: the selected one + any of its children
+            List<String> categoryIds = new ArrayList<>();
+            categoryIds.add(categoryId);
+            categoryRepository.findAllByOrderBySortOrderAscNameAsc()
+                    .stream()
+                    .filter(c -> categoryId.equals(c.getParentId()))
+                    .map(MenuCategory::getId)
+                    .forEach(categoryIds::add);
+            items = categoryIds.size() == 1
+                    ? itemRepository.findAllByCategoryIdOrderByNameAsc(categoryId)
+                    : itemRepository.findAllByOrderByNameAsc().stream()
+                            .filter(i -> categoryIds.contains(i.getCategoryId()))
+                            .toList();
         } else if (!includeArchived) {
             items = itemRepository.findAllByActiveTrueOrderByNameAsc();
         } else {
@@ -555,6 +598,7 @@ public class MenuService {
         m.put("name", c.getName());
         m.put("sortOrder", c.getSortOrder());
         m.put("active", c.isActive());
+        m.put("parentId", c.getParentId());
         m.put("itemCount", itemCount);
         return m;
     }

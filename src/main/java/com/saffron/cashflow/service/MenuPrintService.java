@@ -674,28 +674,49 @@ public class MenuPrintService {
         doc.add(post);
     }
 
-    // ---------- GRID ----------
+    // ---------- GRID — 3 columns × 3 rows per page ----------
+
+    private static final int GRID_COLS = 3;
+    private static final int GRID_ROWS_PER_PAGE = 3;
+    private static final int GRID_PAGE_SIZE = GRID_COLS * GRID_ROWS_PER_PAGE; // 9
 
     private void drawGrid(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
             throws DocumentException {
-        PdfPTable table = new PdfPTable(2);
-        table.setWidthPercentage(100);
-        table.setSpacingBefore(8);
-        table.setSplitLate(false);
-        table.setSplitRows(false);  // never split a grid row — keeps photo and text together
-        table.getDefaultCell().setBorder(Rectangle.NO_BORDER);
-        try { table.setWidths(new float[]{1f, 1f}); } catch (DocumentException ignored) {}
+        // Chunk into pages of 9 (3 cols × 3 rows). Each chunk gets its own
+        // table so we can force a page break between them.
+        int total = items.size();
+        for (int pageStart = 0; pageStart < total; pageStart += GRID_PAGE_SIZE) {
+            if (pageStart > 0) doc.newPage();
 
-        for (MenuItem item : items) table.addCell(gridCard(item, showPrices, locale));
-        if (items.size() % 2 == 1) {
-            // Empty filler card (same wrapper dimensions) keeps even-column alignment
-            PdfPCell filler = new PdfPCell();
-            filler.setBorder(Rectangle.NO_BORDER);
-            filler.setPaddingRight(16);
-            filler.setPaddingBottom(20);
-            table.addCell(filler);
+            List<MenuItem> chunk = items.subList(pageStart, Math.min(pageStart + GRID_PAGE_SIZE, total));
+
+            PdfPTable table = new PdfPTable(GRID_COLS);
+            table.setWidthPercentage(100);
+            table.setSpacingBefore(8);
+            table.setSplitLate(false);
+            table.setSplitRows(false);
+            table.getDefaultCell().setBorder(Rectangle.NO_BORDER);
+            // Equal-width columns
+            float[] colWidths = new float[GRID_COLS];
+            java.util.Arrays.fill(colWidths, 1f);
+            try { table.setWidths(colWidths); } catch (DocumentException ignored) {}
+
+            for (MenuItem item : chunk) {
+                table.addCell(gridCard(item, showPrices, locale, true));
+            }
+            // Fill the last row with blank cells so the table stays aligned
+            int remainder = chunk.size() % GRID_COLS;
+            if (remainder != 0) {
+                for (int f = remainder; f < GRID_COLS; f++) {
+                    PdfPCell filler = new PdfPCell();
+                    filler.setBorder(Rectangle.NO_BORDER);
+                    filler.setPaddingRight(10);
+                    filler.setPaddingBottom(16);
+                    table.addCell(filler);
+                }
+            }
+            doc.add(table);
         }
-        doc.add(table);
     }
 
     /**
@@ -715,23 +736,26 @@ public class MenuPrintService {
      *
      * <p>Cover scaling (Math.max) fills the photo cell without letterboxing.</p>
      */
-    private PdfPCell gridCard(MenuItem item, boolean showPrices, Locale locale) {
+    private PdfPCell gridCard(MenuItem item, boolean showPrices, Locale locale, boolean threeCol) {
         Image img     = tryLoadImage(item.getImagePath());
         boolean hasImg = img != null;
 
+        // Scale factor for narrower 3-column cards
+        float fs = threeCol ? 0.85f : 1f;
+
         // ── Fonts (shared by both card types) ─────────────────────────────────
-        Font portionFont  = font(SANS_REG,      8.5f, MUTED);
-        Font priceFont    = font(SANS_REG,     hasImg ? 10.5f : 11.5f,  PRICE_COLOR);
-        Font pillFont     = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
-        Font descFont     = font(SERIF_ITALIC, hasImg ? 9.5f : 10.5f,  MUTED);
-        Font tagsFont     = font(SANS_ITALIC,   8f,   MUTED);
-        Font allergenFont = font(SANS_REG,      7.5f, MUTED);
-        Font optLabelFont = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
-        Font varNameFont  = font(SANS_REG,      9.5f, INK_SOFT);
-        Font varPriceFont = font(SANS_REG,      9f,   PRICE_COLOR);
-        Font varSameFont  = font(SANS_ITALIC,   9f,   MUTED);
+        Font portionFont  = font(SANS_REG,     8.5f  * fs, MUTED);
+        Font priceFont    = font(SANS_REG,    (hasImg ? 10.5f : 11.5f) * fs, PRICE_COLOR);
+        Font pillFont     = font(SANS_BOLD,    7f    * fs, SAFFRON_DEEP);
+        Font descFont     = font(SERIF_ITALIC,(hasImg ? 9.5f  : 10.5f) * fs, MUTED);
+        Font tagsFont     = font(SANS_ITALIC,  8f    * fs, MUTED);
+        Font allergenFont = font(SANS_REG,     7.5f  * fs, MUTED);
+        Font optLabelFont = font(SANS_BOLD,    7f    * fs, SAFFRON_DEEP);
+        Font varNameFont  = font(SANS_REG,     9.5f  * fs, INK_SOFT);
+        Font varPriceFont = font(SANS_REG,     9f    * fs, PRICE_COLOR);
+        Font varSameFont  = font(SANS_ITALIC,  9f    * fs, MUTED);
         // Name is larger on editorial cards — typography is the visual
-        Font nameFont     = font(SERIF_BOLD,  hasImg ? 13.5f : 15f,   INK);
+        Font nameFont     = font(SERIF_BOLD,  (hasImg ? 13.5f : 15f) * fs, INK);
 
         List<VariantEntry> variants  = parseVariants(item);
         boolean varPrices            = showPrices && hasVariantPrices(variants);
@@ -751,7 +775,7 @@ public class MenuPrintService {
             // ══════════════════════════════════════════════════════════════════
             // VISUAL CARD: photo → saffron stripe → white content
             // ══════════════════════════════════════════════════════════════════
-            final float CARD_W = 221f, PHOTO_H = 170f;
+            final float CARD_W = threeCol ? 147f : 221f, PHOTO_H = threeCol ? 110f : 170f;
             float scaleX = CARD_W / img.getWidth();
             float scaleY = PHOTO_H / img.getHeight();
             float scale  = Math.max(scaleX, scaleY);        // cover, not fit
