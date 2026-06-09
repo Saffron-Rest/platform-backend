@@ -14,6 +14,8 @@ import com.saffron.cashflow.web.NotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +53,29 @@ public class SupplierService {
         List<Supplier> rows = includeInactive
                 ? supplierRepository.findAllOrdered()
                 : supplierRepository.findActiveOrdered();
-        return rows.stream().map(SupplierService::toMap).toList();
+
+        // Build per-supplier stats map in one query
+        Map<String, long[]> stats = new HashMap<>(); // supplierId -> [count, totalCents, paidCents] (using BigDecimal scaled)
+        Map<String, BigDecimal[]> bdStats = new HashMap<>(); // supplierId -> [sumTotal, sumPaid]
+        for (Object[] r : invoiceRepository.statsPerSupplier()) {
+            String sid = (String) r[0];
+            long count = ((Number) r[1]).longValue();
+            BigDecimal sumTotal = (BigDecimal) r[2];
+            BigDecimal sumPaid  = (BigDecimal) r[3];
+            stats.put(sid, new long[]{count});
+            bdStats.put(sid, new BigDecimal[]{sumTotal, sumPaid});
+        }
+
+        return rows.stream().map(s -> {
+            Map<String, Object> m = toMap(s);
+            long[] st = stats.getOrDefault(s.getId(), new long[]{0L});
+            BigDecimal[] bd = bdStats.getOrDefault(s.getId(), new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
+            m.put("invoiceCount", st[0]);
+            BigDecimal outstanding = bd[0].subtract(bd[1]);
+            if (outstanding.signum() < 0) outstanding = BigDecimal.ZERO;
+            m.put("totalOutstanding", outstanding);
+            return m;
+        }).toList();
     }
 
     @Transactional(readOnly = true)

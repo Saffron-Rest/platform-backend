@@ -51,4 +51,14 @@ public interface SupplierInvoiceRepository extends JpaRepository<SupplierInvoice
     @Query("SELECT i FROM SupplierInvoice i WHERE i.supplier.id = :supplierId "
             + "ORDER BY i.invoiceDate DESC, i.createdAt DESC")
     List<SupplierInvoice> findBySupplierId(@Param("supplierId") String supplierId);
+
+    /**
+     * Per-supplier invoice stats — one query, no N+1.
+     * Rows: [supplierId (String), invoiceCount (Long), sumTotal (BigDecimal), sumAmountPaid (BigDecimal)]
+     */
+    @Query("SELECT i.supplier.id, COUNT(i), COALESCE(SUM(i.total), 0), COALESCE(SUM(i.amountPaid), 0) "
+            + "FROM SupplierInvoice i "
+            + "WHERE i.status <> com.saffron.cashflow.domain.SupplierInvoiceStatus.VOID "
+            + "GROUP BY i.supplier.id")
+    List<Object[]> statsPerSupplier();
 }
