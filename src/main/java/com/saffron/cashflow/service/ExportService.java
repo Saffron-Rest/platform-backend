@@ -26,6 +26,8 @@ import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfPageEventHelper;
 import com.lowagie.text.pdf.PdfWriter;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -70,6 +72,8 @@ public class ExportService {
     private final ManualDeliveryIncomeRepository manualDeliveryRepository;
     private final UserRepository userRepository;
     private final SystemSettingRepository settingRepository;
+    /** Lazy to avoid circular dependency (SalaryService → ExportService chain). */
+    @Autowired @Lazy private SalaryService salaryService;
 
     public ExportService(
             DailyEntryRepository entryRepository,
@@ -376,6 +380,7 @@ public class ExportService {
         return flat("payouts", from, to, format, headers, rows, cols);
     }
 
+    @SuppressWarnings("unchecked")
     private ExportResult buildPayoutsPdf(List<SalaryPayment> rows, Map<String, String> names,
                                           LocalDate from, LocalDate to) {
         BigDecimal totalPaid = sum(rows, SalaryPayment::getAmount);
@@ -388,62 +393,287 @@ public class ExportService {
         BigDecimal excludedAmount = sum(rows.stream()
                 .filter(SalaryPayment::isExcludeFromTreasury).toList(),
                 SalaryPayment::getAmount);
+
+        // Load payroll report — skip gracefully if the caller doesn't hold salary permissions.
+        Map<String, Object> payroll = null;
+        try {
+            payroll = salaryService.calculate(from.toString(), to.toString());
+        } catch (Exception ignored) { /* no salary permission — run without earnings data */ }
+
+        // Build per-userId lookup from payroll employees list
+        Map<String, Map<String, Object>> empByUserId = new LinkedHashMap<>();
+        BigDecimal totalEarned = BigDecimal.ZERO;
+        BigDecimal totalRemaining = BigDecimal.ZERO;
+        if (payroll != null) {
+            List<Map<String, Object>> empList = (List<Map<String, Object>>) payroll.get("employees");
+            if (empList != null) {
+                for (Map<String, Object> emp : empList) {
+                    String uid = String.valueOf(emp.getOrDefault("userId", ""));
+                    empByUserId.put(uid, emp);
+                }
+            }
+            totalEarned = bigDec(payroll.get("grandTotalPay"));
+            totalRemaining = bigDec(payroll.get("grandTotalRemaining"));
+        }
+
         long distinctEmployees = rows.stream().map(SalaryPayment::getUserId).distinct().count();
 
-        List<Kpi> kpis = List.of(
-                kpi("Total paid", money(totalPaid)),
-                kpi("Cash", money(cashPaid)),
-                kpi("Card", money(cardPaid)),
-                kpi("Employees", String.valueOf(distinctEmployees)));
+        List<Kpi> kpis = payroll != null
+                ? List.of(
+                    kpi("Earned", money(totalEarned)),
+                    kpi("Paid out", money(totalPaid)),
+                    kpi("Remaining", money(totalRemaining)),
+                    kpi("Employees", String.valueOf(distinctEmployees)))
+                : List.of(
+                    kpi("Total paid", money(totalPaid)),
+                    kpi("Cash", money(cashPaid)),
+                    kpi("Card", money(cardPaid)),
+                    kpi("Employees", String.valueOf(distinctEmployees)));
 
         Map<String, List<SalaryPayment>> byUser = rows.stream()
                 .collect(Collectors.groupingBy(SalaryPayment::getUserId,
                         LinkedHashMap::new, Collectors.toList()));
 
+        // Sort employees by earned (desc), fall back to paid (desc)
         List<Map.Entry<String, List<SalaryPayment>>> sections = byUser.entrySet().stream()
-                .sorted((a, b) -> sum(b.getValue(), SalaryPayment::getAmount)
-                        .compareTo(sum(a.getValue(), SalaryPayment::getAmount)))
+                .sorted((a, b) -> {
+                    Map<String, Object> ea = empByUserId.get(a.getKey());
+                    Map<String, Object> eb = empByUserId.get(b.getKey());
+                    if (ea != null && eb != null) {
+                        return bigDec(eb.get("totalPay")).compareTo(bigDec(ea.get("totalPay")));
+                    }
+                    return sum(b.getValue(), SalaryPayment::getAmount)
+                            .compareTo(sum(a.getValue(), SalaryPayment::getAmount));
+                })
                 .toList();
 
-        float[] widths = {2.0f, 1.4f, 2.6f, 1.8f, 1.6f, 1.8f};
-        List<String> headers = List.of("Paid", "Source", "Period", "Excluded?", "Notes", "Amount");
-        int[] alignments = {
+        // Also include employees who have earnings but no payouts in the date range
+        List<Map<String, Object>> unpaidEmployees = new ArrayList<>();
+        if (payroll != null) {
+            List<Map<String, Object>> empList = (List<Map<String, Object>>) payroll.get("employees");
+            if (empList != null) {
+                for (Map<String, Object> emp : empList) {
+                    String uid = String.valueOf(emp.getOrDefault("userId", ""));
+                    double earned = bigDec(emp.get("totalPay")).doubleValue();
+                    if (!byUser.containsKey(uid) && earned > 0.005) {
+                        unpaidEmployees.add(emp);
+                    }
+                }
+            }
+        }
+
+        String subtitle = payroll != null
+                ? "Earnings vs. payouts per employee · " + from.format(MONTH_LABEL) + " → " + to.format(MONTH_LABEL)
+                : excludedAmount.signum() > 0
+                    ? "Grouped by employee. Items marked Excluded? = Yes don't move the treasury balance."
+                    : "Grouped by employee, ordered by total paid (highest first).";
+
+        float[] payWidths = {2.0f, 1.4f, 2.6f, 1.5f, 1.6f, 1.7f};
+        List<String> payHeaders = List.of("Paid on", "Source", "Period", "Off-books?", "Notes", "Amount");
+        int[] payAlignments = {
                 Element.ALIGN_LEFT, Element.ALIGN_LEFT, Element.ALIGN_LEFT,
-                Element.ALIGN_LEFT, Element.ALIGN_LEFT, Element.ALIGN_RIGHT
+                Element.ALIGN_CENTER, Element.ALIGN_LEFT, Element.ALIGN_RIGHT
         };
 
-        String subtitle = excludedAmount.signum() > 0
-                ? "Grouped by employee. Items marked Excluded? = Yes don't move the treasury balance."
-                : "Grouped by employee, ordered by total paid (highest first).";
+        final Map<String, Map<String, Object>> empLookup = empByUserId;
+        final List<Map<String, Object>> noPayouts = unpaidEmployees;
+        final boolean hasPayroll = payroll != null;
+        final BigDecimal tEarned = totalEarned;
+        final BigDecimal tRemaining = totalRemaining;
+
         PdfReport report = new PdfReport("Payouts statement", from, to, kpis, subtitle);
         report.build(doc -> {
+            // ── Earnings summary table (only when payroll data available) ──────
+            if (hasPayroll && !empLookup.isEmpty()) {
+                // Collect all employees with any activity
+                List<Map<String, Object>> allEmps = new ArrayList<>(empLookup.values());
+                allEmps.sort((a, b) -> bigDec(b.get("totalPay")).compareTo(bigDec(a.get("totalPay"))));
+                List<Map<String, Object>> active = allEmps.stream()
+                        .filter(e -> bigDec(e.get("totalPay")).compareTo(BigDecimal.ZERO) > 0
+                                  || bigDec(e.get("paidAmount")).compareTo(BigDecimal.ZERO) > 0)
+                        .toList();
+                if (!active.isEmpty()) {
+                    report.sectionHeader("Earnings summary",
+                            active.size() + " cashier" + (active.size() == 1 ? "" : "s"),
+                            "Earned " + money(tEarned) + " · Remaining " + money(tRemaining));
+
+                    float[] sumWidths = {2.2f, 0.8f, 1.8f, 1.6f, 1.6f, 1.6f, 1.4f};
+                    PdfPTable sumTable = report.tableStart(sumWidths,
+                            List.of("Employee", "Shifts", "Pay type", "Earned", "Paid", "Remaining", "Status"),
+                            new int[]{Element.ALIGN_LEFT, Element.ALIGN_CENTER, Element.ALIGN_LEFT,
+                                      Element.ALIGN_RIGHT, Element.ALIGN_RIGHT, Element.ALIGN_RIGHT, Element.ALIGN_CENTER});
+                    int si = 0;
+                    for (Map<String, Object> emp : active) {
+                        Color bg = (si++ & 1) == 1 ? ZEBRA : Color.WHITE;
+                        BigDecimal earned = bigDec(emp.get("totalPay"));
+                        BigDecimal paid = bigDec(emp.get("paidAmount"));
+                        BigDecimal remaining = bigDec(emp.get("remainingPay"));
+                        if (remaining.signum() < 0) remaining = BigDecimal.ZERO;
+                        boolean fullyPaid = Boolean.TRUE.equals(emp.get("fullyPaid"));
+                        String status = fullyPaid ? "Paid" : paid.compareTo(BigDecimal.ZERO) > 0 ? "Partial" : "Unpaid";
+                        int shifts = emp.get("shiftCount") instanceof Number n ? n.intValue() : 0;
+                        String payTypeLabel = safeStr(emp.get("payTypeLabel"), "—");
+
+                        report.bodyCell(sumTable, safeStr(emp.get("name"), "—"), Element.ALIGN_LEFT, bg);
+                        report.bodyCell(sumTable, String.valueOf(shifts), Element.ALIGN_CENTER, bg);
+                        report.bodyCell(sumTable, payTypeLabel, Element.ALIGN_LEFT, bg);
+                        report.bodyCell(sumTable, money(earned), Element.ALIGN_RIGHT, bg);
+                        report.bodyCell(sumTable, paid.compareTo(BigDecimal.ZERO) > 0 ? money(paid) : "—", Element.ALIGN_RIGHT, bg);
+                        report.bodyCell(sumTable, remaining.compareTo(new BigDecimal("0.01")) > 0 ? money(remaining) : (earned.compareTo(BigDecimal.ZERO) > 0 ? "✓" : "—"), Element.ALIGN_RIGHT, bg);
+                        report.bodyCell(sumTable, status, Element.ALIGN_CENTER, bg);
+                    }
+                    // Totals footer
+                    Font sumFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9, Color.WHITE);
+                    BigDecimal grandEarned = active.stream().map(e -> bigDec(e.get("totalPay"))).reduce(BigDecimal.ZERO, BigDecimal::add);
+                    BigDecimal grandPaid = active.stream().map(e -> bigDec(e.get("paidAmount"))).reduce(BigDecimal.ZERO, BigDecimal::add);
+                    BigDecimal grandRem = active.stream().map(e -> { BigDecimal r = bigDec(e.get("remainingPay")); return r.signum() < 0 ? BigDecimal.ZERO : r; }).reduce(BigDecimal.ZERO, BigDecimal::add);
+                    PdfPCell totLabel = new PdfPCell(new Phrase("Total (" + active.size() + ")", sumFont));
+                    totLabel.setColspan(3);
+                    totLabel.setBackgroundColor(BRAND_INK);
+                    totLabel.setBorderColor(BRAND_INK);
+                    totLabel.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                    totLabel.setPadding(6f);
+                    sumTable.addCell(totLabel);
+                    for (String v : new String[]{money(grandEarned), money(grandPaid), money(grandRem), ""}) {
+                        PdfPCell tc = new PdfPCell(new Phrase(v, sumFont));
+                        tc.setBackgroundColor(BRAND_INK);
+                        tc.setBorderColor(BRAND_INK);
+                        tc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                        tc.setPadding(6f);
+                        sumTable.addCell(tc);
+                    }
+                    doc.add(sumTable);
+                    report.spacer(doc, 12f);
+                }
+            }
+
+            // ── Per-employee payment sections ─────────────────────────────────
             for (var entry : sections) {
                 List<SalaryPayment> items = entry.getValue().stream()
                         .sorted(Comparator.comparing(SalaryPayment::getPaidDate).reversed())
                         .toList();
                 BigDecimal subtotal = sum(items, SalaryPayment::getAmount);
                 String employee = names.getOrDefault(entry.getKey(), "Unknown");
-                report.sectionHeader(employee,
-                        items.size() + " payment" + (items.size() == 1 ? "" : "s"),
-                        money(subtotal));
-                PdfPTable table = report.tableStart(widths, headers, alignments);
+
+                Map<String, Object> emp = empLookup.get(entry.getKey());
+                BigDecimal earned = emp != null ? bigDec(emp.get("totalPay")) : null;
+                BigDecimal empRemaining = emp != null ? bigDec(emp.get("remainingPay")) : null;
+                if (empRemaining != null && empRemaining.signum() < 0) empRemaining = BigDecimal.ZERO;
+
+                // Section header: name · N payments · "Earned X"
+                String sectionMeta = items.size() + " payment" + (items.size() == 1 ? "" : "s");
+                if (earned != null) sectionMeta += " · Earned " + money(earned);
+                report.sectionHeader(employee, sectionMeta, money(subtotal));
+
+                // Earnings context bar
+                if (emp != null) {
+                    String payTypeLabel = safeStr(emp.get("payTypeLabel"), "");
+                    String payAmt = safeStr(emp.get("payAmount"), "");
+                    String payAmtLabel = safeStr(emp.get("payAmountLabel"), "");
+                    int shiftCount = emp.get("shiftCount") instanceof Number n ? n.intValue() : 0;
+                    String calcSummary = safeStr(emp.get("calculationSummary"), "");
+
+                    PdfPTable ctx = new PdfPTable(new float[]{1f, 1f, 1f, 1f});
+                    ctx.setWidthPercentage(100);
+                    ctx.setSpacingBefore(4f);
+                    ctx.setSpacingAfter(4f);
+                    Font lblF = FontFactory.getFont(FontFactory.HELVETICA, 7, MUTED);
+                    Font valF = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9, BRAND_INK);
+                    for (String[] pair : new String[][]{
+                            {"PAY TYPE", payTypeLabel},
+                            {"RATE", payAmt + (payAmtLabel.isBlank() ? "" : " " + payAmtLabel)},
+                            {"SHIFTS THIS PERIOD", String.valueOf(shiftCount)},
+                            {"REMAINING", empRemaining != null && empRemaining.compareTo(new BigDecimal("0.01")) > 0
+                                    ? money(empRemaining) : "—"}}) {
+                        PdfPCell c = new PdfPCell();
+                        c.setBackgroundColor(BRAND_CREAM);
+                        c.setBorderColor(GRID_LINE);
+                        c.setBorderWidth(0.5f);
+                        c.setPadding(6f);
+                        Paragraph lbl = new Paragraph(pair[0], lblF);
+                        lbl.setSpacingAfter(2f);
+                        c.addElement(lbl);
+                        c.addElement(new Paragraph(pair[1], valF));
+                        ctx.addCell(c);
+                    }
+                    doc.add(ctx);
+
+                    if (!calcSummary.isBlank()) {
+                        Paragraph calc = new Paragraph(calcSummary,
+                                FontFactory.getFont(FontFactory.HELVETICA, 8, MUTED));
+                        calc.setSpacingBefore(2f);
+                        calc.setSpacingAfter(4f);
+                        doc.add(calc);
+                    }
+                }
+
+                PdfPTable table = report.tableStart(payWidths, payHeaders, payAlignments);
                 int i = 0;
                 for (SalaryPayment p : items) {
                     Color bg = (i++ & 1) == 1 ? ZEBRA : Color.WHITE;
                     report.bodyCell(table, dateShort(p.getPaidDate()), Element.ALIGN_LEFT, bg);
                     report.bodyCell(table, sourceLabel(p.getPaymentSource()), Element.ALIGN_LEFT, bg);
                     report.bodyCell(table, periodLabel(p.getPeriodFrom(), p.getPeriodTo()), Element.ALIGN_LEFT, bg);
-                    report.bodyCell(table, p.isExcludeFromTreasury() ? "Yes" : "No", Element.ALIGN_LEFT, bg);
-                    report.bodyCell(table, truncate(p.getNotes(), 60), Element.ALIGN_LEFT, bg);
+                    report.bodyCell(table, p.isExcludeFromTreasury() ? "Yes" : "No", Element.ALIGN_CENTER, bg);
+                    report.bodyCell(table, truncate(p.getNotes(), 50), Element.ALIGN_LEFT, bg);
                     report.bodyCell(table, money(p.getAmount()), Element.ALIGN_RIGHT, bg);
                 }
-                report.subtotalRow(table, "Subtotal · " + employee, money(subtotal), widths.length, widths.length - 1);
+                report.subtotalRow(table, "Paid out · " + employee, money(subtotal), payWidths.length, payWidths.length - 1);
                 doc.add(table);
-                report.spacer(doc, 8f);
+                report.spacer(doc, 10f);
             }
-            report.grandTotal(doc, "Total paid out", money(totalPaid));
+
+            // ── Employees with earned pay but no recorded payouts ─────────────
+            if (!noPayouts.isEmpty()) {
+                report.sectionHeader("No payouts recorded",
+                        noPayouts.size() + " employee" + (noPayouts.size() == 1 ? "" : "s") + " with unpaid balance",
+                        "");
+                float[] npWidths = {2.5f, 1.0f, 2.0f, 1.6f, 1.6f};
+                PdfPTable npTable = report.tableStart(npWidths,
+                        List.of("Employee", "Shifts", "Pay type", "Earned", "Remaining"),
+                        new int[]{Element.ALIGN_LEFT, Element.ALIGN_CENTER, Element.ALIGN_LEFT,
+                                  Element.ALIGN_RIGHT, Element.ALIGN_RIGHT});
+                int ni = 0;
+                for (Map<String, Object> emp : noPayouts) {
+                    Color bg = (ni++ & 1) == 1 ? ZEBRA : Color.WHITE;
+                    int shiftCount = emp.get("shiftCount") instanceof Number n ? n.intValue() : 0;
+                    BigDecimal earned = bigDec(emp.get("totalPay"));
+                    BigDecimal remaining = bigDec(emp.get("remainingPay"));
+                    if (remaining.signum() < 0) remaining = BigDecimal.ZERO;
+                    report.bodyCell(npTable, safeStr(emp.get("name"), "—"), Element.ALIGN_LEFT, bg);
+                    report.bodyCell(npTable, String.valueOf(shiftCount), Element.ALIGN_CENTER, bg);
+                    report.bodyCell(npTable, safeStr(emp.get("payTypeLabel"), "—"), Element.ALIGN_LEFT, bg);
+                    report.bodyCell(npTable, money(earned), Element.ALIGN_RIGHT, bg);
+                    report.bodyCell(npTable, money(remaining), Element.ALIGN_RIGHT, bg);
+                }
+                doc.add(npTable);
+                report.spacer(doc, 10f);
+            }
+
+            // ── Grand total ───────────────────────────────────────────────────
+            if (hasPayroll) {
+                report.grandTotalMulti(doc, "Summary",
+                        new String[]{"Earned " + money(tEarned),
+                                     "Paid " + money(totalPaid),
+                                     "Remaining " + money(tRemaining)});
+            } else {
+                report.grandTotal(doc, "Total paid out", money(totalPaid));
+            }
         });
         return report.finish("payouts", from, to);
+    }
+
+    /** Parse a numeric value from a Map (Object may be BigDecimal, Double, String). */
+    private static BigDecimal bigDec(Object v) {
+        if (v == null) return BigDecimal.ZERO;
+        if (v instanceof BigDecimal bd) return bd;
+        if (v instanceof Number n) return BigDecimal.valueOf(n.doubleValue());
+        try { return new BigDecimal(v.toString()); }
+        catch (Exception e) { return BigDecimal.ZERO; }
+    }
+
+    private static String safeStr(Object v, String fallback) {
+        return v == null ? fallback : String.valueOf(v);
     }
 
     // ========================================================================
