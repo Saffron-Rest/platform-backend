@@ -375,6 +375,7 @@ public class PosIntegrationController {
                 .map(log -> {
                     Map<String, Object> row = new LinkedHashMap<>();
                     row.put("id", log.getId());
+                    row.put("externalId", log.getExternalId());
                     row.put("receivedAt", log.getReceivedAt() != null ? log.getReceivedAt().toString() : null);
                     row.put("inserted", log.getInserted());
                     row.put("skipped", log.getSkipped());

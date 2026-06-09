@@ -266,12 +266,18 @@ public class DotykackaSyncService {
         int index = 0;
         for (JsonNode item : items) {
             long orderItemId = item.path("id").asLong();
-            String externalId = orderItemId > 0
-                    ? String.valueOf(orderItemId)
-                    : (orderId + "#" + index);
+            // Use orderId#itemId so baseReceiptId() can strip the suffix and group
+            // all lines from the same order into one receipt in the webhook-log view.
+            String externalId = orderId + "#" + (orderItemId > 0 ? orderItemId : index);
             index++;
 
             if (saleRepository.findByIntegrationIdAndExternalId(integration.getId(), externalId).isPresent()) {
+                stats.skipped++;
+                continue;
+            }
+            // Backward-compat: old records were stored as plain orderItemId without the order prefix.
+            if (orderItemId > 0 && saleRepository.findByIntegrationIdAndExternalId(
+                    integration.getId(), String.valueOf(orderItemId)).isPresent()) {
                 stats.skipped++;
                 continue;
             }
