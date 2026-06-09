@@ -174,14 +174,14 @@ public class MenuService {
                     .map(MenuCategory::getId)
                     .forEach(categoryIds::add);
             items = categoryIds.size() == 1
-                    ? itemRepository.findAllByCategoryIdOrderByNameAsc(categoryId)
-                    : itemRepository.findAllByOrderByNameAsc().stream()
+                    ? itemRepository.findAllByCategoryIdOrderByDisplayOrderAscNameAsc(categoryId)
+                    : itemRepository.findAllByOrderByDisplayOrderAscNameAsc().stream()
                             .filter(i -> categoryIds.contains(i.getCategoryId()))
                             .toList();
         } else if (!includeArchived) {
-            items = itemRepository.findAllByActiveTrueOrderByNameAsc();
+            items = itemRepository.findAllByActiveTrueOrderByDisplayOrderAscNameAsc();
         } else {
-            items = itemRepository.findAllByOrderByNameAsc();
+            items = itemRepository.findAllByOrderByDisplayOrderAscNameAsc();
         }
         Map<String, MenuCategory> catsById = categoriesById();
         return items.stream().map(i -> itemToMap(i, catsById.get(i.getCategoryId()))).toList();
@@ -289,6 +289,7 @@ public class MenuService {
             if (!req.active() && wasActive) item.setArchivedAt(Instant.now());
             if (req.active() && !wasActive) item.setArchivedAt(null);
         }
+        if (req.displayOrder() != null) item.setDisplayOrder(req.displayOrder());
         item = itemRepository.save(item);
 
         auditService.logChange(AuthHelper.currentUser().id(), AuditAction.UPDATE, "MenuItem", item.getId(),
@@ -625,6 +626,7 @@ public class MenuService {
         m.put("foodCost", item.getFoodCost());
         m.put("vatRatePct", item.getVatRatePct());
         m.put("active", item.isActive());
+        m.put("displayOrder", item.getDisplayOrder());
         // Display-only margin so the UI doesn't need to recompute.
         if (item.getFoodCost() != null && item.getSellPrice() != null
                 && item.getSellPrice().signum() > 0) {
@@ -731,7 +733,9 @@ public class MenuService {
              * JSON array of variants, e.g. {@code [{"name":"Small","price":15},{"name":"Large"}]}.
              * Null / empty string clears any existing variants.
              */
-            String variants) {
+            String variants,
+            /** Display order within the item's category on the menu. Lower = first. */
+            Integer displayOrder) {
         public MenuItemRequest {
             Objects.requireNonNullElse(name, "");
         }

@@ -8,6 +8,13 @@ import java.util.Optional;
 
 public interface MenuItemRepository extends JpaRepository<MenuItem, String> {
 
+    List<MenuItem> findAllByOrderByDisplayOrderAscNameAsc();
+
+    List<MenuItem> findAllByCategoryIdOrderByDisplayOrderAscNameAsc(String categoryId);
+
+    List<MenuItem> findAllByActiveTrueOrderByDisplayOrderAscNameAsc();
+
+    // Legacy name-only queries (used by analytics / import helpers that don't need display order)
     List<MenuItem> findAllByOrderByNameAsc();
 
     List<MenuItem> findAllByCategoryIdOrderByNameAsc(String categoryId);

@@ -97,6 +97,10 @@ public class MenuItem {
     @Column(name = "pos_display_order", nullable = false, columnDefinition = "integer default 0")
     private int posDisplayOrder = 0;
 
+    /** Display order on the printable menu / admin UI within its category. Lower numbers appear first. */
+    @Column(name = "display_order", nullable = false, columnDefinition = "integer default 0")
+    private int displayOrder = 0;
+
     @Column(name = "is_active", nullable = false)
     private boolean active = true;
 
@@ -157,6 +161,8 @@ public class MenuItem {
     public void setPosAvailable(boolean posAvailable) { this.posAvailable = posAvailable; }
     public int getPosDisplayOrder() { return posDisplayOrder; }
     public void setPosDisplayOrder(int posDisplayOrder) { this.posDisplayOrder = posDisplayOrder; }
+    public int getDisplayOrder() { return displayOrder; }
+    public void setDisplayOrder(int displayOrder) { this.displayOrder = displayOrder; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public Instant getArchivedAt() { return archivedAt; }
