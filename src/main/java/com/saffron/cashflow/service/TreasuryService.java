@@ -13,6 +13,7 @@ import com.saffron.cashflow.domain.OwnerExpenseReimbursement;
 import com.saffron.cashflow.domain.PaymentSource;
 import com.saffron.cashflow.domain.Permission;
 import com.saffron.cashflow.domain.SalaryPayment;
+import com.saffron.cashflow.domain.SupplierInvoice;
 import com.saffron.cashflow.domain.SupplierInvoicePayment;
 import com.saffron.cashflow.domain.SystemSetting;
 import com.saffron.cashflow.domain.User;
@@ -22,6 +23,7 @@ import com.saffron.cashflow.dto.UpdateSalaryPaymentRequest;
 import com.saffron.cashflow.repository.DailyEntryRepository;
 import com.saffron.cashflow.repository.OwnerExpenseReimbursementRepository;
 import com.saffron.cashflow.repository.SalaryPaymentRepository;
+import com.saffron.cashflow.repository.SupplierInvoicePaymentRepository;
 import com.saffron.cashflow.repository.SystemSettingRepository;
 import com.saffron.cashflow.repository.UserRepository;
 import com.saffron.cashflow.security.AuthHelper;
@@ -69,6 +71,7 @@ public class TreasuryService {
     // transfers / cheques / "other" are bookkeeping-only here because
     // the till and card accounts didn't move.
     private final OwnerExpenseReimbursementRepository ownerReimbursementRepository;
+    private final SupplierInvoicePaymentRepository supplierInvoicePaymentRepository;
 
     public TreasuryService(
             SystemSettingRepository settingRepository,
@@ -82,7 +85,8 @@ public class TreasuryService {
             BankDepositService bankDepositService,
             @Lazy TagService tagService,
             @Lazy CommentService commentService,
-            OwnerExpenseReimbursementRepository ownerReimbursementRepository) {
+            OwnerExpenseReimbursementRepository ownerReimbursementRepository,
+            SupplierInvoicePaymentRepository supplierInvoicePaymentRepository) {
         this.settingRepository = settingRepository;
         this.entryRepository = entryRepository;
         this.salaryPaymentRepository = salaryPaymentRepository;
@@ -95,6 +99,7 @@ public class TreasuryService {
         this.tagService = tagService;
         this.commentService = commentService;
         this.ownerReimbursementRepository = ownerReimbursementRepository;
+        this.supplierInvoicePaymentRepository = supplierInvoicePaymentRepository;
     }
 
     /** Default settlement % — any logged-in user (for shift report form). */
@@ -224,6 +229,25 @@ public class TreasuryService {
             }
         }
 
+        // Supplier invoice payments (payables): CASH reduces the drawer,
+        // CARD and BANK_TRANSFER reduce the card/bank balance.
+        BigDecimal payableCashOut = BigDecimal.ZERO;
+        BigDecimal payableCashOutPostCount = BigDecimal.ZERO;
+        BigDecimal payableCardOut = BigDecimal.ZERO;
+        for (SupplierInvoicePayment p : supplierInvoicePaymentRepository.findByPaymentDateBetween(from, to)) {
+            if (p.getAmount() == null || p.getAmount().signum() <= 0) continue;
+            PaymentSource src = methodToLedgerSource(p.getMethod());
+            if (src == null) continue;
+            if (src == PaymentSource.CASH) {
+                payableCashOut = payableCashOut.add(p.getAmount());
+                if (isAfterCutoff(p.getPaymentDate(), p.getCreatedAt(), cutoff, cutoffStamp)) {
+                    payableCashOutPostCount = payableCashOutPostCount.add(p.getAmount());
+                }
+            } else {
+                payableCardOut = payableCardOut.add(p.getAmount());
+            }
+        }
+
         BigDecimal cashRaw = latestCount
                 .map(DailyEntry::getActualCashCounted)
                 .orElse(settings.getInitialCashBalance());
@@ -232,18 +256,21 @@ public class TreasuryService {
         // flips between this baseline and the fully-adjusted balance).
         BigDecimal cashBalanceBeforeSalary = cashRaw
                 .subtract(standaloneCashExpensesPostCount)
-                .subtract(ownerCashOutPostCount);
+                .subtract(ownerCashOutPostCount)
+                .subtract(payableCashOutPostCount);
         BigDecimal cashBalance = cashBalanceBeforeSalary.subtract(salaryCashOutPostCount);
         // Card balance stays cumulative (no physical count).
         BigDecimal cardBalanceBeforeSalary = settings.getInitialCardBalance().add(cardFromEntries);
         BigDecimal cardBalance = cardBalanceBeforeSalary
                 .subtract(salaryCardOut)
-                .subtract(ownerCardOut);
+                .subtract(ownerCardOut)
+                .subtract(payableCardOut);
         // Cumulative cash balance kept for reference / cross-checks.
         BigDecimal cashComputedBalance = settings.getInitialCashBalance()
                 .add(cashFromEntries)
                 .subtract(salaryCashOut)
-                .subtract(ownerCashOut);
+                .subtract(ownerCashOut)
+                .subtract(payableCashOut);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("settings", settings.toApiMap());
@@ -359,17 +386,17 @@ public class TreasuryService {
     /**
      * Map a supplier-/owner-payment method onto the till/card ledger.
      *
-     * <p>{@code BANK_TRANSFER}, {@code CHEQUE}, and {@code OTHER} are
-     * real money movements but they happen at the bank — neither the
-     * cash drawer nor the card account are touched, so we return
-     * {@code null} and skip them on this ledger.</p>
+     * <p>{@code BANK_TRANSFER} is treated as a card/bank-account movement —
+     * the money leaves the restaurant's bank account, which is the same
+     * ledger as card payments. {@code CHEQUE} and {@code OTHER} remain
+     * bookkeeping-only and do not move any balance.</p>
      */
     private static PaymentSource methodToLedgerSource(SupplierInvoicePayment.PaymentMethod method) {
         if (method == null) return null;
         return switch (method) {
             case CASH -> PaymentSource.CASH;
-            case CARD -> PaymentSource.CARD;
-            case BANK_TRANSFER, CHEQUE, OTHER -> null;
+            case CARD, BANK_TRANSFER -> PaymentSource.CARD;
+            case CHEQUE, OTHER -> null;
         };
     }
 
@@ -557,6 +584,41 @@ public class TreasuryService {
             } else if (r.getNotes() != null && !r.getNotes().isBlank()) {
                 row.put("notes", r.getNotes());
             }
+            rows.add(row);
+        }
+
+        // 6) Supplier invoice payments (payables): CASH from the drawer,
+        //    CARD/BANK_TRANSFER from the bank account.
+        for (SupplierInvoicePayment p : supplierInvoicePaymentRepository.findByPaymentDateBetween(from, to)) {
+            PaymentSource ledgerSource = methodToLedgerSource(p.getMethod());
+            if (ledgerSource == null || ledgerSource != source) continue;
+            BigDecimal amt = p.getAmount();
+            if (amt == null || amt.signum() <= 0) continue;
+            SupplierInvoice inv = p.getInvoice();
+            String supplierName = (inv != null && inv.getSupplier() != null)
+                    ? inv.getSupplier().getName() : "Supplier";
+            String label = "Payable · " + supplierName;
+            if (inv != null && inv.getInvoiceNumber() != null && !inv.getInvoiceNumber().isBlank()) {
+                label += " (" + inv.getInvoiceNumber() + ")";
+            }
+            Map<String, Object> row = baseRow(
+                    p.getPaymentDate().toString(),
+                    "PAYABLE_PAYMENT",
+                    "STANDALONE_EXPENSE",
+                    label,
+                    amt,
+                    "-",
+                    "/reports?tab=payables",
+                    "Open payables",
+                    p.getId());
+            String notesParts = "";
+            if (p.getReference() != null && !p.getReference().isBlank()) {
+                notesParts = "Ref " + p.getReference();
+            }
+            if (p.getNotes() != null && !p.getNotes().isBlank()) {
+                notesParts = notesParts.isBlank() ? p.getNotes() : notesParts + " · " + p.getNotes();
+            }
+            if (!notesParts.isBlank()) row.put("notes", notesParts);
             rows.add(row);
         }
 
