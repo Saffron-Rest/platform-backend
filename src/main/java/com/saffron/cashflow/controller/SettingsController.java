@@ -42,4 +42,23 @@ public class SettingsController {
         }
         return settingsService.updatePayrollSettings(map);
     }
+
+    @GetMapping("/ai")
+    public Map<String, Object> getAiSettings() {
+        String key = settingsService.loadGeminiApiKey();
+        return Map.of(
+            "geminiApiKey", key,
+            "configured", !key.isBlank()
+        );
+    }
+
+    @PutMapping("/ai")
+    public Map<String, Object> saveAiSettings(@RequestBody Map<String, String> body) {
+        settingsService.saveGeminiApiKey(body.get("geminiApiKey"));
+        String key = settingsService.loadGeminiApiKey();
+        return Map.of(
+            "geminiApiKey", key,
+            "configured", !key.isBlank()
+        );
+    }
 }

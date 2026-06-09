@@ -20,6 +20,7 @@ public class SettingsService {
 
     private static final String PLATFORMS_KEY = "platforms";
     private static final String PAYROLL_KEY = "payroll";
+    private static final String AI_ADVISOR_KEY = "ai_advisor";
 
     private final SystemSettingRepository settingRepository;
     private final AuditService auditService;
@@ -127,5 +128,26 @@ public class SettingsService {
 
     public static Map<String, Boolean> defaultPlatforms() {
         return Map.of("wolt", true, "bolt", true, "uberEats", true, "glovo", true, "other", true);
+    }
+
+    /** Returns the stored Gemini API key (empty string if not set). Any authenticated user can read it. */
+    public String loadGeminiApiKey() {
+        return settingRepository.findById(AI_ADVISOR_KEY)
+                .map(s -> {
+                    Object k = s.getValue().get("geminiApiKey");
+                    return k != null ? k.toString() : "";
+                })
+                .orElse("");
+    }
+
+    @Transactional
+    public void saveGeminiApiKey(String apiKey) {
+        AuthHelper.requireAdmin();
+        SystemSetting setting = settingRepository.findById(AI_ADVISOR_KEY).orElse(new SystemSetting());
+        setting.setKey(AI_ADVISOR_KEY);
+        Map<String, Object> value = new LinkedHashMap<>();
+        value.put("geminiApiKey", apiKey == null ? "" : apiKey.trim());
+        setting.setValue(value);
+        settingRepository.save(setting);
     }
 }
