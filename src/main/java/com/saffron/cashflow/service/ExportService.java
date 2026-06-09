@@ -363,7 +363,8 @@ public class ExportService {
                 .toList();
         Format format = f.format() == null ? Format.CSV : f.format();
         if (format == Format.PDF) {
-            return buildPayoutsPdf(rows, names, from, to);
+            return buildPayoutsPdf(rows, names, from, to,
+                    f.cashierId() != null && !f.cashierId().isBlank() ? f.cashierId() : null);
         }
         List<String> headers = List.of(
                 "Paid date", "Employee", "Amount (PLN)", "Source",
@@ -382,7 +383,7 @@ public class ExportService {
 
     @SuppressWarnings("unchecked")
     private ExportResult buildPayoutsPdf(List<SalaryPayment> rows, Map<String, String> names,
-                                          LocalDate from, LocalDate to) {
+                                          LocalDate from, LocalDate to, String cashierId) {
         BigDecimal totalPaid = sum(rows, SalaryPayment::getAmount);
         BigDecimal cashPaid = sum(rows.stream()
                 .filter(p -> p.getPaymentSource() == PaymentSource.CASH).toList(),
@@ -400,7 +401,7 @@ public class ExportService {
             payroll = salaryService.calculate(from.toString(), to.toString());
         } catch (Exception ignored) { /* no salary permission — run without earnings data */ }
 
-        // Build per-userId lookup from payroll employees list
+        // Build per-userId lookup — filter to selected cashier when one is chosen
         Map<String, Map<String, Object>> empByUserId = new LinkedHashMap<>();
         BigDecimal totalEarned = BigDecimal.ZERO;
         BigDecimal totalRemaining = BigDecimal.ZERO;
@@ -409,11 +410,29 @@ public class ExportService {
             if (empList != null) {
                 for (Map<String, Object> emp : empList) {
                     String uid = String.valueOf(emp.getOrDefault("userId", ""));
-                    empByUserId.put(uid, emp);
+                    if (cashierId == null || cashierId.equals(uid)) {
+                        empByUserId.put(uid, emp);
+                    }
                 }
             }
-            totalEarned = bigDec(payroll.get("grandTotalPay"));
-            totalRemaining = bigDec(payroll.get("grandTotalRemaining"));
+            if (cashierId != null && !empByUserId.isEmpty()) {
+                // Compute totals from the filtered set only
+                for (Map<String, Object> emp : empByUserId.values()) {
+                    totalEarned    = totalEarned.add(bigDec(emp.get("totalPay")));
+                    BigDecimal rem = bigDec(emp.get("remainingPay"));
+                    totalRemaining = totalRemaining.add(rem.signum() < 0 ? BigDecimal.ZERO : rem);
+                }
+            } else if (cashierId == null) {
+                totalEarned    = bigDec(payroll.get("grandTotalPay"));
+                totalRemaining = bigDec(payroll.get("grandTotalRemaining"));
+            }
+        }
+
+        // Single-cashier selected → render a detailed personal report
+        if (cashierId != null) {
+            Map<String, Object> emp = empByUserId.get(cashierId);
+            String cashierName = names.getOrDefault(cashierId, "Unknown cashier");
+            return buildSingleCashierPayoutsPdf(rows, cashierName, emp, from, to);
         }
 
         long distinctEmployees = rows.stream().map(SalaryPayment::getUserId).distinct().count();
@@ -661,6 +680,209 @@ public class ExportService {
             }
         });
         return report.finish("payouts", from, to);
+    }
+
+    // ========================================================================
+    // Single-cashier detailed payout report
+    // ========================================================================
+
+    /**
+     * Detailed PDF for one cashier: personal KPIs, shift-by-shift breakdown,
+     * and full payment ledger — generated when the cashier filter is set.
+     */
+    @SuppressWarnings("unchecked")
+    private ExportResult buildSingleCashierPayoutsPdf(
+            List<SalaryPayment> payments,
+            String cashierName,
+            Map<String, Object> emp,   // nullable when no payroll data
+            LocalDate from,
+            LocalDate to) {
+
+        BigDecimal totalPaid = sum(payments, SalaryPayment::getAmount);
+        BigDecimal cashPaid = sum(payments.stream()
+                .filter(p -> p.getPaymentSource() == PaymentSource.CASH).toList(),
+                SalaryPayment::getAmount);
+        BigDecimal cardPaid = sum(payments.stream()
+                .filter(p -> p.getPaymentSource() == PaymentSource.CARD).toList(),
+                SalaryPayment::getAmount);
+        BigDecimal earned    = emp != null ? bigDec(emp.get("totalPay")) : null;
+        BigDecimal remaining = emp != null ? bigDec(emp.get("remainingPay")) : null;
+        if (remaining != null && remaining.signum() < 0) remaining = BigDecimal.ZERO;
+
+        // KPIs
+        List<Kpi> kpis;
+        if (earned != null) {
+            kpis = List.of(
+                    kpi("Earned", money(earned)),
+                    kpi("Paid out", money(totalPaid)),
+                    kpi("Remaining", money(remaining != null ? remaining : BigDecimal.ZERO)),
+                    kpi("Payments", String.valueOf(payments.size())));
+        } else {
+            kpis = List.of(
+                    kpi("Total paid", money(totalPaid)),
+                    kpi("Cash", money(cashPaid)),
+                    kpi("Card", money(cardPaid)),
+                    kpi("Payments", String.valueOf(payments.size())));
+        }
+
+        String subtitle = "Detailed payouts report for " + cashierName + " · " +
+                from.format(MONTH_LABEL) + " → " + to.format(MONTH_LABEL);
+        PdfReport report = new PdfReport("Payouts – " + cashierName, from, to, kpis, subtitle);
+
+        final BigDecimal fEarned = earned;
+        final BigDecimal fRemaining = remaining;
+        final BigDecimal fTotalPaid = totalPaid;
+
+        report.build(doc -> {
+            Font sectionFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 9, BRAND_INK);
+            Font bodyFont = FontFactory.getFont(FontFactory.HELVETICA, 9, BRAND_INK);
+            Font mutedFont = FontFactory.getFont(FontFactory.HELVETICA, 8, MUTED);
+
+            // ── Payroll details card ─────────────────────────────────────────
+            if (emp != null) {
+                String payTypeLabel  = safeStr(emp.get("payTypeLabel"), "—");
+                String payAmt        = safeStr(emp.get("payAmount"), "—");
+                String payAmtLabel   = safeStr(emp.get("payAmountLabel"), "");
+                int shiftCount       = emp.get("shiftCount") instanceof Number n ? n.intValue() : 0;
+                double totalHours    = emp.get("totalHours") instanceof Number n ? n.doubleValue() : 0;
+                String calcSummary   = safeStr(emp.get("calculationSummary"), "");
+                boolean fullyPaid    = Boolean.TRUE.equals(emp.get("fullyPaid"));
+                String payStatus     = fullyPaid ? "Fully paid" : fTotalPaid.compareTo(BigDecimal.ZERO) > 0 ? "Partial" : "Unpaid";
+
+                // 6-cell info grid
+                PdfPTable info = new PdfPTable(3);
+                info.setWidthPercentage(100);
+                info.setSpacingBefore(2f);
+                info.setSpacingAfter(8f);
+                for (String[] pair : new String[][]{
+                        {"PAY TYPE",           payTypeLabel},
+                        {"RATE",               payAmt + (payAmtLabel.isBlank() ? "" : " " + payAmtLabel)},
+                        {"SHIFTS THIS PERIOD", String.valueOf(shiftCount)},
+                        {"TOTAL HOURS",        String.format(Locale.ENGLISH, "%.1f h", totalHours)},
+                        {"EARNED",             fEarned != null ? money(fEarned) : "—"},
+                        {"STATUS",             payStatus}}) {
+                    PdfPCell c = new PdfPCell();
+                    c.setBackgroundColor(BRAND_CREAM);
+                    c.setBorderColor(GRID_LINE);
+                    c.setBorderWidth(0.5f);
+                    c.setPadding(8f);
+                    Paragraph lbl = new Paragraph(pair[0],
+                            FontFactory.getFont(FontFactory.HELVETICA_BOLD, 7, MUTED));
+                    lbl.setSpacingAfter(3f);
+                    c.addElement(lbl);
+                    c.addElement(new Paragraph(pair[1],
+                            FontFactory.getFont(FontFactory.HELVETICA_BOLD, 11, BRAND_INK)));
+                    info.addCell(c);
+                }
+                doc.add(info);
+
+                if (!calcSummary.isBlank()) {
+                    Paragraph cp = new Paragraph(calcSummary, mutedFont);
+                    cp.setSpacingAfter(10f);
+                    doc.add(cp);
+                }
+
+                // ── Shift breakdown table ────────────────────────────────────
+                List<Map<String, Object>> shifts =
+                        (List<Map<String, Object>>) emp.get("shifts");
+                if (shifts != null && !shifts.isEmpty()) {
+                    report.sectionHeader("Shift breakdown",
+                            shiftCount + " shift" + (shiftCount == 1 ? "" : "s") +
+                            " · " + String.format(Locale.ENGLISH, "%.1f h", totalHours),
+                            fEarned != null ? money(fEarned) : "");
+
+                    boolean showHours = !"MONTHLY".equals(
+                            safeStr(emp.get("payType"), ""));
+
+                    float[] shiftWidths = showHours
+                            ? new float[]{2.4f, 2.0f, 1.2f, 2.2f, 1.6f}
+                            : new float[]{2.4f, 2.8f, 2.4f, 1.8f};
+                    List<String> shiftHeaders = showHours
+                            ? List.of("Date", "Schedule", "Hours", "Calculation", "Pay")
+                            : List.of("Date", "Schedule", "Calculation", "Pay");
+                    int[] shiftAligns = showHours
+                            ? new int[]{Element.ALIGN_LEFT, Element.ALIGN_LEFT,
+                                        Element.ALIGN_RIGHT, Element.ALIGN_LEFT, Element.ALIGN_RIGHT}
+                            : new int[]{Element.ALIGN_LEFT, Element.ALIGN_LEFT,
+                                        Element.ALIGN_LEFT, Element.ALIGN_RIGHT};
+
+                    PdfPTable shiftTable = report.tableStart(shiftWidths, shiftHeaders, shiftAligns);
+                    int si = 0;
+                    BigDecimal shiftTotal = BigDecimal.ZERO;
+                    for (Map<String, Object> s : shifts) {
+                        Color bg = (si++ & 1) == 1 ? ZEBRA : Color.WHITE;
+                        String date       = safeStr(s.get("date"), "—");
+                        String hoursLabel = safeStr(s.get("hoursLabel"), "—");
+                        double hrs        = s.get("hours") instanceof Number n ? n.doubleValue() : 0;
+                        BigDecimal pay    = bigDec(s.get("pay"));
+                        String payNote    = safeStr(s.get("payNote"), "");
+                        boolean est       = Boolean.TRUE.equals(s.get("tillCloseAssumed"));
+                        shiftTotal        = shiftTotal.add(pay);
+
+                        try { date = LocalDate.parse(date).format(SHORT_DATE); } catch (Exception ignored) {}
+
+                        report.bodyCell(shiftTable, date, Element.ALIGN_LEFT, bg);
+                        report.bodyCell(shiftTable, hoursLabel + (est ? " (est.)" : ""), Element.ALIGN_LEFT, bg);
+                        if (showHours) {
+                            report.bodyCell(shiftTable,
+                                    String.format(Locale.ENGLISH, "%.1f h", hrs),
+                                    Element.ALIGN_RIGHT, bg);
+                        }
+                        report.bodyCell(shiftTable, truncate(payNote, 60), Element.ALIGN_LEFT, bg);
+                        report.bodyCell(shiftTable, money(pay), Element.ALIGN_RIGHT, bg);
+                    }
+                    report.subtotalRow(shiftTable, "Total earnings", money(shiftTotal),
+                            shiftWidths.length, shiftWidths.length - 1);
+                    doc.add(shiftTable);
+                    report.spacer(doc, 10f);
+                }
+            }
+
+            // ── Payment ledger ───────────────────────────────────────────────
+            if (!payments.isEmpty()) {
+                report.sectionHeader("Payment ledger",
+                        payments.size() + " payment" + (payments.size() == 1 ? "" : "s"),
+                        money(fTotalPaid));
+
+                float[] payWidths = {2.0f, 1.4f, 2.6f, 1.6f, 1.5f, 1.7f};
+                PdfPTable payTable = report.tableStart(payWidths,
+                        List.of("Paid on", "Source", "Payroll period", "Off-books?", "Notes", "Amount"),
+                        new int[]{Element.ALIGN_LEFT, Element.ALIGN_LEFT, Element.ALIGN_LEFT,
+                                  Element.ALIGN_CENTER, Element.ALIGN_LEFT, Element.ALIGN_RIGHT});
+                int pi = 0;
+                for (SalaryPayment p : payments.stream()
+                        .sorted(Comparator.comparing(SalaryPayment::getPaidDate)).toList()) {
+                    Color bg = (pi++ & 1) == 1 ? ZEBRA : Color.WHITE;
+                    report.bodyCell(payTable, dateShort(p.getPaidDate()), Element.ALIGN_LEFT, bg);
+                    report.bodyCell(payTable, sourceLabel(p.getPaymentSource()), Element.ALIGN_LEFT, bg);
+                    report.bodyCell(payTable, periodLabel(p.getPeriodFrom(), p.getPeriodTo()), Element.ALIGN_LEFT, bg);
+                    report.bodyCell(payTable, p.isExcludeFromTreasury() ? "Yes" : "No", Element.ALIGN_CENTER, bg);
+                    report.bodyCell(payTable, truncate(p.getNotes(), 45), Element.ALIGN_LEFT, bg);
+                    report.bodyCell(payTable, money(p.getAmount()), Element.ALIGN_RIGHT, bg);
+                }
+                report.subtotalRow(payTable, "Total paid out", money(fTotalPaid),
+                        payWidths.length, payWidths.length - 1);
+                doc.add(payTable);
+                report.spacer(doc, 10f);
+            } else {
+                Paragraph noPay = new Paragraph("No payments recorded in this period.", mutedFont);
+                noPay.setSpacingBefore(8f);
+                noPay.setSpacingAfter(10f);
+                doc.add(noPay);
+            }
+
+            // ── Summary band ─────────────────────────────────────────────────
+            if (fEarned != null) {
+                report.grandTotalMulti(doc, cashierName,
+                        new String[]{"Earned " + money(fEarned),
+                                     "Paid " + money(fTotalPaid),
+                                     "Remaining " + money(fRemaining != null ? fRemaining : BigDecimal.ZERO)});
+            } else {
+                report.grandTotal(doc, "Total paid out", money(fTotalPaid));
+            }
+        });
+
+        return report.finish("payouts-" + cashierName.toLowerCase(Locale.ENGLISH).replace(' ', '-'), from, to);
     }
 
     /** Parse a numeric value from a Map (Object may be BigDecimal, Double, String). */
