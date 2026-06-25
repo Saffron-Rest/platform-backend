@@ -135,6 +135,14 @@ public class MenuPrintService {
     private static final Color DARK_GOLD  = new Color(0xE2, 0xB8, 0x58);
     private static final Color DARK_LINE  = new Color(0x3C, 0x2E, 0x1E);
 
+    // ---------- Deco theme ----------
+    private static final Color DECO_BG    = new Color(0x10, 0x1B, 0x34);
+    private static final Color DECO_GOLD  = new Color(0xC8, 0x9A, 0x28);
+    private static final Color DECO_LIGHT = new Color(0xE4, 0xCC, 0x80);
+    private static final Color DECO_TEXT  = new Color(0xF0, 0xEC, 0xE0);
+    private static final Color DECO_MUTED = new Color(0x88, 0x7E, 0x60);
+    private static final Color DECO_RULE  = new Color(0x28, 0x38, 0x58);
+
     private static final DateTimeFormatter MENU_DATE =
             DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
 
@@ -223,7 +231,14 @@ public class MenuPrintService {
                     "No active categories with items — add items in /admin/menu before printing.");
         }
 
-        Document doc = new Document(PageSize.A4, 50, 50, 64, 64);
+        boolean isA3   = opt.layout() == Layout.A3;
+        boolean isDeco = opt.layout() == Layout.DECO;
+        Rectangle pageRect = isDeco ? PageSize.A3.rotate()
+                           : isA3   ? PageSize.A3
+                                    : PageSize.A4;
+        float mSide = (isA3 || isDeco) ? 54 : 50;
+        float mTopBot = isDeco ? 54 : (isA3 ? 68 : 64);
+        Document doc = new Document(pageRect, mSide, mSide, mTopBot, mTopBot);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
             PdfWriter writer = PdfWriter.getInstance(doc, out);
@@ -231,66 +246,72 @@ public class MenuPrintService {
             writer.setPageEvent(chrome);
             doc.open();
 
-            boolean dark = opt.layout() == Layout.DARK;
-            if (dark) chrome.setTheme(DARK_PAGE, DARK_SAF, DARK_MUTED);
+            // A3 and DECO: items only — no editorial pages
+            if (isA3) {
+                chrome.setSuppressAll(true);
+                drawA3Content(doc, categories, itemsByCategory, opt.showPrices(), opt.locale());
+            } else if (isDeco) {
+                chrome.setDecoMode();
+                chrome.setSuppressAll(true);
+                drawDecoContent(doc, categories, itemsByCategory, opt.showPrices(), opt.locale());
+            } else {
+                boolean dark = opt.layout() == Layout.DARK;
+                if (dark) chrome.setTheme(DARK_PAGE, DARK_SAF, DARK_MUTED);
 
-            chrome.suppressNext();
-            if (dark) drawDarkCover(doc, writer, title, subtitle);
-            else      drawCover(doc, writer, title, subtitle);
+                chrome.suppressNext();
+                if (dark) drawDarkCover(doc, writer, title, subtitle);
+                else      drawCover(doc, writer, title, subtitle);
 
-            if (!dark) {
-                doc.newPage();
-                drawStory(doc, writer, opt);
-                doc.newPage();
-                drawHeritage(doc);
-            }
-
-            for (int ci = 0; ci < categories.size(); ci++) {
-                MenuCategory cat     = categories.get(ci);
-                List<MenuItem> items = itemsByCategory.get(cat.getId());
-                if (items == null || items.isEmpty()) continue;
-
-                float avail = ci == 0 ? 0 : writer.getVerticalPosition(false) - doc.bottomMargin();
-                boolean freshPage = ci == 0 || avail < 260f;
-                if (freshPage) doc.newPage();
-
-                if (dark) {
-                    if (freshPage) drawDarkSectionDivider(doc, cat.getName());
-                    else           drawDarkCompactDivider(doc, cat.getName());
-                } else if (opt.layout() == Layout.BOLD) {
-                    drawBoldSectionHeader(doc, cat.getName());
-                } else {
-                    if (freshPage) drawSectionDivider(doc, cat.getName());
-                    else           drawCompactSectionDivider(doc, cat.getName());
+                if (!dark) {
+                    doc.newPage(); drawStory(doc, writer, opt);
+                    doc.newPage(); drawHeritage(doc);
                 }
 
-                boolean hasVisualContent = items.stream().anyMatch(
-                        i -> (i.getImagePath() != null && !i.getImagePath().isBlank())
-                             || chooseDescription(i) != null);
-                Layout effectiveLayout = (opt.layout() == Layout.GRID && !hasVisualContent)
-                        ? Layout.LIST : opt.layout();
+                for (int ci = 0; ci < categories.size(); ci++) {
+                    MenuCategory cat     = categories.get(ci);
+                    List<MenuItem> items = itemsByCategory.get(cat.getId());
+                    if (items == null || items.isEmpty()) continue;
 
-                switch (effectiveLayout) {
-                    case GRID    -> drawGrid(doc, items, opt.showPrices(), opt.locale());
-                    case LIST    -> drawList(doc, items, opt.showPrices(), opt.locale());
-                    case COMPACT -> drawCompact(doc, items, opt.showPrices(), opt.locale());
-                    case FINE    -> drawFine(doc, items, opt.showPrices(), opt.locale());
-                    case TASTING -> drawTasting(doc, writer, items, opt.showPrices(), opt.locale());
-                    case DARK    -> drawDarkList(doc, items, opt.showPrices(), opt.locale());
-                    case BOLD    -> drawBoldList(doc, items, opt.showPrices(), opt.locale());
-                    case COLUMNS -> drawColumns(doc, items, opt.showPrices(), opt.locale());
+                    float avail = ci == 0 ? 0 : writer.getVerticalPosition(false) - doc.bottomMargin();
+                    boolean freshPage = ci == 0 || avail < 260f;
+                    if (freshPage) doc.newPage();
+
+                    if (dark) {
+                        if (freshPage) drawDarkSectionDivider(doc, cat.getName());
+                        else           drawDarkCompactDivider(doc, cat.getName());
+                    } else if (opt.layout() == Layout.BOLD) {
+                        drawBoldSectionHeader(doc, cat.getName());
+                    } else {
+                        if (freshPage) drawSectionDivider(doc, cat.getName());
+                        else           drawCompactSectionDivider(doc, cat.getName());
+                    }
+
+                    boolean hasVisualContent = items.stream().anyMatch(
+                            i -> (i.getImagePath() != null && !i.getImagePath().isBlank())
+                                 || chooseDescription(i) != null);
+                    Layout effectiveLayout = (opt.layout() == Layout.GRID && !hasVisualContent)
+                            ? Layout.LIST : opt.layout();
+
+                    switch (effectiveLayout) {
+                        case GRID    -> drawGrid(doc, items, opt.showPrices(), opt.locale());
+                        case LIST    -> drawList(doc, items, opt.showPrices(), opt.locale());
+                        case COMPACT -> drawCompact(doc, items, opt.showPrices(), opt.locale());
+                        case FINE    -> drawFine(doc, items, opt.showPrices(), opt.locale());
+                        case TASTING -> drawTasting(doc, writer, items, opt.showPrices(), opt.locale());
+                        case DARK    -> drawDarkList(doc, items, opt.showPrices(), opt.locale());
+                        case BOLD    -> drawBoldList(doc, items, opt.showPrices(), opt.locale());
+                        case COLUMNS -> drawColumns(doc, items, opt.showPrices(), opt.locale());
+                        default      -> {}
+                    }
                 }
-            }
 
-            if (!dark) {
+                if (!dark) { doc.newPage(); drawAllergens(doc); }
+
                 doc.newPage();
-                drawAllergens(doc);
+                chrome.suppressNext();
+                if (dark) drawDarkClosing(doc, writer, opt);
+                else      drawClosing(doc, writer, opt);
             }
-
-            doc.newPage();
-            chrome.suppressNext();
-            if (dark) drawDarkClosing(doc, writer, opt);
-            else      drawClosing(doc, writer, opt);
 
             doc.close();
             return out.toByteArray();
@@ -300,7 +321,7 @@ public class MenuPrintService {
     }
 
     public enum Layout {
-        GRID, LIST, COMPACT, FINE, TASTING, DARK, BOLD, COLUMNS;
+        GRID, LIST, COMPACT, FINE, TASTING, DARK, BOLD, COLUMNS, A3, DECO;
         public static Layout from(String key) {
             if (key == null) return GRID;
             return switch (key.trim().toLowerCase(Locale.ROOT)) {
@@ -311,6 +332,8 @@ public class MenuPrintService {
                 case "dark"    -> DARK;
                 case "bold"    -> BOLD;
                 case "columns" -> COLUMNS;
+                case "a3"      -> A3;
+                case "deco"    -> DECO;
                 default        -> GRID;
             };
         }
@@ -1841,6 +1864,271 @@ public class MenuPrintService {
         return col;
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // A3 — portrait A3, 3 columns, items only, no editorial pages
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private void drawA3Content(Document doc,
+                                List<MenuCategory> categories,
+                                Map<String, List<MenuItem>> itemsByCategory,
+                                boolean showPrices, Locale locale) throws DocumentException {
+        List<Object[]> tokens = new ArrayList<>();
+        for (MenuCategory cat : categories) {
+            List<MenuItem> its = itemsByCategory.get(cat.getId());
+            if (its == null || its.isEmpty()) continue;
+            tokens.add(new Object[]{cat, null});
+            for (MenuItem it : its) tokens.add(new Object[]{null, it});
+        }
+
+        int total = tokens.size();
+        int perCol = (int) Math.ceil(total / 3.0);
+        List<Object[]> c1 = tokens.subList(0, Math.min(perCol, total));
+        List<Object[]> c2 = tokens.subList(Math.min(perCol, total), Math.min(perCol * 2, total));
+        List<Object[]> c3 = tokens.subList(Math.min(perCol * 2, total), total);
+
+        PdfPTable three = new PdfPTable(3);
+        three.setWidthPercentage(100);
+        try { three.setWidths(new float[]{1, 1, 1}); } catch (DocumentException ignored) {}
+
+        for (List<Object[]> slice : List.of(c1, c2, c3)) {
+            PdfPCell cell = new PdfPCell(buildA3ColumnImpl(slice, showPrices, locale));
+            cell.setBorder(Rectangle.LEFT);
+            cell.setBorderWidthLeft(0.4f); cell.setBorderColor(HAIRLINE);
+            cell.setPaddingLeft(14); cell.setPaddingRight(14);
+            three.addCell(cell);
+        }
+        three.getRow(0).getCells()[0].setBorder(Rectangle.NO_BORDER);
+        doc.add(three);
+    }
+
+    private PdfPTable buildA3ColumnImpl(List<Object[]> tokens, boolean showPrices, Locale locale) {
+        PdfPTable col = new PdfPTable(1);
+        col.setWidthPercentage(100);
+
+        Font catFont  = font(SERIF_BOLD,   11f,  INK);
+        Font nameFont = font(SERIF_BOLD,   10.5f, INK);
+        Font portFont = font(SANS_REG,      7.5f, MUTED);
+        Font priceFont= font(SANS_BOLD,    10.5f, INK_SOFT);
+        Font descFont = font(SERIF_ITALIC,  8.5f, MUTED);
+        Font pillFont = font(SANS_BOLD,     6f,   SAFFRON_DEEP);
+        Font optFont  = font(SANS_BOLD,     6f,   MUTED);
+        Font varName  = font(SANS_REG,      8.5f, INK_SOFT);
+        Font varPrice = font(SANS_BOLD,     8.5f, INK_SOFT);
+        Font varSame  = font(SANS_ITALIC,   8f,   MUTED);
+
+        int itemIdx = 0;
+        for (Object[] tok : tokens) {
+            MenuCategory cat  = (MenuCategory) tok[0];
+            MenuItem     item = (MenuItem)     tok[1];
+
+            if (cat != null) {
+                // Category header
+                if (itemIdx > 0) {
+                    PdfPCell spacer = new PdfPCell(new Phrase(" "));
+                    spacer.setBorder(Rectangle.NO_BORDER); spacer.setFixedHeight(10f); col.addCell(spacer);
+                }
+                PdfPCell catCell = new PdfPCell(new Phrase(cat.getName().toUpperCase(Locale.ROOT), catFont));
+                catCell.setBorder(Rectangle.BOTTOM);
+                catCell.setBorderWidthBottom(0.8f); catCell.setBorderColor(SAFFRON);
+                catCell.setPaddingBottom(5); catCell.setPaddingTop(itemIdx == 0 ? 0 : 4);
+                col.addCell(catCell);
+                PdfPCell afterCat = new PdfPCell(new Phrase(" "));
+                afterCat.setBorder(Rectangle.NO_BORDER); afterCat.setFixedHeight(5f); col.addCell(afterCat);
+
+            } else if (item != null) {
+                List<VariantEntry> variants = parseVariants(item);
+                boolean varPrices     = showPrices && hasVariantPrices(variants);
+                boolean showBasePrice = showPrices && !varPrices;
+
+                if (item.isFeatured()) {
+                    PdfPCell p = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
+                    p.setBorder(Rectangle.NO_BORDER); col.addCell(p);
+                }
+                PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
+                head.setWidthPercentage(100);
+                try { if (showBasePrice) head.setWidths(new float[]{4f, 2f}); } catch (DocumentException ig) {}
+                head.addCell(textCell(namePhrase(item, nameFont, portFont), Element.ALIGN_LEFT));
+                if (showBasePrice) {
+                    PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+                    pc.setBorder(Rectangle.NO_BORDER); pc.setHorizontalAlignment(Element.ALIGN_RIGHT); pc.setNoWrap(true);
+                    head.addCell(pc);
+                }
+                PdfPCell hw = new PdfPCell(head); hw.setBorder(Rectangle.NO_BORDER); col.addCell(hw);
+
+                String desc = chooseDescription(item);
+                if (desc != null) {
+                    PdfPCell d = new PdfPCell(new Phrase(desc, descFont));
+                    d.setBorder(Rectangle.NO_BORDER); d.setPaddingTop(2); d.setLeading(0, 1.25f); col.addCell(d);
+                }
+                if (!variants.isEmpty()) {
+                    if (varPrices) {
+                        for (VariantEntry v : variants) {
+                            PdfPTable vr = new PdfPTable(2);
+                            vr.setWidthPercentage(100);
+                            try { vr.setWidths(new float[]{4f, 2f}); } catch (DocumentException ig) {}
+                            PdfPCell vn = new PdfPCell(new Phrase("  " + v.name(), varName));
+                            vn.setBorder(Rectangle.NO_BORDER); vr.addCell(vn);
+                            BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                            PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPrice));
+                            vpc.setBorder(Rectangle.NO_BORDER); vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                            vpc.setNoWrap(true); vr.addCell(vpc);
+                            PdfPCell vw = new PdfPCell(vr); vw.setBorder(Rectangle.NO_BORDER); col.addCell(vw);
+                        }
+                    } else {
+                        PdfPCell vl = new PdfPCell(new Phrase("  " + variantNamesLine(variants), varSame));
+                        vl.setBorder(Rectangle.NO_BORDER); col.addCell(vl);
+                    }
+                }
+                PdfPCell sep = new PdfPCell(new Phrase(" "));
+                sep.setBorder(Rectangle.NO_BORDER); sep.setFixedHeight(4f); col.addCell(sep);
+                itemIdx++;
+            }
+        }
+        return col;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // DECO — A3 landscape, dark navy, gold ornaments, 4 columns, items only
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private void drawDecoContent(Document doc,
+                                  List<MenuCategory> categories,
+                                  Map<String, List<MenuItem>> itemsByCategory,
+                                  boolean showPrices, Locale locale) throws DocumentException {
+        List<Object[]> tokens = new ArrayList<>();
+        for (MenuCategory cat : categories) {
+            List<MenuItem> its = itemsByCategory.get(cat.getId());
+            if (its == null || its.isEmpty()) continue;
+            tokens.add(new Object[]{cat, null});
+            for (MenuItem it : its) tokens.add(new Object[]{null, it});
+        }
+
+        int total = tokens.size();
+        int perCol = (int) Math.ceil(total / 4.0);
+        List<Object[]> c1 = tokens.subList(0, Math.min(perCol, total));
+        List<Object[]> c2 = tokens.subList(Math.min(perCol, total),   Math.min(perCol*2, total));
+        List<Object[]> c3 = tokens.subList(Math.min(perCol*2, total), Math.min(perCol*3, total));
+        List<Object[]> c4 = tokens.subList(Math.min(perCol*3, total), total);
+
+        PdfPTable four = new PdfPTable(4);
+        four.setWidthPercentage(100);
+        try { four.setWidths(new float[]{1,1,1,1}); } catch (DocumentException ignored) {}
+
+        for (List<Object[]> slice : List.of(c1, c2, c3, c4)) {
+            PdfPCell cell = new PdfPCell(buildDecoColumn(slice, showPrices, locale));
+            cell.setBorder(Rectangle.LEFT);
+            cell.setBorderWidthLeft(0.4f);
+            cell.setBorderColor(DECO_RULE);
+            cell.setPaddingLeft(14); cell.setPaddingRight(14);
+            four.addCell(cell);
+        }
+        // Override first cell — no left border on leftmost column
+        four.getRow(0).getCells()[0].setBorder(Rectangle.NO_BORDER);
+        doc.add(four);
+    }
+
+    private PdfPTable buildDecoColumn(List<Object[]> tokens, boolean showPrices, Locale locale) {
+        PdfPTable col = new PdfPTable(1);
+        col.setWidthPercentage(100);
+
+        Font catFont  = font(SANS_BOLD,   9.5f, DECO_GOLD);
+        Font nameFont = font(SERIF_BOLD,  10.5f, DECO_TEXT);
+        Font portFont = font(SANS_REG,     7.5f, DECO_MUTED);
+        Font priceFont= font(SANS_BOLD,   10.5f, DECO_LIGHT);
+        Font descFont = font(SERIF_ITALIC, 8.5f, DECO_MUTED);
+        Font pillFont = font(SANS_BOLD,    6f,   DECO_GOLD);
+        Font varName  = font(SANS_REG,     8.5f, DECO_TEXT);
+        Font varPrice = font(SANS_BOLD,    8.5f, DECO_LIGHT);
+        Font varSame  = font(SANS_ITALIC,  8f,   DECO_MUTED);
+
+        int itemIdx = 0;
+        for (Object[] tok : tokens) {
+            MenuCategory cat  = (MenuCategory) tok[0];
+            MenuItem     item = (MenuItem)     tok[1];
+
+            if (cat != null) {
+                if (itemIdx > 0) {
+                    PdfPCell sp = new PdfPCell(new Phrase(" "));
+                    sp.setBorder(Rectangle.NO_BORDER); sp.setFixedHeight(10f); col.addCell(sp);
+                }
+                // Gold rule above category name
+                PdfPCell ruleTop = new PdfPCell();
+                ruleTop.setFixedHeight(0.6f); ruleTop.setBackgroundColor(DECO_GOLD);
+                ruleTop.setBorder(Rectangle.NO_BORDER); col.addCell(ruleTop);
+
+                PdfPCell cc = new PdfPCell(new Phrase(spacedCaps(cat.getName()), catFont));
+                cc.setBorder(Rectangle.NO_BORDER);
+                cc.setHorizontalAlignment(Element.ALIGN_CENTER);
+                cc.setPaddingTop(5); cc.setPaddingBottom(5);
+                col.addCell(cc);
+
+                PdfPCell ruleBot = new PdfPCell();
+                ruleBot.setFixedHeight(0.6f); ruleBot.setBackgroundColor(DECO_GOLD);
+                ruleBot.setBorder(Rectangle.NO_BORDER); col.addCell(ruleBot);
+
+                PdfPCell afterCat = new PdfPCell(new Phrase(" "));
+                afterCat.setBorder(Rectangle.NO_BORDER); afterCat.setFixedHeight(6f); col.addCell(afterCat);
+
+            } else if (item != null) {
+                List<VariantEntry> variants = parseVariants(item);
+                boolean varPrices     = showPrices && hasVariantPrices(variants);
+                boolean showBasePrice = showPrices && !varPrices;
+
+                if (item.isFeatured()) {
+                    PdfPCell p = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
+                    p.setBorder(Rectangle.NO_BORDER); col.addCell(p);
+                }
+                PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
+                head.setWidthPercentage(100);
+                try { if (showBasePrice) head.setWidths(new float[]{4f, 2f}); } catch (DocumentException ig) {}
+                head.addCell(textCell(namePhrase(item, nameFont, portFont), Element.ALIGN_LEFT));
+                if (showBasePrice) {
+                    PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+                    pc.setBorder(Rectangle.NO_BORDER); pc.setHorizontalAlignment(Element.ALIGN_RIGHT); pc.setNoWrap(true);
+                    head.addCell(pc);
+                }
+                PdfPCell hw = new PdfPCell(head); hw.setBorder(Rectangle.NO_BORDER); col.addCell(hw);
+
+                String desc = chooseDescription(item);
+                if (desc != null) {
+                    PdfPCell d = new PdfPCell(new Phrase(desc, descFont));
+                    d.setBorder(Rectangle.NO_BORDER); d.setPaddingTop(2); d.setLeading(0, 1.25f); col.addCell(d);
+                }
+                if (!variants.isEmpty()) {
+                    if (varPrices) {
+                        for (VariantEntry v : variants) {
+                            PdfPTable vr = new PdfPTable(2);
+                            vr.setWidthPercentage(100);
+                            try { vr.setWidths(new float[]{4f, 2f}); } catch (DocumentException ig) {}
+                            PdfPCell vn = new PdfPCell(new Phrase("  " + v.name(), varName));
+                            vn.setBorder(Rectangle.NO_BORDER); vr.addCell(vn);
+                            BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                            PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPrice));
+                            vpc.setBorder(Rectangle.NO_BORDER); vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                            vpc.setNoWrap(true); vr.addCell(vpc);
+                            PdfPCell vw = new PdfPCell(vr); vw.setBorder(Rectangle.NO_BORDER); col.addCell(vw);
+                        }
+                    } else {
+                        PdfPCell vl = new PdfPCell(new Phrase("  " + variantNamesLine(variants), varSame));
+                        vl.setBorder(Rectangle.NO_BORDER); col.addCell(vl);
+                    }
+                }
+                // Thin deco rule between items
+                PdfPCell dimRule = new PdfPCell();
+                dimRule.setFixedHeight(0.3f); dimRule.setBackgroundColor(DECO_RULE);
+                dimRule.setBorder(Rectangle.NO_BORDER);
+                PdfPCell dimPad = new PdfPCell(new Phrase(" "));
+                dimPad.setBorder(Rectangle.NO_BORDER); dimPad.setFixedHeight(4f);
+                col.addCell(dimPad); col.addCell(dimRule);
+                PdfPCell dimPad2 = new PdfPCell(new Phrase(" "));
+                dimPad2.setBorder(Rectangle.NO_BORDER); dimPad2.setFixedHeight(3f);
+                col.addCell(dimPad2);
+                itemIdx++;
+            }
+        }
+        return col;
+    }
+
     // ---------- Allergens ----------
 
     private void drawAllergens(Document doc) throws DocumentException {
@@ -2240,17 +2528,22 @@ public class MenuPrintService {
      */
     private static class MenuChrome extends PdfPageEventHelper {
         private boolean suppressPageNumber = false;
-        private Color bgColor       = CREAM;
-        private Color brandColor    = SAFFRON;
-        private Color pageNumColor  = MUTED;
+        private Color   bgColor      = CREAM;
+        private Color   brandColor   = SAFFRON;
+        private Color   pageNumColor = MUTED;
+        private boolean decoMode     = false;
+        private boolean suppressChrome = false;
 
-        void suppressNext() { this.suppressPageNumber = true; }
+        void suppressNext()  { this.suppressPageNumber = true; }
+        void setSuppressAll(boolean v) { this.suppressChrome = v; }
         void setSection(@SuppressWarnings("unused") String s) {}
 
         void setTheme(Color bg, Color brand, Color pageNum) {
-            this.bgColor      = bg;
-            this.brandColor   = brand;
-            this.pageNumColor = pageNum;
+            this.bgColor = bg; this.brandColor = brand; this.pageNumColor = pageNum;
+        }
+        void setDecoMode() {
+            setTheme(DECO_BG, DECO_GOLD, DECO_MUTED);
+            this.decoMode = true;
         }
 
         @Override
@@ -2268,21 +2561,63 @@ public class MenuPrintService {
 
         @Override
         public void onEndPage(PdfWriter writer, Document doc) {
-            if (suppressPageNumber) { suppressPageNumber = false; return; }
-            int p = writer.getPageNumber();
-            if (p <= 1) return;
+            if (suppressPageNumber) { suppressPageNumber = false; }
+            if (suppressChrome) return;
             try {
                 PdfContentByte cb = writer.getDirectContent();
                 Rectangle page = doc.getPageSize();
-                Font fBrand = font(SANS_BOLD, 7.5f, brandColor);
-                ColumnText.showTextAligned(cb, Element.ALIGN_RIGHT,
-                        new Phrase("SAFFRON", fBrand),
-                        page.getWidth() - 68f, page.getHeight() - 52f, 0);
-                Font fNum = font(SERIF_REG, 9.5f, pageNumColor);
-                ColumnText.showTextAligned(cb, Element.ALIGN_CENTER,
-                        new Phrase(String.valueOf(p), fNum),
-                        page.getWidth() / 2f, 38, 0);
+                if (decoMode) {
+                    drawDecoPageFrame(cb, page);
+                } else {
+                    int p = writer.getPageNumber();
+                    if (p <= 1) return;
+                    Font fBrand = font(SANS_BOLD, 7.5f, brandColor);
+                    ColumnText.showTextAligned(cb, Element.ALIGN_RIGHT,
+                            new Phrase("SAFFRON", fBrand),
+                            page.getWidth() - 68f, page.getHeight() - 52f, 0);
+                    Font fNum = font(SERIF_REG, 9.5f, pageNumColor);
+                    ColumnText.showTextAligned(cb, Element.ALIGN_CENTER,
+                            new Phrase(String.valueOf(p), fNum),
+                            page.getWidth() / 2f, 38, 0);
+                }
             } catch (Exception ignored) {}
         }
+    }
+
+    /** Art-Deco double border + corner ornaments — drawn over content on every DECO page. */
+    private static void drawDecoPageFrame(PdfContentByte cb, Rectangle page) {
+        float w = page.getWidth(), h = page.getHeight();
+        float o = 20f, i2 = 32f; // outer / inner border inset
+        cb.saveState();
+        cb.setColorStroke(DECO_GOLD); cb.setColorFill(DECO_GOLD);
+        cb.setLineWidth(0.9f);
+        cb.rectangle(o, o, w - 2*o, h - 2*o); cb.stroke();
+        cb.setLineWidth(0.35f);
+        cb.rectangle(i2, i2, w - 2*i2, h - 2*i2); cb.stroke();
+        // Corner ornaments at the four inner-border corners
+        float[][] corners = {{i2,i2},{w-i2,i2},{i2,h-i2},{w-i2,h-i2}};
+        float[][] dirs    = {{1,1},{-1,1},{1,-1},{-1,-1}};
+        float arm = 28f;
+        cb.setLineWidth(0.6f);
+        for (int c = 0; c < 4; c++) {
+            float cx = corners[c][0], cy = corners[c][1];
+            float dx = dirs[c][0],    dy = dirs[c][1];
+            decoSmallDiamond(cb, cx, cy, 3.5f);
+            cb.moveTo(cx + dx*7, cy); cb.lineTo(cx + dx*arm, cy); cb.stroke();
+            decoSmallDiamond(cb, cx + dx*arm, cy, 2f);
+            cb.moveTo(cx, cy + dy*7); cb.lineTo(cx, cy + dy*arm); cb.stroke();
+            decoSmallDiamond(cb, cx, cy + dy*arm, 2f);
+            // Short cross-tick near corner
+            cb.setLineWidth(0.3f);
+            cb.moveTo(cx + dx*13, cy + dy*2); cb.lineTo(cx + dx*13, cy + dy*10); cb.stroke();
+            cb.moveTo(cx + dx*2, cy + dy*13); cb.lineTo(cx + dx*10, cy + dy*13); cb.stroke();
+            cb.setLineWidth(0.6f);
+        }
+        cb.restoreState();
+    }
+
+    private static void decoSmallDiamond(PdfContentByte cb, float x, float y, float r) {
+        cb.moveTo(x, y+r); cb.lineTo(x+r, y); cb.lineTo(x, y-r); cb.lineTo(x-r, y);
+        cb.closePathFillStroke();
     }
 }
