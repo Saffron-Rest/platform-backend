@@ -38,11 +38,40 @@ class MenuPrintServiceSmokeTest {
 
         MenuPrintService service = new MenuPrintService(menu, storage);
 
-        for (String layout : new String[]{"grid", "list", "compact"}) {
+        for (String layout : new String[]{"grid", "list", "compact", "fine", "tasting",
+                                          "dark", "bold", "columns", "a3", "deco"}) {
             byte[] bytes = service.buildMenu(layout, "Saffron Test", "Smoke test menu", true, "en");
-            assertThat(bytes).isNotEmpty();
+            assertThat(bytes).as("non-empty PDF for layout %s", layout).isNotEmpty();
             assertThat(new String(bytes, 0, 4)).as("PDF header for layout %s", layout).isEqualTo("%PDF");
         }
+
+        // Verify A3 produces wider pages than A4 (A3 portrait width ≈ 841pt vs A4 ≈ 595pt)
+        byte[] a3Pdf   = service.buildMenu("a3",   "Saffron", null, true, "en");
+        byte[] decoPdf = service.buildMenu("deco",  "Saffron", null, true, "en");
+        byte[] listPdf = service.buildMenu("list",  "Saffron", null, true, "en");
+
+        float a3Width   = extractPageWidth(a3Pdf);
+        float decoWidth = extractPageWidth(decoPdf);
+        float listWidth = extractPageWidth(listPdf);
+
+        assertThat(a3Width).as("A3 page width should exceed A4 width")
+                           .isGreaterThan(listWidth + 100f);
+        assertThat(decoWidth).as("DECO (landscape A3) page width should exceed A3 portrait width")
+                             .isGreaterThan(a3Width);
+    }
+
+    /** Reads the /MediaBox width from the first page by scanning raw PDF bytes. */
+    private static float extractPageWidth(byte[] pdf) {
+        String text = new String(pdf);
+        int idx = text.indexOf("/MediaBox");
+        if (idx < 0) return 0;
+        // /MediaBox [llx lly urx ury]
+        int open = text.indexOf('[', idx);
+        int close = text.indexOf(']', open);
+        if (open < 0 || close < 0) return 0;
+        String[] parts = text.substring(open + 1, close).trim().split("\\s+");
+        if (parts.length < 3) return 0;
+        try { return Float.parseFloat(parts[2]); } catch (NumberFormatException e) { return 0; }
     }
 
     private static MenuCategory category(String id, String name, int sort) {

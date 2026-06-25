@@ -233,7 +233,8 @@ public class MenuPrintService {
 
         boolean isA3   = opt.layout() == Layout.A3;
         boolean isDeco = opt.layout() == Layout.DECO;
-        Rectangle pageRect = isDeco ? PageSize.A3.rotate()
+        // A3.rotate() only sets a metadata flag — actual landscape needs swapped dimensions.
+        Rectangle pageRect = isDeco ? new Rectangle(PageSize.A3.getHeight(), PageSize.A3.getWidth())
                            : isA3   ? PageSize.A3
                                     : PageSize.A4;
         float mSide = (isA3 || isDeco) ? 54 : 50;
