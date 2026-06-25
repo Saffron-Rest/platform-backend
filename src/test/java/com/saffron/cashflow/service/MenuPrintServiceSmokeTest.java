@@ -54,10 +54,11 @@ class MenuPrintServiceSmokeTest {
         float decoWidth = extractPageWidth(decoPdf);
         float listWidth = extractPageWidth(listPdf);
 
-        assertThat(a3Width).as("A3 page width should exceed A4 width")
+        // Both A3 and DECO are landscape A3 (≈1190pt wide vs A4 ≈595pt wide)
+        assertThat(a3Width).as("A3 landscape width should exceed A4 width")
                            .isGreaterThan(listWidth + 100f);
-        assertThat(decoWidth).as("DECO (landscape A3) page width should exceed A3 portrait width")
-                             .isGreaterThan(a3Width);
+        assertThat(decoWidth).as("DECO width should match A3 landscape width")
+                             .isEqualTo(a3Width);
     }
 
     /** Reads the /MediaBox width from the first page by scanning raw PDF bytes. */

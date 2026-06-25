@@ -234,9 +234,8 @@ public class MenuPrintService {
         boolean isA3   = opt.layout() == Layout.A3;
         boolean isDeco = opt.layout() == Layout.DECO;
         // A3.rotate() only sets a metadata flag — actual landscape needs swapped dimensions.
-        Rectangle pageRect = isDeco ? new Rectangle(PageSize.A3.getHeight(), PageSize.A3.getWidth())
-                           : isA3   ? PageSize.A3
-                                    : PageSize.A4;
+        Rectangle a3Landscape = new Rectangle(PageSize.A3.getHeight(), PageSize.A3.getWidth());
+        Rectangle pageRect = (isA3 || isDeco) ? a3Landscape : PageSize.A4;
         float mSide = (isA3 || isDeco) ? 54 : 50;
         float mTopBot = isDeco ? 54 : (isA3 ? 68 : 64);
         Document doc = new Document(pageRect, mSide, mSide, mTopBot, mTopBot);
@@ -1940,27 +1939,55 @@ public class MenuPrintService {
                 List<VariantEntry> variants = parseVariants(item);
                 boolean varPrices     = showPrices && hasVariantPrices(variants);
                 boolean showBasePrice = showPrices && !varPrices;
+                Image img = tryLoadImage(item.getImagePath());
 
                 if (item.isFeatured()) {
                     PdfPCell p = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
                     p.setBorder(Rectangle.NO_BORDER); col.addCell(p);
                 }
-                PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
-                head.setWidthPercentage(100);
-                try { if (showBasePrice) head.setWidths(new float[]{4f, 2f}); } catch (DocumentException ig) {}
-                head.addCell(textCell(namePhrase(item, nameFont, portFont), Element.ALIGN_LEFT));
+
+                // ── Image + text row ─────────────────────────────────────────
+                final float THUMB = 52f;
+                PdfPTable row = new PdfPTable(img != null ? 2 : 1);
+                row.setWidthPercentage(100);
+                if (img != null) {
+                    try { row.setWidths(new float[]{THUMB, 100f - THUMB}); } catch (DocumentException ig) {}
+                    float scale = Math.max(THUMB / img.getWidth(), THUMB / img.getHeight());
+                    img.scaleAbsolute(img.getWidth() * scale, img.getHeight() * scale);
+                    PdfPCell imgCell = new PdfPCell();
+                    imgCell.setBorder(Rectangle.NO_BORDER);
+                    imgCell.setFixedHeight(THUMB);
+                    imgCell.setPadding(0); imgCell.setPaddingRight(6);
+                    imgCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
+                    imgCell.setImage(img);
+                    row.addCell(imgCell);
+                }
+
+                // Text sub-table: name+price then description
+                PdfPTable txt = new PdfPTable(showBasePrice ? 2 : 1);
+                txt.setWidthPercentage(100);
+                try { if (showBasePrice) txt.setWidths(new float[]{4f, 2f}); } catch (DocumentException ig) {}
+                txt.addCell(textCell(namePhrase(item, nameFont, portFont), Element.ALIGN_LEFT));
                 if (showBasePrice) {
                     PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
                     pc.setBorder(Rectangle.NO_BORDER); pc.setHorizontalAlignment(Element.ALIGN_RIGHT); pc.setNoWrap(true);
-                    head.addCell(pc);
+                    txt.addCell(pc);
                 }
-                PdfPCell hw = new PdfPCell(head); hw.setBorder(Rectangle.NO_BORDER); col.addCell(hw);
-
                 String desc = chooseDescription(item);
                 if (desc != null) {
-                    PdfPCell d = new PdfPCell(new Phrase(desc, descFont));
-                    d.setBorder(Rectangle.NO_BORDER); d.setPaddingTop(2); d.setLeading(0, 1.25f); col.addCell(d);
+                    PdfPCell dc = new PdfPCell(new Phrase(desc, descFont));
+                    if (showBasePrice) { PdfPCell blank = new PdfPCell(new Phrase("")); blank.setBorder(Rectangle.NO_BORDER); txt.addCell(blank); }
+                    dc.setBorder(Rectangle.NO_BORDER); dc.setPaddingTop(2); dc.setLeading(0, 1.25f);
+                    dc.setColspan(showBasePrice ? 2 : 1);
+                    txt.addCell(dc);
                 }
+                PdfPCell txtWrap = new PdfPCell(txt);
+                txtWrap.setBorder(Rectangle.NO_BORDER);
+                txtWrap.setVerticalAlignment(Element.ALIGN_MIDDLE);
+                row.addCell(txtWrap);
+                PdfPCell rowWrap = new PdfPCell(row); rowWrap.setBorder(Rectangle.NO_BORDER);
+                col.addCell(rowWrap);
+
                 if (!variants.isEmpty()) {
                     if (varPrices) {
                         for (VariantEntry v : variants) {
@@ -2074,27 +2101,53 @@ public class MenuPrintService {
                 List<VariantEntry> variants = parseVariants(item);
                 boolean varPrices     = showPrices && hasVariantPrices(variants);
                 boolean showBasePrice = showPrices && !varPrices;
+                Image img = tryLoadImage(item.getImagePath());
 
                 if (item.isFeatured()) {
                     PdfPCell p = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
                     p.setBorder(Rectangle.NO_BORDER); col.addCell(p);
                 }
-                PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
-                head.setWidthPercentage(100);
-                try { if (showBasePrice) head.setWidths(new float[]{4f, 2f}); } catch (DocumentException ig) {}
-                head.addCell(textCell(namePhrase(item, nameFont, portFont), Element.ALIGN_LEFT));
+
+                final float THUMB = 50f;
+                PdfPTable row = new PdfPTable(img != null ? 2 : 1);
+                row.setWidthPercentage(100);
+                if (img != null) {
+                    try { row.setWidths(new float[]{THUMB, 100f - THUMB}); } catch (DocumentException ig) {}
+                    float scale = Math.max(THUMB / img.getWidth(), THUMB / img.getHeight());
+                    img.scaleAbsolute(img.getWidth() * scale, img.getHeight() * scale);
+                    PdfPCell imgCell = new PdfPCell();
+                    imgCell.setFixedHeight(THUMB); imgCell.setPadding(0); imgCell.setPaddingRight(7);
+                    imgCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
+                    imgCell.setImage(img);
+                    // thin gold border around the photo
+                    imgCell.setBorder(Rectangle.BOX); imgCell.setBorderColor(DECO_GOLD); imgCell.setBorderWidth(0.5f);
+                    imgCell.setPaddingRight(7);
+                    row.addCell(imgCell);
+                }
+
+                PdfPTable txt = new PdfPTable(showBasePrice ? 2 : 1);
+                txt.setWidthPercentage(100);
+                try { if (showBasePrice) txt.setWidths(new float[]{4f, 2f}); } catch (DocumentException ig) {}
+                txt.addCell(textCell(namePhrase(item, nameFont, portFont), Element.ALIGN_LEFT));
                 if (showBasePrice) {
                     PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
                     pc.setBorder(Rectangle.NO_BORDER); pc.setHorizontalAlignment(Element.ALIGN_RIGHT); pc.setNoWrap(true);
-                    head.addCell(pc);
+                    txt.addCell(pc);
                 }
-                PdfPCell hw = new PdfPCell(head); hw.setBorder(Rectangle.NO_BORDER); col.addCell(hw);
-
                 String desc = chooseDescription(item);
                 if (desc != null) {
-                    PdfPCell d = new PdfPCell(new Phrase(desc, descFont));
-                    d.setBorder(Rectangle.NO_BORDER); d.setPaddingTop(2); d.setLeading(0, 1.25f); col.addCell(d);
+                    PdfPCell dc = new PdfPCell(new Phrase(desc, descFont));
+                    if (showBasePrice) { PdfPCell blank = new PdfPCell(new Phrase("")); blank.setBorder(Rectangle.NO_BORDER); txt.addCell(blank); }
+                    dc.setBorder(Rectangle.NO_BORDER); dc.setPaddingTop(2); dc.setLeading(0, 1.25f);
+                    dc.setColspan(showBasePrice ? 2 : 1);
+                    txt.addCell(dc);
                 }
+                PdfPCell txtWrap = new PdfPCell(txt);
+                txtWrap.setBorder(Rectangle.NO_BORDER); txtWrap.setVerticalAlignment(Element.ALIGN_MIDDLE);
+                row.addCell(txtWrap);
+                PdfPCell rowWrap = new PdfPCell(row); rowWrap.setBorder(Rectangle.NO_BORDER);
+                col.addCell(rowWrap);
+
                 if (!variants.isEmpty()) {
                     if (varPrices) {
                         for (VariantEntry v : variants) {
@@ -2114,16 +2167,13 @@ public class MenuPrintService {
                         vl.setBorder(Rectangle.NO_BORDER); col.addCell(vl);
                     }
                 }
-                // Thin deco rule between items
-                PdfPCell dimRule = new PdfPCell();
-                dimRule.setFixedHeight(0.3f); dimRule.setBackgroundColor(DECO_RULE);
-                dimRule.setBorder(Rectangle.NO_BORDER);
                 PdfPCell dimPad = new PdfPCell(new Phrase(" "));
-                dimPad.setBorder(Rectangle.NO_BORDER); dimPad.setFixedHeight(4f);
-                col.addCell(dimPad); col.addCell(dimRule);
+                dimPad.setBorder(Rectangle.NO_BORDER); dimPad.setFixedHeight(4f); col.addCell(dimPad);
+                PdfPCell dimRule = new PdfPCell();
+                dimRule.setFixedHeight(0.3f); dimRule.setBackgroundColor(DECO_RULE); dimRule.setBorder(Rectangle.NO_BORDER);
+                col.addCell(dimRule);
                 PdfPCell dimPad2 = new PdfPCell(new Phrase(" "));
-                dimPad2.setBorder(Rectangle.NO_BORDER); dimPad2.setFixedHeight(3f);
-                col.addCell(dimPad2);
+                dimPad2.setBorder(Rectangle.NO_BORDER); dimPad2.setFixedHeight(3f); col.addCell(dimPad2);
                 itemIdx++;
             }
         }
