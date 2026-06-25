@@ -215,7 +215,7 @@ public class MenuPrintService {
                     "No active categories with items — add items in /admin/menu before printing.");
         }
 
-        Document doc = new Document(PageSize.A4, 68, 68, 84, 84);
+        Document doc = new Document(PageSize.A4, 50, 50, 64, 64);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
             PdfWriter writer = PdfWriter.getInstance(doc, out);
@@ -244,7 +244,7 @@ public class MenuPrintService {
                     // Compact divider: use available-space check to avoid orphaned heading.
                     // Minimum required = compact divider (~80pt) + one grid row (~240pt).
                     float avail = writer.getVerticalPosition(false) - doc.bottomMargin();
-                    if (avail < 340f) {
+                    if (avail < 260f) {
                         // Not enough room — fresh page with full divider keeps heading+items together
                         doc.newPage();
                         drawSectionDivider(doc, cat.getName());
@@ -258,6 +258,8 @@ public class MenuPrintService {
                 boolean hasVisualContent = items.stream().anyMatch(
                         i -> (i.getImagePath() != null && !i.getImagePath().isBlank())
                              || chooseDescription(i) != null);
+                // Only auto-downgrade GRID (photo layout) when there is no visual content.
+                // FINE and TASTING are text-first by design — never downgrade them.
                 Layout effectiveLayout = (opt.layout() == Layout.GRID && !hasVisualContent)
                         ? Layout.LIST : opt.layout();
 
@@ -265,6 +267,8 @@ public class MenuPrintService {
                     case GRID    -> drawGrid(doc, items, opt.showPrices(), opt.locale());
                     case LIST    -> drawList(doc, items, opt.showPrices(), opt.locale());
                     case COMPACT -> drawCompact(doc, items, opt.showPrices(), opt.locale());
+                    case FINE    -> drawFine(doc, items, opt.showPrices(), opt.locale());
+                    case TASTING -> drawTasting(doc, writer, items, opt.showPrices(), opt.locale());
                 }
             }
 
@@ -283,13 +287,15 @@ public class MenuPrintService {
     }
 
     public enum Layout {
-        GRID, LIST, COMPACT;
+        GRID, LIST, COMPACT, FINE, TASTING;
         public static Layout from(String key) {
             if (key == null) return GRID;
             return switch (key.trim().toLowerCase(Locale.ROOT)) {
-                case "list" -> LIST;
+                case "list"    -> LIST;
                 case "compact" -> COMPACT;
-                default -> GRID;
+                case "fine"    -> FINE;
+                case "tasting" -> TASTING;
+                default        -> GRID;
             };
         }
     }
@@ -570,10 +576,10 @@ public class MenuPrintService {
      * The blurb font matches the body text on item cards for consistency.</p>
      */
     private void drawSectionDivider(Document doc, String name) throws DocumentException {
-        Font eyebrow  = font(SANS_BOLD,    8.5f, SAFFRON_DEEP);
-        Font head     = font(SERIF_BOLD,   32,   INK);
-        Font az       = font(SERIF_ITALIC, 13,   MUTED);
-        Font blurb    = font(SERIF_ITALIC, 10.5f, MUTED);
+        Font eyebrow  = font(SANS_BOLD,    8f,   SAFFRON_DEEP);
+        Font head     = font(SERIF_BOLD,   22,   INK);
+        Font az       = font(SERIF_ITALIC, 11.5f, MUTED);
+        Font blurb    = font(SERIF_ITALIC, 10f,  MUTED);
 
         // Eyebrow label
         Paragraph eb = new Paragraph(spacedCaps(eyebrowFor(name)), eyebrow);
@@ -621,7 +627,7 @@ public class MenuPrintService {
         }
 
         Paragraph after = new Paragraph(" ");
-        after.setSpacingAfter(14);
+        after.setSpacingAfter(8);
         doc.add(after);
     }
 
@@ -636,19 +642,19 @@ public class MenuPrintService {
      * it does not fit the remaining space.</p>
      */
     private void drawCompactSectionDivider(Document doc, String name) throws DocumentException {
-        Font head    = font(SERIF_BOLD,    20,    INK);
-        Font azFont  = font(SERIF_ITALIC,  11,    MUTED);
-        Font eyebrow = font(SANS_BOLD,      8f,   SAFFRON_DEEP);
+        Font head    = font(SERIF_BOLD,    16,    INK);
+        Font azFont  = font(SERIF_ITALIC,  10,    MUTED);
+        Font eyebrow = font(SANS_BOLD,      7.5f, SAFFRON_DEEP);
 
         // Wide hairline spacer — clear visual break between previous section and this one
         Paragraph preSpacer = new Paragraph(" ");
-        preSpacer.setSpacingBefore(28);
+        preSpacer.setSpacingBefore(14);
         doc.add(preSpacer);
         doc.add(new Chunk(new LineSeparator(0.5f, 100, HAIRLINE, Element.ALIGN_LEFT, 0)));
 
         // Compact eyebrow (e.g. "FRESH & VIBRANT")
         Paragraph eb = new Paragraph(spacedCaps(eyebrowFor(name)), eyebrow);
-        eb.setSpacingBefore(14);
+        eb.setSpacingBefore(8);
         doc.add(eb);
 
         // Category name — left-aligned, reads like a chapter title
@@ -670,7 +676,7 @@ public class MenuPrintService {
         doc.add(new Chunk(new LineSeparator(1.2f, 32, SAFFRON, Element.ALIGN_LEFT, 0)));
 
         Paragraph post = new Paragraph(" ");
-        post.setSpacingAfter(10);
+        post.setSpacingAfter(5);
         doc.add(post);
     }
 
@@ -980,17 +986,17 @@ public class MenuPrintService {
     private void drawList(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
             throws DocumentException {
         // ── Fonts ────────────────────────────────────────────────────────────
-        Font nameFont      = font(SERIF_BOLD,   14.5f, INK);
-        Font portionFont   = font(SANS_REG,      9.5f, MUTED);
-        Font priceFont     = font(SANS_REG,     11.5f, PRICE_COLOR);  // quiet — food sells, price follows
-        Font pillFont      = font(SANS_BOLD,     7.5f, SAFFRON_DEEP);
-        Font descFont      = font(SERIF_ITALIC, 11,    MUTED);
-        Font tagsFont      = font(SANS_ITALIC,   9,    MUTED);
-        Font allergenFont  = font(SANS_REG,      8,    MUTED);
-        Font optLabelFont  = font(SANS_BOLD,     7.5f, SAFFRON_DEEP);
-        Font varNameFont   = font(SANS_REG,     10.5f, INK_SOFT);
-        Font varPriceFont  = font(SANS_REG,      9.5f, PRICE_COLOR);
-        Font varSameFont   = font(SANS_ITALIC,  10f,   MUTED);
+        Font nameFont      = font(SERIF_BOLD,   12.5f, INK);
+        Font portionFont   = font(SANS_REG,      8.5f, MUTED);
+        Font priceFont     = font(SANS_BOLD,    12.5f, INK_SOFT);
+        Font pillFont      = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
+        Font descFont      = font(SERIF_ITALIC, 10.5f, MUTED);
+        Font tagsFont      = font(SANS_ITALIC,   8.5f, MUTED);
+        Font allergenFont  = font(SANS_REG,      7.5f, MUTED);
+        Font optLabelFont  = font(SANS_BOLD,     7f,   MUTED);
+        Font varNameFont   = font(SANS_REG,     10f,   INK_SOFT);
+        Font varPriceFont  = font(SANS_BOLD,    10f,   INK_SOFT);
+        Font varSameFont   = font(SANS_ITALIC,   9.5f, MUTED);
 
         for (int i = 0; i < items.size(); i++) {
             MenuItem item       = items.get(i);
@@ -1018,7 +1024,7 @@ public class MenuPrintService {
                 pc.setNoWrap(true);
                 head.addCell(pc);
             }
-            head.setSpacingBefore(item.isFeatured() ? 2 : 6);
+            head.setSpacingBefore(item.isFeatured() ? 2 : 4);
             doc.add(head);
 
             // ── 3. Description (before options — read the dish, then choose) ──
@@ -1046,12 +1052,9 @@ public class MenuPrintService {
 
             // ── 5. Options section (after description — price choices last) ────
             if (!variants.isEmpty()) {
-                // "OPTIONS" label
                 Paragraph optLabel = new Paragraph(spacedCaps("Options"), optLabelFont);
-                optLabel.setSpacingBefore(9);
+                optLabel.setSpacingBefore(6);
                 doc.add(optLabel);
-                // thin saffron rule
-                doc.add(new Chunk(new LineSeparator(0.5f, 40, SAFFRON, Element.ALIGN_LEFT, 0)));
 
                 if (varPrices) {
                     for (VariantEntry v : variants) {
@@ -1084,7 +1087,7 @@ public class MenuPrintService {
             // ── Item separator ────────────────────────────────────────────────
             if (i < items.size() - 1) {
                 Paragraph pad = new Paragraph(" ");
-                pad.setSpacingBefore(10);
+                pad.setSpacingBefore(4);
                 doc.add(pad);
                 LineSeparator sep = new LineSeparator(0.4f, 100, HAIRLINE, Element.ALIGN_LEFT, 0);
                 doc.add(new Chunk(sep));
@@ -1126,7 +1129,7 @@ public class MenuPrintService {
         Font pillFont      = font(SANS_BOLD,     7,    SAFFRON_DEEP);
         Font descFont      = font(SERIF_ITALIC,  9.5f, MUTED);
         Font tagsFont      = font(SANS_ITALIC,   8,    MUTED);
-        Font optLabelFont  = font(SANS_BOLD,     6.5f, SAFFRON_DEEP);
+        Font optLabelFont  = font(SANS_BOLD,     6.5f, MUTED);
         Font varNameFont   = font(SANS_REG,      9f,   INK_SOFT);
         Font varPriceFont  = font(SANS_REG,      8.5f, PRICE_COLOR);
         Font varSameFont   = font(SANS_ITALIC,   8.5f, MUTED);
@@ -1219,11 +1222,210 @@ public class MenuPrintService {
             if (i < items.size() - 1) {
                 PdfPCell pad = new PdfPCell(new Phrase(" "));
                 pad.setBorder(Rectangle.NO_BORDER);
-                pad.setFixedHeight(16f);
+                pad.setFixedHeight(8f);
                 col.addCell(pad);
             }
         }
         return col;
+    }
+
+    // ---------- FINE — ultra-minimal, name + price only ----------
+
+    /**
+     * Fine-dining layout: each item is a single row — name on the left,
+     * price right-aligned, a very thin hairline between rows. No photos,
+     * no descriptions, no OPTIONS label. Variants listed as a muted
+     * comma line directly under the name. Category headers are just small
+     * muted spaced-caps labels with no decoration.
+     */
+    private void drawFine(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
+            throws DocumentException {
+        Font nameFont    = font(SERIF_REG,   12f,  INK);
+        Font portionFont = font(SANS_REG,     8f,  MUTED);
+        Font priceFont   = font(SANS_BOLD,   12f,  INK_SOFT);
+        Font varFont     = font(SANS_ITALIC,  9f,  MUTED);
+        Font pillFont    = font(SANS_BOLD,    6.5f, SAFFRON_DEEP);
+
+        for (int i = 0; i < items.size(); i++) {
+            MenuItem item = items.get(i);
+            List<VariantEntry> variants = parseVariants(item);
+            boolean varPrices    = showPrices && hasVariantPrices(variants);
+            boolean showBasePrice = showPrices && !varPrices;
+
+            if (item.isFeatured()) {
+                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                pill.setSpacingBefore(i == 0 ? 0 : 3);
+                doc.add(pill);
+            }
+
+            // Name + base price row
+            PdfPTable row = new PdfPTable(showBasePrice ? 2 : 1);
+            row.setWidthPercentage(100);
+            try { if (showBasePrice) row.setWidths(new float[]{6f, 2f}); }
+            catch (DocumentException ignored) {}
+            row.setSpacingBefore(item.isFeatured() ? 2 : (i == 0 ? 0 : 2));
+
+            PdfPCell nc = new PdfPCell(namePhrase(item, nameFont, portionFont));
+            nc.setBorder(Rectangle.NO_BORDER);
+            nc.setPaddingBottom(3);
+            row.addCell(nc);
+
+            if (showBasePrice) {
+                PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+                pc.setBorder(Rectangle.NO_BORDER);
+                pc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                pc.setNoWrap(true);
+                pc.setPaddingBottom(3);
+                row.addCell(pc);
+            }
+            doc.add(row);
+
+            // Variant prices (two-column sub-rows)
+            if (varPrices) {
+                for (VariantEntry v : variants) {
+                    PdfPTable vr = new PdfPTable(2);
+                    vr.setWidthPercentage(100);
+                    try { vr.setWidths(new float[]{6f, 2f}); } catch (DocumentException ignored) {}
+                    PdfPCell vn = new PdfPCell(new Phrase("   " + v.name(), varFont));
+                    vn.setBorder(Rectangle.NO_BORDER);
+                    vn.setPaddingBottom(2);
+                    vr.addCell(vn);
+                    BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                    PdfPCell vp2 = new PdfPCell(new Phrase(formatPrice(vp, locale), varFont));
+                    vp2.setBorder(Rectangle.NO_BORDER);
+                    vp2.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                    vp2.setNoWrap(true);
+                    vp2.setPaddingBottom(2);
+                    vr.addCell(vp2);
+                    doc.add(vr);
+                }
+            } else if (!variants.isEmpty()) {
+                Paragraph vl = new Paragraph("   " + variantNamesLine(variants), varFont);
+                vl.setSpacingBefore(1);
+                doc.add(vl);
+            }
+
+            // Thin hairline separator
+            if (i < items.size() - 1) {
+                Paragraph gap = new Paragraph(" ");
+                gap.setSpacingBefore(2);
+                doc.add(gap);
+                doc.add(new Chunk(new LineSeparator(0.3f, 100, HAIRLINE, Element.ALIGN_LEFT, 0)));
+            }
+        }
+    }
+
+    // ---------- TASTING — numbered, centered, description-forward ----------
+
+    /**
+     * Tasting-menu layout: each item is centred on the page with a large
+     * saffron index number, the dish name in display serif, description in
+     * italic, and price right-aligned at the bottom of the block.
+     * Wide diamond rules separate courses — spacious and editorial.
+     */
+    private void drawTasting(Document doc, PdfWriter writer, List<MenuItem> items,
+                              boolean showPrices, Locale locale) throws DocumentException {
+        Font numFont    = font(SANS_BOLD,   9f,   SAFFRON_DEEP);
+        Font nameFont   = font(SERIF_BOLD,  19f,  INK);
+        Font portFont   = font(SANS_REG,    9f,   MUTED);
+        Font descFont   = font(SERIF_ITALIC,11f,  MUTED);
+        Font priceFont  = font(SANS_BOLD,   11.5f, INK_SOFT);
+        Font varLabel   = font(SANS_BOLD,   7f,   MUTED);
+        Font varName    = font(SANS_REG,    10f,  INK_SOFT);
+        Font varPrice   = font(SANS_BOLD,   10f,  INK_SOFT);
+        Font pillFont   = font(SANS_BOLD,   6.5f, SAFFRON_DEEP);
+
+        for (int i = 0; i < items.size(); i++) {
+            MenuItem item = items.get(i);
+            List<VariantEntry> variants = parseVariants(item);
+            boolean varPrices     = showPrices && hasVariantPrices(variants);
+            boolean showBasePrice = showPrices && !varPrices;
+
+            // Course number
+            Paragraph num = new Paragraph(String.format("%02d", i + 1), numFont);
+            num.setAlignment(Element.ALIGN_CENTER);
+            num.setSpacingBefore(i == 0 ? 4 : 28);
+            doc.add(num);
+
+            // Chef badge
+            if (item.isFeatured()) {
+                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                pill.setAlignment(Element.ALIGN_CENTER);
+                pill.setSpacingBefore(4);
+                doc.add(pill);
+            }
+
+            // Dish name (centered)
+            Phrase namePhr = namePhrase(item, nameFont, portFont);
+            Paragraph namePara = new Paragraph(namePhr);
+            namePara.setAlignment(Element.ALIGN_CENTER);
+            namePara.setSpacingBefore(3);
+            doc.add(namePara);
+
+            // Description (centered italic)
+            String desc = chooseDescription(item);
+            if (desc != null) {
+                Paragraph d = new Paragraph(desc, descFont);
+                d.setAlignment(Element.ALIGN_CENTER);
+                d.setLeading(15.5f);
+                d.setSpacingBefore(6);
+                d.setIndentationLeft(60f);
+                d.setIndentationRight(60f);
+                doc.add(d);
+            }
+
+            // Base price (right-aligned)
+            if (showBasePrice) {
+                Paragraph p = new Paragraph(formatPrice(item.getSellPrice(), locale), priceFont);
+                p.setAlignment(Element.ALIGN_RIGHT);
+                p.setSpacingBefore(5);
+                doc.add(p);
+            }
+
+            // Variants
+            if (!variants.isEmpty()) {
+                Paragraph optHead = new Paragraph(spacedCaps("Options"), varLabel);
+                optHead.setAlignment(Element.ALIGN_CENTER);
+                optHead.setSpacingBefore(8);
+                doc.add(optHead);
+
+                if (varPrices) {
+                    PdfPTable vt = new PdfPTable(2);
+                    vt.setWidthPercentage(60);
+                    vt.setHorizontalAlignment(Element.ALIGN_CENTER);
+                    try { vt.setWidths(new float[]{3f, 1.5f}); } catch (DocumentException ignored) {}
+                    for (VariantEntry v : variants) {
+                        PdfPCell vnc = new PdfPCell(new Phrase(v.name(), varName));
+                        vnc.setBorder(Rectangle.NO_BORDER);
+                        vnc.setHorizontalAlignment(Element.ALIGN_CENTER);
+                        vnc.setPaddingBottom(3);
+                        vt.addCell(vnc);
+                        BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                        PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPrice));
+                        vpc.setBorder(Rectangle.NO_BORDER);
+                        vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                        vpc.setPaddingBottom(3);
+                        vt.addCell(vpc);
+                    }
+                    doc.add(vt);
+                } else {
+                    Paragraph vl = new Paragraph(variantNamesLine(variants), descFont);
+                    vl.setAlignment(Element.ALIGN_CENTER);
+                    vl.setSpacingBefore(3);
+                    doc.add(vl);
+                }
+            }
+
+            // Diamond rule between courses
+            if (i < items.size() - 1) {
+                Paragraph gap = new Paragraph(" ");
+                gap.setSpacingBefore(14);
+                doc.add(gap);
+                float cx = doc.getPageSize().getWidth() / 2f;
+                float y  = writer.getVerticalPosition(true) - 6f;
+                diamondRule(writer.getDirectContent(), cx - 45f, y, 90f);
+            }
+        }
     }
 
     // ---------- Allergens ----------
