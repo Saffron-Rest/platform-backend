@@ -1146,14 +1146,14 @@ public class MenuPrintService {
         }
     }
 
-    // ---------- PHOTO LIST — single column, photo left, details right ----------
+    // ---------- PHOTO LIST — single column, photo left, details right (top) ----------
 
     /**
-     * Line-based single-column layout: one item per row — a photo on the left
-     * with its details (name and price on top, description and dietary notes
-     * below) stacked to the right. Dishes run down the page in one column,
+     * Single-column layout, one item per row: a photo on the left with its
+     * details to the right — name and price on top (aligned with the TOP of the
+     * photo), then description and dietary notes below. Dishes run down the page
      * separated by a thin hairline. Items without a photo get a soft saffron-tint
-     * monogram tile so the left edge stays aligned all the way down.
+     * monogram tile.
      */
     private void drawPhotoList(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
             throws DocumentException {
@@ -1184,7 +1184,6 @@ public class MenuPrintService {
             row.setSpacingBefore(i == 0 ? 2 : 6);
             row.setKeepTogether(true);
             row.setSplitLate(false);
-            // Relative widths tuned for A4 content width (~495pt): larger photo column.
             try { row.setWidths(new float[]{ THUMB, 377f }); } catch (DocumentException ignored) {}
 
             // Left — photo, or a saffron-tint monogram tile
@@ -1201,8 +1200,6 @@ public class MenuPrintService {
                 img.setAlignment(Image.ALIGN_LEFT | Image.ALIGN_MIDDLE);
                 photoCell.setImage(img);
             } else {
-                // No photo — fill the tile with a soft monogram of the dish's
-                // initial so it reads as intentional rather than a blank gap.
                 photoCell.setBackgroundColor(SAFFRON_TINT);
                 String name = item.getName();
                 String initial = (name == null || name.isBlank())
@@ -1213,13 +1210,14 @@ public class MenuPrintService {
             }
             row.addCell(photoCell);
 
-            // Right — details stacked vertically (name/price on top, desc below)
+            // Right — details, TOP-aligned so the name starts level with the
+            // top of the photo.
             PdfPCell details = new PdfPCell();
             details.setBorder(Rectangle.NO_BORDER);
             details.setPaddingLeft(14);
             details.setPaddingTop(0);
             details.setPaddingBottom(0);
-            details.setVerticalAlignment(Element.ALIGN_MIDDLE);
+            details.setVerticalAlignment(Element.ALIGN_TOP);
 
             // Featured pill
             if (item.isFeatured()) {
@@ -1248,7 +1246,7 @@ public class MenuPrintService {
             if (desc != null) {
                 Paragraph d = new Paragraph(desc, descFont);
                 d.setLeading(13.5f);
-                d.setSpacingBefore(2);
+                d.setSpacingBefore(3);
                 details.addElement(d);
             }
 
@@ -1256,7 +1254,7 @@ public class MenuPrintService {
             String dietary = renderDietary(item);
             if (dietary != null) {
                 Paragraph d = new Paragraph(dietary, tagsFont);
-                d.setSpacingBefore(2);
+                d.setSpacingBefore(3);
                 details.addElement(d);
             }
             String allergen = renderAllergens(item);
