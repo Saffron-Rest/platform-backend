@@ -127,6 +127,7 @@ public class MenuPrintService {
     private static final Color HAIRLINE     = new Color(0xDF, 0xD8, 0xCC);
     private static final Color SAFFRON_TINT = new Color(0xF5, 0xE8, 0xD5);
     private static final Color PRICE_COLOR  = new Color(0x7A, 0x48, 0x18);
+    private static final Color MONOGRAM     = new Color(0xD6, 0xB6, 0x86); // soft tan for photoless tiles
 
     // ---------- Dark theme ----------
     private static final Color DARK_PAGE  = new Color(0x18, 0x14, 0x10);
@@ -275,7 +276,10 @@ public class MenuPrintService {
                     if (items == null || items.isEmpty()) continue;
 
                     float avail = ci == 0 ? 0 : writer.getVerticalPosition(false) - doc.bottomMargin();
-                    boolean freshPage = ci == 0 || avail < 260f;
+                    // Photolist rows are tall (big photos); let categories keep
+                    // flowing down a page instead of leaving a large tail blank.
+                    float minTail = opt.layout() == Layout.PHOTOLIST ? 190f : 260f;
+                    boolean freshPage = ci == 0 || avail < minTail;
                     if (freshPage) doc.newPage();
 
                     if (dark) {
@@ -284,8 +288,12 @@ public class MenuPrintService {
                     } else if (opt.layout() == Layout.BOLD) {
                         drawBoldSectionHeader(doc, cat.getName());
                     } else {
-                        if (freshPage) drawSectionDivider(doc, cat.getName());
-                        else           drawCompactSectionDivider(doc, cat.getName());
+                        // Photolist drops the decorative eyebrow label
+                        // ("FROM THE KITCHEN" …) above each category for a
+                        // tighter, cleaner header.
+                        boolean eyebrowLabel = opt.layout() != Layout.PHOTOLIST;
+                        if (freshPage) drawSectionDivider(doc, cat.getName(), eyebrowLabel);
+                        else           drawCompactSectionDivider(doc, cat.getName(), eyebrowLabel);
                     }
 
                     boolean hasVisualContent = items.stream().anyMatch(
@@ -614,27 +622,29 @@ public class MenuPrintService {
      * and the category name (not after), so the name reads as the centrepiece.
      * The blurb font matches the body text on item cards for consistency.</p>
      */
-    private void drawSectionDivider(Document doc, String name) throws DocumentException {
+    private void drawSectionDivider(Document doc, String name, boolean showEyebrow) throws DocumentException {
         Font eyebrow  = font(SANS_BOLD,    8f,   SAFFRON_DEEP);
         Font head     = font(SERIF_BOLD,   22,   INK);
         Font az       = font(SERIF_ITALIC, 11.5f, MUTED);
         Font blurb    = font(SERIF_ITALIC, 10f,  MUTED);
 
-        // Eyebrow label
-        Paragraph eb = new Paragraph(spacedCaps(eyebrowFor(name)), eyebrow);
-        eb.setAlignment(Element.ALIGN_CENTER);
-        doc.add(eb);
+        // Eyebrow label + short saffron rule above the heading — decorative,
+        // dropped for the tighter photolist header.
+        if (showEyebrow) {
+            Paragraph eb = new Paragraph(spacedCaps(eyebrowFor(name)), eyebrow);
+            eb.setAlignment(Element.ALIGN_CENTER);
+            doc.add(eb);
 
-        // Short saffron rule between eyebrow and heading
-        Paragraph ruleSpace = new Paragraph(" ");
-        ruleSpace.setSpacingBefore(6);
-        doc.add(ruleSpace);
-        doc.add(new Chunk(new LineSeparator(1f, 16, SAFFRON, Element.ALIGN_CENTER, 0)));
+            Paragraph ruleSpace = new Paragraph(" ");
+            ruleSpace.setSpacingBefore(4);
+            doc.add(ruleSpace);
+            doc.add(new Chunk(new LineSeparator(1f, 16, SAFFRON, Element.ALIGN_CENTER, 0)));
+        }
 
         // Category heading — the hero of the section page
         Paragraph h = new Paragraph(name, head);
         h.setAlignment(Element.ALIGN_CENTER);
-        h.setSpacingBefore(10);
+        h.setSpacingBefore(showEyebrow ? 6 : 0);
         h.setSpacingAfter(0);
         doc.add(h);
 
@@ -643,13 +653,13 @@ public class MenuPrintService {
         if (azName != null) {
             Paragraph azP = new Paragraph(azName, az);
             azP.setAlignment(Element.ALIGN_CENTER);
-            azP.setSpacingBefore(4);
+            azP.setSpacingBefore(2);
             doc.add(azP);
         }
 
         // Long decorative rule below heading block
         Paragraph longRuleSpace = new Paragraph(" ");
-        longRuleSpace.setSpacingBefore(10);
+        longRuleSpace.setSpacingBefore(5);
         doc.add(longRuleSpace);
         doc.add(new Chunk(new LineSeparator(0.4f, 100, HAIRLINE, Element.ALIGN_CENTER, 0)));
 
@@ -658,15 +668,15 @@ public class MenuPrintService {
         if (blurbText != null) {
             Paragraph bp = new Paragraph(blurbText, blurb);
             bp.setAlignment(Element.ALIGN_CENTER);
-            bp.setLeading(15f);
-            bp.setSpacingBefore(12);
+            bp.setLeading(13f);
+            bp.setSpacingBefore(6);
             bp.setIndentationLeft(40f);
             bp.setIndentationRight(40f);
             doc.add(bp);
         }
 
         Paragraph after = new Paragraph(" ");
-        after.setSpacingAfter(8);
+        after.setSpacingAfter(2);
         doc.add(after);
     }
 
@@ -680,25 +690,27 @@ public class MenuPrintService {
      * No eyebrow, no blurb. iText will automatically page-break this header if
      * it does not fit the remaining space.</p>
      */
-    private void drawCompactSectionDivider(Document doc, String name) throws DocumentException {
+    private void drawCompactSectionDivider(Document doc, String name, boolean showEyebrow) throws DocumentException {
         Font head    = font(SERIF_BOLD,    16,    INK);
         Font azFont  = font(SERIF_ITALIC,  10,    MUTED);
         Font eyebrow = font(SANS_BOLD,      7.5f, SAFFRON_DEEP);
 
         // Wide hairline spacer — clear visual break between previous section and this one
         Paragraph preSpacer = new Paragraph(" ");
-        preSpacer.setSpacingBefore(14);
+        preSpacer.setSpacingBefore(8);
         doc.add(preSpacer);
         doc.add(new Chunk(new LineSeparator(0.5f, 100, HAIRLINE, Element.ALIGN_LEFT, 0)));
 
-        // Compact eyebrow (e.g. "FRESH & VIBRANT")
-        Paragraph eb = new Paragraph(spacedCaps(eyebrowFor(name)), eyebrow);
-        eb.setSpacingBefore(8);
-        doc.add(eb);
+        // Compact eyebrow (e.g. "FRESH & VIBRANT") — dropped for photolist.
+        if (showEyebrow) {
+            Paragraph eb = new Paragraph(spacedCaps(eyebrowFor(name)), eyebrow);
+            eb.setSpacingBefore(5);
+            doc.add(eb);
+        }
 
         // Category name — left-aligned, reads like a chapter title
         Paragraph h = new Paragraph(name, head);
-        h.setSpacingBefore(4);
+        h.setSpacingBefore(showEyebrow ? 3 : 5);
         h.setSpacingAfter(0);
         // keepWithNext not available in this iText version — rely on spacing to stay together
         doc.add(h);
@@ -707,7 +719,7 @@ public class MenuPrintService {
         String az = azFor(name);
         if (az != null) {
             Paragraph azP = new Paragraph(az, azFont);
-            azP.setSpacingBefore(3);
+            azP.setSpacingBefore(2);
             doc.add(azP);
         }
 
@@ -715,7 +727,7 @@ public class MenuPrintService {
         doc.add(new Chunk(new LineSeparator(1.2f, 32, SAFFRON, Element.ALIGN_LEFT, 0)));
 
         Paragraph post = new Paragraph(" ");
-        post.setSpacingAfter(5);
+        post.setSpacingAfter(3);
         doc.add(post);
     }
 
@@ -1137,11 +1149,11 @@ public class MenuPrintService {
     // ---------- PHOTO LIST — single column, photo left, details right ----------
 
     /**
-     * Line-based single-column layout: each dish is one row with a small square
-     * photo on the left and its details (name, price, description, dietary tags,
-     * options) on the right. Dishes stack vertically down the page, separated by
-     * a thin hairline. Items without a photo get a warm saffron-tint placeholder
-     * square so the left edge stays aligned all the way down the column.
+     * Line-based single-column layout: one item per row — a photo on the left
+     * with its details (name and price on top, description and dietary notes
+     * below) stacked to the right. Dishes run down the page in one column,
+     * separated by a thin hairline. Items without a photo get a soft saffron-tint
+     * monogram tile so the left edge stays aligned all the way down.
      */
     private void drawPhotoList(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
             throws DocumentException {
@@ -1158,7 +1170,7 @@ public class MenuPrintService {
         Font varPriceFont  = font(SANS_BOLD,    10f,   INK_SOFT);
         Font varSameFont   = font(SANS_ITALIC,   9.5f, MUTED);
 
-        final float THUMB = 100f;   // square photo edge (points)
+        final float THUMB = 118f;   // square photo edge (points)
 
         for (int i = 0; i < items.size(); i++) {
             MenuItem item        = items.get(i);
@@ -1173,9 +1185,9 @@ public class MenuPrintService {
             row.setKeepTogether(true);
             row.setSplitLate(false);
             // Relative widths tuned for A4 content width (~495pt): larger photo column.
-            try { row.setWidths(new float[]{ THUMB, 395f }); } catch (DocumentException ignored) {}
+            try { row.setWidths(new float[]{ THUMB, 377f }); } catch (DocumentException ignored) {}
 
-            // Left — photo, or a saffron-tint placeholder square
+            // Left — photo, or a saffron-tint monogram tile
             PdfPCell photoCell = new PdfPCell();
             photoCell.setBorder(Rectangle.NO_BORDER);
             photoCell.setFixedHeight(THUMB);
@@ -1189,11 +1201,19 @@ public class MenuPrintService {
                 img.setAlignment(Image.ALIGN_LEFT | Image.ALIGN_MIDDLE);
                 photoCell.setImage(img);
             } else {
+                // No photo — fill the tile with a soft monogram of the dish's
+                // initial so it reads as intentional rather than a blank gap.
                 photoCell.setBackgroundColor(SAFFRON_TINT);
+                String name = item.getName();
+                String initial = (name == null || name.isBlank())
+                        ? "·" : name.trim().substring(0, 1).toUpperCase(locale);
+                photoCell.setPhrase(new Phrase(initial, font(SERIF_BOLD, THUMB * 0.4f, MONOGRAM)));
+                photoCell.setHorizontalAlignment(Element.ALIGN_CENTER);
+                photoCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
             }
             row.addCell(photoCell);
 
-            // Right — details stacked vertically
+            // Right — details stacked vertically (name/price on top, desc below)
             PdfPCell details = new PdfPCell();
             details.setBorder(Rectangle.NO_BORDER);
             details.setPaddingLeft(14);
@@ -1282,13 +1302,12 @@ public class MenuPrintService {
             row.addCell(details);
             doc.add(row);
 
-            // Hairline between dishes
+            // Hairline between dishes — one thin rule, minimal breathing room.
             if (i < items.size() - 1) {
-                Paragraph pad = new Paragraph(" ");
-                pad.setSpacingBefore(3);
-                doc.add(pad);
-                LineSeparator sep = new LineSeparator(0.4f, 100, HAIRLINE, Element.ALIGN_LEFT, 0);
-                doc.add(new Chunk(sep));
+                Paragraph sepP = new Paragraph();
+                sepP.setSpacingBefore(5);
+                sepP.add(new Chunk(new LineSeparator(0.4f, 100, HAIRLINE, Element.ALIGN_LEFT, 0)));
+                doc.add(sepP);
             }
         }
     }
