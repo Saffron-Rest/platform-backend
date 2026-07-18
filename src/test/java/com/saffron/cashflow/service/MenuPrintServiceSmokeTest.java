@@ -38,7 +38,7 @@ class MenuPrintServiceSmokeTest {
 
         MenuPrintService service = new MenuPrintService(menu, storage);
 
-        for (String layout : new String[]{"grid", "list", "compact", "fine", "tasting",
+        for (String layout : new String[]{"grid", "list", "photolist", "compact", "fine", "tasting",
                                           "dark", "bold", "columns", "a3", "deco"}) {
             byte[] bytes = service.buildMenu(layout, "Saffron Test", "Smoke test menu", true, "en");
             assertThat(bytes).as("non-empty PDF for layout %s", layout).isNotEmpty();

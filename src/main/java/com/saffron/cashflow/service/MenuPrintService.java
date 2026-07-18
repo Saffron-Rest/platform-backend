@@ -29,6 +29,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -41,6 +42,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -293,8 +295,9 @@ public class MenuPrintService {
                             ? Layout.LIST : opt.layout();
 
                     switch (effectiveLayout) {
-                        case GRID    -> drawGrid(doc, items, opt.showPrices(), opt.locale());
-                        case LIST    -> drawList(doc, items, opt.showPrices(), opt.locale());
+                        case GRID     -> drawGrid(doc, items, opt.showPrices(), opt.locale());
+                        case LIST     -> drawList(doc, items, opt.showPrices(), opt.locale());
+                        case PHOTOLIST -> drawPhotoList(doc, items, opt.showPrices(), opt.locale());
                         case COMPACT -> drawCompact(doc, items, opt.showPrices(), opt.locale());
                         case FINE    -> drawFine(doc, items, opt.showPrices(), opt.locale());
                         case TASTING -> drawTasting(doc, writer, items, opt.showPrices(), opt.locale());
@@ -321,11 +324,12 @@ public class MenuPrintService {
     }
 
     public enum Layout {
-        GRID, LIST, COMPACT, FINE, TASTING, DARK, BOLD, COLUMNS, A3, DECO;
+        GRID, LIST, PHOTOLIST, COMPACT, FINE, TASTING, DARK, BOLD, COLUMNS, A3, DECO;
         public static Layout from(String key) {
             if (key == null) return GRID;
             return switch (key.trim().toLowerCase(Locale.ROOT)) {
-                case "list"    -> LIST;
+                case "list"      -> LIST;
+                case "photolist", "photo-list", "photo_list" -> PHOTOLIST;
                 case "compact" -> COMPACT;
                 case "fine"    -> FINE;
                 case "tasting" -> TASTING;
@@ -1123,6 +1127,165 @@ public class MenuPrintService {
             if (i < items.size() - 1) {
                 Paragraph pad = new Paragraph(" ");
                 pad.setSpacingBefore(4);
+                doc.add(pad);
+                LineSeparator sep = new LineSeparator(0.4f, 100, HAIRLINE, Element.ALIGN_LEFT, 0);
+                doc.add(new Chunk(sep));
+            }
+        }
+    }
+
+    // ---------- PHOTO LIST — single column, photo left, details right ----------
+
+    /**
+     * Line-based single-column layout: each dish is one row with a small square
+     * photo on the left and its details (name, price, description, dietary tags,
+     * options) on the right. Dishes stack vertically down the page, separated by
+     * a thin hairline. Items without a photo get a warm saffron-tint placeholder
+     * square so the left edge stays aligned all the way down the column.
+     */
+    private void drawPhotoList(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
+            throws DocumentException {
+        // ── Fonts ────────────────────────────────────────────────────────────
+        Font nameFont      = font(SERIF_BOLD,   13f,   INK);
+        Font portionFont   = font(SANS_REG,      8.5f, MUTED);
+        Font priceFont     = font(SANS_BOLD,    13f,   INK_SOFT);
+        Font pillFont      = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
+        Font descFont      = font(SERIF_ITALIC, 10.5f, MUTED);
+        Font tagsFont      = font(SANS_ITALIC,   8.5f, MUTED);
+        Font allergenFont  = font(SANS_REG,      7.5f, MUTED);
+        Font optLabelFont  = font(SANS_BOLD,     7f,   MUTED);
+        Font varNameFont   = font(SANS_REG,     10f,   INK_SOFT);
+        Font varPriceFont  = font(SANS_BOLD,    10f,   INK_SOFT);
+        Font varSameFont   = font(SANS_ITALIC,   9.5f, MUTED);
+
+        final float THUMB = 100f;   // square photo edge (points)
+
+        for (int i = 0; i < items.size(); i++) {
+            MenuItem item        = items.get(i);
+            List<VariantEntry> variants = parseVariants(item);
+            boolean varPrices    = showPrices && hasVariantPrices(variants);
+            boolean showBasePrice = showPrices && !varPrices;
+
+            // ── Row: [photo] [details] — kept together so it never splits ─────
+            PdfPTable row = new PdfPTable(2);
+            row.setWidthPercentage(100);
+            row.setSpacingBefore(i == 0 ? 2 : 6);
+            row.setKeepTogether(true);
+            row.setSplitLate(false);
+            // Relative widths tuned for A4 content width (~495pt): larger photo column.
+            try { row.setWidths(new float[]{ THUMB, 395f }); } catch (DocumentException ignored) {}
+
+            // Left — photo, or a saffron-tint placeholder square
+            PdfPCell photoCell = new PdfPCell();
+            photoCell.setBorder(Rectangle.NO_BORDER);
+            photoCell.setFixedHeight(THUMB);
+            photoCell.setPadding(0);
+            photoCell.setHorizontalAlignment(Element.ALIGN_LEFT);
+            photoCell.setVerticalAlignment(Element.ALIGN_TOP);
+            Image img = tryLoadImage(item.getImagePath());
+            if (img != null) {
+                float scale = Math.max(THUMB / img.getWidth(), THUMB / img.getHeight()); // cover
+                img.scaleAbsolute(img.getWidth() * scale, img.getHeight() * scale);
+                img.setAlignment(Image.ALIGN_LEFT | Image.ALIGN_MIDDLE);
+                photoCell.setImage(img);
+            } else {
+                photoCell.setBackgroundColor(SAFFRON_TINT);
+            }
+            row.addCell(photoCell);
+
+            // Right — details stacked vertically
+            PdfPCell details = new PdfPCell();
+            details.setBorder(Rectangle.NO_BORDER);
+            details.setPaddingLeft(14);
+            details.setPaddingTop(0);
+            details.setPaddingBottom(0);
+            details.setVerticalAlignment(Element.ALIGN_MIDDLE);
+
+            // Featured pill
+            if (item.isFeatured()) {
+                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                pill.setSpacingAfter(3);
+                details.addElement(pill);
+            }
+
+            // Name (+ portion) and base price on one row
+            PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
+            head.setWidthPercentage(100);
+            try { if (showBasePrice) head.setWidths(new float[]{6.4f, 1.6f}); }
+            catch (DocumentException ignored) {}
+            head.addCell(textCell(namePhrase(item, nameFont, portionFont), Element.ALIGN_LEFT));
+            if (showBasePrice) {
+                PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+                pc.setBorder(Rectangle.NO_BORDER);
+                pc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                pc.setNoWrap(true);
+                head.addCell(pc);
+            }
+            details.addElement(head);
+
+            // Description
+            String desc = chooseDescription(item);
+            if (desc != null) {
+                Paragraph d = new Paragraph(desc, descFont);
+                d.setLeading(13.5f);
+                d.setSpacingBefore(2);
+                details.addElement(d);
+            }
+
+            // Dietary + allergens
+            String dietary = renderDietary(item);
+            if (dietary != null) {
+                Paragraph d = new Paragraph(dietary, tagsFont);
+                d.setSpacingBefore(2);
+                details.addElement(d);
+            }
+            String allergen = renderAllergens(item);
+            if (allergen != null) {
+                Paragraph d = new Paragraph(allergen, allergenFont);
+                d.setSpacingBefore(1);
+                details.addElement(d);
+            }
+
+            // Options (variant prices, or shared-price name line)
+            if (!variants.isEmpty()) {
+                Paragraph optLabel = new Paragraph(spacedCaps("Options"), optLabelFont);
+                optLabel.setSpacingBefore(3);
+                details.addElement(optLabel);
+                if (varPrices) {
+                    for (VariantEntry v : variants) {
+                        PdfPTable vRow = new PdfPTable(2);
+                        vRow.setWidthPercentage(100);
+                        try { vRow.setWidths(new float[]{6.4f, 1.6f}); } catch (DocumentException ignored) {}
+
+                        PdfPCell vnc = new PdfPCell(new Phrase(v.name(), varNameFont));
+                        vnc.setBorder(Rectangle.NO_BORDER);
+                        vnc.setPaddingTop(3);
+                        vnc.setPaddingLeft(6);
+                        vRow.addCell(vnc);
+
+                        BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                        PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
+                        vpc.setBorder(Rectangle.NO_BORDER);
+                        vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                        vpc.setNoWrap(true);
+                        vpc.setPaddingTop(3);
+                        vRow.addCell(vpc);
+                        details.addElement(vRow);
+                    }
+                } else {
+                    Paragraph vLine = new Paragraph(variantNamesLine(variants), varSameFont);
+                    vLine.setSpacingBefore(3);
+                    details.addElement(vLine);
+                }
+            }
+
+            row.addCell(details);
+            doc.add(row);
+
+            // Hairline between dishes
+            if (i < items.size() - 1) {
+                Paragraph pad = new Paragraph(" ");
+                pad.setSpacingBefore(3);
                 doc.add(pad);
                 LineSeparator sep = new LineSeparator(0.4f, 100, HAIRLINE, Element.ALIGN_LEFT, 0);
                 doc.add(new Chunk(sep));
@@ -2208,7 +2371,7 @@ public class MenuPrintService {
 
     private void drawAllergens(Document doc) throws DocumentException {
         Font eyebrow = font(SANS_BOLD, 9.5f, SAFFRON_DEEP);
-        Font head = font(SERIF_BOLD, 30, INK);
+        Font head = font(SERIF_BOLD, 22, INK);
         Font key = font(SANS_BOLD, 10.5f, INK);
         Font keyDesc = font(SANS_REG, 10, MUTED);
         Font body = font(SANS_REG, 10.5f, MUTED);
@@ -2219,12 +2382,12 @@ public class MenuPrintService {
 
         Paragraph h = new Paragraph("Allergens & advisories", head);
         h.setAlignment(Element.ALIGN_CENTER);
-        h.setSpacingBefore(6);
+        h.setSpacingBefore(4);
         h.setSpacingAfter(0);
         doc.add(h);
 
         Paragraph ruleSpacer = new Paragraph(" ");
-        ruleSpacer.setSpacingBefore(8);
+        ruleSpacer.setSpacingBefore(5);
         doc.add(ruleSpacer);
         LineSeparator sep = new LineSeparator(1.5f, 18, SAFFRON, Element.ALIGN_CENTER, 0);
         doc.add(new Chunk(sep));
@@ -2239,22 +2402,22 @@ public class MenuPrintService {
 
         PdfPTable kt = new PdfPTable(2);
         kt.setWidthPercentage(100);
-        kt.setSpacingBefore(26);
+        kt.setSpacingBefore(14);
         kt.getDefaultCell().setBorder(Rectangle.NO_BORDER);
         try { kt.setWidths(new float[]{1, 3}); } catch (DocumentException ignored) {}
 
         for (String[] row : dietKey) {
             PdfPCell label = new PdfPCell(new Phrase(row[0], key));
             label.setBorder(Rectangle.NO_BORDER);
-            label.setPaddingTop(8);
-            label.setPaddingBottom(8);
+            label.setPaddingTop(4);
+            label.setPaddingBottom(4);
 
             PdfPCell desc = new PdfPCell(new Phrase(row[1], keyDesc));
             desc.setBorder(Rectangle.BOTTOM);
             desc.setBorderColor(HAIRLINE);
             desc.setBorderWidthBottom(0.4f);
-            desc.setPaddingTop(8);
-            desc.setPaddingBottom(8);
+            desc.setPaddingTop(4);
+            desc.setPaddingBottom(4);
             desc.setPaddingLeft(12);
 
             kt.addCell(label);
@@ -2264,8 +2427,8 @@ public class MenuPrintService {
 
         Paragraph allergenHead = new Paragraph("Allergens & cross-contact",
                 font(SERIF_BOLD, 13, INK));
-        allergenHead.setSpacingBefore(26);
-        allergenHead.setSpacingAfter(6);
+        allergenHead.setSpacingBefore(14);
+        allergenHead.setSpacingAfter(4);
         doc.add(allergenHead);
 
         Paragraph allergenP = new Paragraph(
@@ -2273,7 +2436,7 @@ public class MenuPrintService {
                         + "tree nuts, sesame, soya, fish, shellfish, celery, mustard, and sulphites. Please tell a "
                         + "member of our team about any allergies before ordering so the kitchen can advise.",
                 body);
-        allergenP.setLeading(15.5f);
+        allergenP.setLeading(14f);
         allergenP.setAlignment(Element.ALIGN_JUSTIFIED);
         doc.add(allergenP);
 
@@ -2281,8 +2444,8 @@ public class MenuPrintService {
                 "Prices include VAT. A discretionary 10% service charge is added to tables of six or more. "
                         + "Seasonal garnishes may vary with availability.",
                 body);
-        priceP.setLeading(15.5f);
-        priceP.setSpacingBefore(12);
+        priceP.setLeading(14f);
+        priceP.setSpacingBefore(8);
         priceP.setAlignment(Element.ALIGN_JUSTIFIED);
         doc.add(priceP);
     }
@@ -2478,9 +2641,66 @@ public class MenuPrintService {
             Path p = fileStorage.getUploadDir().resolve(relativePath).normalize();
             if (!p.startsWith(fileStorage.getUploadDir())) return null;
             if (!Files.exists(p)) return null;
-            return Image.getInstance(p.toUri().toURL());
+            try {
+                return Image.getInstance(p.toUri().toURL());
+            } catch (Exception openPdfCannotDecode) {
+                // OpenPDF cannot decode WEBP. Menu photos are frequently uploaded
+                // as .webp (browsers show them fine, but the PDF engine can't),
+                // so transcode to PNG with dwebp (libwebp-tools) and load that.
+                if (isWebp(p)) {
+                    Image converted = loadViaDwebp(p);
+                    if (converted != null) return converted;
+                }
+                throw openPdfCannotDecode;
+            }
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    /** RIFF….WEBP magic-byte sniff — cheaper and safer than trusting the extension. */
+    private static boolean isWebp(Path p) {
+        try (InputStream in = Files.newInputStream(p)) {
+            byte[] h = in.readNBytes(12);
+            return h.length == 12
+                    && h[0] == 'R' && h[1] == 'I' && h[2] == 'F' && h[3] == 'F'
+                    && h[8] == 'W' && h[9] == 'E' && h[10] == 'B' && h[11] == 'P';
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Convert a WEBP file to PNG using the {@code dwebp} binary (from the
+     * libwebp-tools package installed in the runtime image) and load the result
+     * as an OpenPDF image. Returns {@code null} on any failure so the caller can
+     * fall back to the placeholder rather than aborting the whole PDF.
+     */
+    private Image loadViaDwebp(Path src) {
+        Path tmp = null;
+        try {
+            tmp = Files.createTempFile("menu-webp-", ".png");
+            Process proc = new ProcessBuilder("dwebp", src.toString(), "-o", tmp.toString())
+                    .redirectErrorStream(true)
+                    .start();
+            if (!proc.waitFor(15, TimeUnit.SECONDS)) {
+                proc.destroyForcibly();
+                LOG.warn("dwebp timed out converting {}", src);
+                return null;
+            }
+            if (proc.exitValue() != 0) {
+                LOG.warn("dwebp exited {} converting {}", proc.exitValue(), src);
+                return null;
+            }
+            if (!Files.exists(tmp) || Files.size(tmp) == 0) return null;
+            return Image.getInstance(Files.readAllBytes(tmp));
+        } catch (Exception e) {
+            LOG.warn("dwebp conversion failed for {}: {}", src, e.getMessage());
+            return null;
+        } finally {
+            if (tmp != null) {
+                try { Files.deleteIfExists(tmp); } catch (IOException ignore) { /* temp file */ }
+            }
         }
     }
 
