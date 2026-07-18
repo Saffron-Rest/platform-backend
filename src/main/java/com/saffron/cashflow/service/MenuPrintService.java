@@ -1171,6 +1171,7 @@ public class MenuPrintService {
         Font varSameFont   = font(SANS_ITALIC,   9.5f, MUTED);
 
         final float THUMB = 118f;   // square photo edge (points)
+        final float GAP   = 8f;     // equal breathing room above and below the hairline
 
         for (int i = 0; i < items.size(); i++) {
             MenuItem item        = items.get(i);
@@ -1267,21 +1268,19 @@ public class MenuPrintService {
                 // [photo] [details]
                 PdfPTable row = new PdfPTable(2);
                 row.setWidthPercentage(100);
-                row.setSpacingBefore(i == 0 ? 2 : 6);
+                row.setSpacingBefore(i == 0 ? 2 : GAP);
                 row.setKeepTogether(true);
                 row.setSplitLate(false);
                 try { row.setWidths(new float[]{ THUMB, 377f }); } catch (DocumentException ignored) {}
 
-                PdfPCell photoCell = new PdfPCell();
+                // Fit the image to the column width; the cell height follows the
+                // image (no fixedHeight → no dead space below it), so the hairline
+                // sits an equal GAP from this item and the next.
+                PdfPCell photoCell = new PdfPCell(img, true);
                 photoCell.setBorder(Rectangle.NO_BORDER);
-                photoCell.setFixedHeight(THUMB);
                 photoCell.setPadding(0);
                 photoCell.setHorizontalAlignment(Element.ALIGN_LEFT);
                 photoCell.setVerticalAlignment(Element.ALIGN_TOP);
-                float scale = Math.max(THUMB / img.getWidth(), THUMB / img.getHeight()); // cover
-                img.scaleAbsolute(img.getWidth() * scale, img.getHeight() * scale);
-                img.setAlignment(Image.ALIGN_LEFT | Image.ALIGN_MIDDLE);
-                photoCell.setImage(img);
                 row.addCell(photoCell);
                 row.addCell(details);
                 doc.add(row);
@@ -1289,19 +1288,30 @@ public class MenuPrintService {
                 // No photo — text starts flush at the left, full width.
                 PdfPTable row = new PdfPTable(1);
                 row.setWidthPercentage(100);
-                row.setSpacingBefore(i == 0 ? 2 : 6);
+                row.setSpacingBefore(i == 0 ? 2 : GAP);
                 row.setKeepTogether(true);
                 row.setSplitLate(false);
                 row.addCell(details);
                 doc.add(row);
             }
 
-            // Hairline between dishes — one thin rule, minimal breathing room.
+            // Hairline between dishes — a thin cell (not a LineSeparator inside
+            // a paragraph, whose leading would push the rule closer to the next
+            // item). GAP of space above it; the next row adds an equal GAP below,
+            // so the rule sits exactly midway between the two dishes.
             if (i < items.size() - 1) {
-                Paragraph sepP = new Paragraph();
-                sepP.setSpacingBefore(5);
-                sepP.add(new Chunk(new LineSeparator(0.4f, 100, HAIRLINE, Element.ALIGN_LEFT, 0)));
-                doc.add(sepP);
+                PdfPTable sep = new PdfPTable(1);
+                sep.setWidthPercentage(100);
+                // Equal GAP above (here) and below (the next row's spacingBefore),
+                // so the rule sits centred between the two dishes.
+                sep.setSpacingBefore(GAP);
+                PdfPCell line = new PdfPCell();
+                line.setFixedHeight(0.4f);
+                line.setBackgroundColor(HAIRLINE);
+                line.setBorder(Rectangle.NO_BORDER);
+                line.setPadding(0);
+                sep.addCell(line);
+                doc.add(sep);
             }
         }
     }
