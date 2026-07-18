@@ -127,7 +127,6 @@ public class MenuPrintService {
     private static final Color HAIRLINE     = new Color(0xDF, 0xD8, 0xCC);
     private static final Color SAFFRON_TINT = new Color(0xF5, 0xE8, 0xD5);
     private static final Color PRICE_COLOR  = new Color(0x7A, 0x48, 0x18);
-    private static final Color MONOGRAM     = new Color(0xD6, 0xB6, 0x86); // soft tan for photoless tiles
 
     // ---------- Dark theme ----------
     private static final Color DARK_PAGE  = new Color(0x18, 0x14, 0x10);
@@ -1149,11 +1148,12 @@ public class MenuPrintService {
     // ---------- PHOTO LIST — single column, photo left, details right (top) ----------
 
     /**
-     * Single-column layout, one item per row: a photo on the left with its
-     * details to the right — name and price on top (aligned with the TOP of the
-     * photo), then description and dietary notes below. Dishes run down the page
-     * separated by a thin hairline. Items without a photo get a soft saffron-tint
-     * monogram tile.
+     * Single-column layout, one item per row. When a dish has a photo it sits on
+     * the left with the details (name + price on top, aligned with the top of the
+     * photo, then description and dietary notes) to its right. When a dish has no
+     * photo, there is no image or placeholder at all — the text simply starts
+     * from the left edge and spans the full width. Dishes run down the page
+     * separated by a thin hairline.
      */
     private void drawPhotoList(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
             throws DocumentException {
@@ -1178,55 +1178,25 @@ public class MenuPrintService {
             boolean varPrices    = showPrices && hasVariantPrices(variants);
             boolean showBasePrice = showPrices && !varPrices;
 
-            // ── Row: [photo] [details] — kept together so it never splits ─────
-            PdfPTable row = new PdfPTable(2);
-            row.setWidthPercentage(100);
-            row.setSpacingBefore(i == 0 ? 2 : 6);
-            row.setKeepTogether(true);
-            row.setSplitLate(false);
-            try { row.setWidths(new float[]{ THUMB, 377f }); } catch (DocumentException ignored) {}
-
-            // Left — photo, or a saffron-tint monogram tile
-            PdfPCell photoCell = new PdfPCell();
-            photoCell.setBorder(Rectangle.NO_BORDER);
-            photoCell.setFixedHeight(THUMB);
-            photoCell.setPadding(0);
-            photoCell.setHorizontalAlignment(Element.ALIGN_LEFT);
-            photoCell.setVerticalAlignment(Element.ALIGN_TOP);
             Image img = tryLoadImage(item.getImagePath());
-            if (img != null) {
-                float scale = Math.max(THUMB / img.getWidth(), THUMB / img.getHeight()); // cover
-                img.scaleAbsolute(img.getWidth() * scale, img.getHeight() * scale);
-                img.setAlignment(Image.ALIGN_LEFT | Image.ALIGN_MIDDLE);
-                photoCell.setImage(img);
-            } else {
-                photoCell.setBackgroundColor(SAFFRON_TINT);
-                String name = item.getName();
-                String initial = (name == null || name.isBlank())
-                        ? "·" : name.trim().substring(0, 1).toUpperCase(locale);
-                photoCell.setPhrase(new Phrase(initial, font(SERIF_BOLD, THUMB * 0.4f, MONOGRAM)));
-                photoCell.setHorizontalAlignment(Element.ALIGN_CENTER);
-                photoCell.setVerticalAlignment(Element.ALIGN_MIDDLE);
-            }
-            row.addCell(photoCell);
+            boolean hasImg = img != null;
 
-            // Right — details, TOP-aligned so the name starts level with the
-            // top of the photo.
+            // ── Details: name + price on top, description below. TOP-aligned so
+            //    the name starts level with the top of the photo. With no photo
+            //    the text starts flush at the left edge (paddingLeft 0).
             PdfPCell details = new PdfPCell();
             details.setBorder(Rectangle.NO_BORDER);
-            details.setPaddingLeft(14);
+            details.setPaddingLeft(hasImg ? 14 : 0);
             details.setPaddingTop(0);
             details.setPaddingBottom(0);
             details.setVerticalAlignment(Element.ALIGN_TOP);
 
-            // Featured pill
             if (item.isFeatured()) {
                 Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
                 pill.setSpacingAfter(3);
                 details.addElement(pill);
             }
 
-            // Name (+ portion) and base price on one row
             PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
             head.setWidthPercentage(100);
             try { if (showBasePrice) head.setWidths(new float[]{6.4f, 1.6f}); }
@@ -1241,7 +1211,6 @@ public class MenuPrintService {
             }
             details.addElement(head);
 
-            // Description
             String desc = chooseDescription(item);
             if (desc != null) {
                 Paragraph d = new Paragraph(desc, descFont);
@@ -1249,8 +1218,6 @@ public class MenuPrintService {
                 d.setSpacingBefore(3);
                 details.addElement(d);
             }
-
-            // Dietary + allergens
             String dietary = renderDietary(item);
             if (dietary != null) {
                 Paragraph d = new Paragraph(dietary, tagsFont);
@@ -1263,8 +1230,6 @@ public class MenuPrintService {
                 d.setSpacingBefore(1);
                 details.addElement(d);
             }
-
-            // Options (variant prices, or shared-price name line)
             if (!variants.isEmpty()) {
                 Paragraph optLabel = new Paragraph(spacedCaps("Options"), optLabelFont);
                 optLabel.setSpacingBefore(3);
@@ -1297,8 +1262,39 @@ public class MenuPrintService {
                 }
             }
 
-            row.addCell(details);
-            doc.add(row);
+            // ── Assemble the row ──
+            if (hasImg) {
+                // [photo] [details]
+                PdfPTable row = new PdfPTable(2);
+                row.setWidthPercentage(100);
+                row.setSpacingBefore(i == 0 ? 2 : 6);
+                row.setKeepTogether(true);
+                row.setSplitLate(false);
+                try { row.setWidths(new float[]{ THUMB, 377f }); } catch (DocumentException ignored) {}
+
+                PdfPCell photoCell = new PdfPCell();
+                photoCell.setBorder(Rectangle.NO_BORDER);
+                photoCell.setFixedHeight(THUMB);
+                photoCell.setPadding(0);
+                photoCell.setHorizontalAlignment(Element.ALIGN_LEFT);
+                photoCell.setVerticalAlignment(Element.ALIGN_TOP);
+                float scale = Math.max(THUMB / img.getWidth(), THUMB / img.getHeight()); // cover
+                img.scaleAbsolute(img.getWidth() * scale, img.getHeight() * scale);
+                img.setAlignment(Image.ALIGN_LEFT | Image.ALIGN_MIDDLE);
+                photoCell.setImage(img);
+                row.addCell(photoCell);
+                row.addCell(details);
+                doc.add(row);
+            } else {
+                // No photo — text starts flush at the left, full width.
+                PdfPTable row = new PdfPTable(1);
+                row.setWidthPercentage(100);
+                row.setSpacingBefore(i == 0 ? 2 : 6);
+                row.setKeepTogether(true);
+                row.setSplitLate(false);
+                row.addCell(details);
+                doc.add(row);
+            }
 
             // Hairline between dishes — one thin rule, minimal breathing room.
             if (i < items.size() - 1) {
