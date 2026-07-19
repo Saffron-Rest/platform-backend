@@ -1355,14 +1355,15 @@ public class MenuPrintService {
         doc.add(two);
     }
 
-    /** One column of the drinks-style grid: name (+ portion/variants) · price rows. */
+    /** One column of the drinks-style grid: name (+ portion) · price, aligned. */
     private PdfPTable simpleColumn(List<MenuItem> items, boolean showPrices, Locale locale) {
         Font nameFont     = font(SERIF_BOLD,   11.5f, INK);
         Font portionFont  = font(SANS_REG,      8f,   MUTED);
         Font priceFont    = font(SANS_BOLD,    11.5f, INK_SOFT);
         Font tagsFont     = font(SANS_ITALIC,   8f,   MUTED);
         Font pillFont     = font(SANS_BOLD,     6.5f, SAFFRON_DEEP);
-        Font varFont      = font(SANS_ITALIC,   8.5f, MUTED);
+        Font varNameFont  = font(SANS_REG,      9.5f, INK_SOFT);
+        Font varPriceFont = font(SANS_REG,      9.5f, PRICE_COLOR);
 
         PdfPTable col = new PdfPTable(1);
         col.setWidthPercentage(100);
@@ -1373,15 +1374,16 @@ public class MenuPrintService {
             boolean varPrices = showPrices && hasVariantPrices(variants);
             boolean showBasePrice = showPrices && !varPrices;
 
-            // Name (+ portion) on the left, price on the right.
-            PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
+            // Name row: name (+ portion) left, base price right — always a 2-col
+            // grid so every price lines up in the same right-hand column.
+            PdfPTable head = new PdfPTable(2);
             head.setWidthPercentage(100);
-            try { if (showBasePrice) head.setWidths(new float[]{5.2f, 1.8f}); } catch (DocumentException ignored) {}
+            try { head.setWidths(new float[]{5f, 2f}); } catch (DocumentException ignored) {}
 
             PdfPCell nameC = new PdfPCell();
             nameC.setBorder(Rectangle.NO_BORDER);
             nameC.setPadding(0);
-            nameC.setPaddingTop(i == 0 ? 0 : 6);
+            nameC.setPaddingTop(i == 0 ? 0 : 7);
             if (item.isFeatured()) {
                 Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
                 pill.setSpacingAfter(1);
@@ -1390,33 +1392,50 @@ public class MenuPrintService {
             nameC.addElement(new Paragraph(namePhrase(item, nameFont, portionFont)));
             head.addCell(nameC);
 
-            if (showBasePrice) {
-                PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
-                pc.setBorder(Rectangle.NO_BORDER);
-                pc.setPadding(0);
-                pc.setPaddingTop(i == 0 ? 0 : 6);
-                pc.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                pc.setVerticalAlignment(Element.ALIGN_BOTTOM);
-                pc.setNoWrap(true);
-                head.addCell(pc);
-            }
-            PdfPCell headWrap = new PdfPCell(head);
-            headWrap.setBorder(Rectangle.NO_BORDER);
-            headWrap.setPadding(0);
-            col.addCell(headWrap);
+            PdfPCell pc = new PdfPCell(showBasePrice
+                    ? new Phrase(formatPrice(item.getSellPrice(), locale), priceFont)
+                    : new Phrase(""));
+            pc.setBorder(Rectangle.NO_BORDER);
+            pc.setPadding(0);
+            pc.setPaddingTop(i == 0 ? 0 : 7);
+            pc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+            pc.setVerticalAlignment(Element.ALIGN_BOTTOM);
+            pc.setNoWrap(true);
+            head.addCell(pc);
+            col.addCell(simpleWrap(head));
 
-            // Variant sizes (e.g. "Small · Large", or per-size prices).
-            if (!variants.isEmpty()) {
-                String vline = varPrices
-                        ? variants.stream()
-                            .map(v -> v.name() + " "
-                                    + formatPrice(v.price() != null ? v.price() : item.getSellPrice(), locale))
-                            .collect(Collectors.joining("   ·   "))
-                        : variantNamesLine(variants);
-                PdfPCell vc = new PdfPCell(new Phrase(vline, varFont));
+            // Options with their own prices: one indented line per size, price
+            // right-aligned in the same column as the base prices.
+            if (varPrices) {
+                for (VariantEntry v : variants) {
+                    PdfPTable vr = new PdfPTable(2);
+                    vr.setWidthPercentage(100);
+                    try { vr.setWidths(new float[]{5f, 2f}); } catch (DocumentException ignored) {}
+
+                    PdfPCell vn = new PdfPCell(new Phrase(v.name(), varNameFont));
+                    vn.setBorder(Rectangle.NO_BORDER);
+                    vn.setPadding(0);
+                    vn.setPaddingTop(2);
+                    vn.setPaddingLeft(10);
+                    vr.addCell(vn);
+
+                    BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
+                    PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
+                    vpc.setBorder(Rectangle.NO_BORDER);
+                    vpc.setPadding(0);
+                    vpc.setPaddingTop(2);
+                    vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                    vpc.setNoWrap(true);
+                    vr.addCell(vpc);
+                    col.addCell(simpleWrap(vr));
+                }
+            } else if (!variants.isEmpty()) {
+                // Options that share the base price: just list the size names.
+                PdfPCell vc = new PdfPCell(new Phrase(variantNamesLine(variants), varNameFont));
                 vc.setBorder(Rectangle.NO_BORDER);
                 vc.setPadding(0);
-                vc.setPaddingTop(1);
+                vc.setPaddingTop(2);
+                vc.setPaddingLeft(10);
                 col.addCell(vc);
             }
 
@@ -1431,6 +1450,14 @@ public class MenuPrintService {
             }
         }
         return col;
+    }
+
+    /** Wrap a nested table in a borderless, padding-free cell. */
+    private PdfPCell simpleWrap(PdfPTable inner) {
+        PdfPCell c = new PdfPCell(inner);
+        c.setBorder(Rectangle.NO_BORDER);
+        c.setPadding(0);
+        return c;
     }
 
     // ---------- COMPACT ----------
