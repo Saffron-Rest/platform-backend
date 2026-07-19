@@ -708,7 +708,9 @@ public class MenuService {
 
     @Transactional(readOnly = true)
     public List<MenuItem> activeItemsForCategory(String categoryId) {
-        return itemRepository.findAllByCategoryIdOrderByNameAsc(categoryId).stream()
+        // Order by the display order set from the admin menu (↑/↓ reorder), so the
+        // printed menu matches the arrangement there. Falls back to name for ties.
+        return itemRepository.findAllByCategoryIdOrderByDisplayOrderAscNameAsc(categoryId).stream()
                 .filter(MenuItem::isActive)
                 .toList();
     }
