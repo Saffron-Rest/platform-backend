@@ -1157,6 +1157,16 @@ public class MenuPrintService {
      */
     private void drawPhotoList(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
             throws DocumentException {
+        // Drinks-style categories — no photo and no description on ANY item —
+        // waste space one-per-row, so lay them out as a compact two-column grid.
+        boolean anyImage = items.stream()
+                .anyMatch(it -> it.getImagePath() != null && !it.getImagePath().isBlank());
+        boolean anyDesc = items.stream().anyMatch(it -> chooseDescription(it) != null);
+        if (!anyImage && !anyDesc) {
+            drawPhotoSimpleGrid(doc, items, showPrices, locale);
+            return;
+        }
+
         // ── Fonts ────────────────────────────────────────────────────────────
         Font nameFont      = font(SERIF_BOLD,   13f,   INK);
         Font portionFont   = font(SANS_REG,      8.5f, MUTED);
@@ -1314,6 +1324,113 @@ public class MenuPrintService {
                 doc.add(sep);
             }
         }
+    }
+
+    // ---------- PHOTO LIST — compact two-column grid (drinks-style) ----------
+
+    /**
+     * Two-column name·price grid used inside the photolist layout for categories
+     * whose items have neither a photo nor a description (drinks, sides…). Items
+     * fill the left column top-to-bottom, then the right column, so each column
+     * reads in order.
+     */
+    private void drawPhotoSimpleGrid(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
+            throws DocumentException {
+        int half = (items.size() + 1) / 2;
+        PdfPTable two = new PdfPTable(2);
+        two.setWidthPercentage(100);
+        two.setSpacingBefore(4);
+        try { two.setWidths(new float[]{1, 1}); } catch (DocumentException ignored) {}
+
+        PdfPCell left = new PdfPCell(simpleColumn(items.subList(0, half), showPrices, locale));
+        left.setBorder(Rectangle.NO_BORDER);
+        left.setPaddingRight(22);
+        two.addCell(left);
+
+        PdfPCell right = new PdfPCell(simpleColumn(items.subList(half, items.size()), showPrices, locale));
+        right.setBorder(Rectangle.NO_BORDER);
+        right.setPaddingLeft(22);
+        two.addCell(right);
+
+        doc.add(two);
+    }
+
+    /** One column of the drinks-style grid: name (+ portion/variants) · price rows. */
+    private PdfPTable simpleColumn(List<MenuItem> items, boolean showPrices, Locale locale) {
+        Font nameFont     = font(SERIF_BOLD,   11.5f, INK);
+        Font portionFont  = font(SANS_REG,      8f,   MUTED);
+        Font priceFont    = font(SANS_BOLD,    11.5f, INK_SOFT);
+        Font tagsFont     = font(SANS_ITALIC,   8f,   MUTED);
+        Font pillFont     = font(SANS_BOLD,     6.5f, SAFFRON_DEEP);
+        Font varFont      = font(SANS_ITALIC,   8.5f, MUTED);
+
+        PdfPTable col = new PdfPTable(1);
+        col.setWidthPercentage(100);
+
+        for (int i = 0; i < items.size(); i++) {
+            MenuItem item = items.get(i);
+            List<VariantEntry> variants = parseVariants(item);
+            boolean varPrices = showPrices && hasVariantPrices(variants);
+            boolean showBasePrice = showPrices && !varPrices;
+
+            // Name (+ portion) on the left, price on the right.
+            PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
+            head.setWidthPercentage(100);
+            try { if (showBasePrice) head.setWidths(new float[]{5.2f, 1.8f}); } catch (DocumentException ignored) {}
+
+            PdfPCell nameC = new PdfPCell();
+            nameC.setBorder(Rectangle.NO_BORDER);
+            nameC.setPadding(0);
+            nameC.setPaddingTop(i == 0 ? 0 : 6);
+            if (item.isFeatured()) {
+                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                pill.setSpacingAfter(1);
+                nameC.addElement(pill);
+            }
+            nameC.addElement(new Paragraph(namePhrase(item, nameFont, portionFont)));
+            head.addCell(nameC);
+
+            if (showBasePrice) {
+                PdfPCell pc = new PdfPCell(new Phrase(formatPrice(item.getSellPrice(), locale), priceFont));
+                pc.setBorder(Rectangle.NO_BORDER);
+                pc.setPadding(0);
+                pc.setPaddingTop(i == 0 ? 0 : 6);
+                pc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                pc.setVerticalAlignment(Element.ALIGN_BOTTOM);
+                pc.setNoWrap(true);
+                head.addCell(pc);
+            }
+            PdfPCell headWrap = new PdfPCell(head);
+            headWrap.setBorder(Rectangle.NO_BORDER);
+            headWrap.setPadding(0);
+            col.addCell(headWrap);
+
+            // Variant sizes (e.g. "Small · Large", or per-size prices).
+            if (!variants.isEmpty()) {
+                String vline = varPrices
+                        ? variants.stream()
+                            .map(v -> v.name() + " "
+                                    + formatPrice(v.price() != null ? v.price() : item.getSellPrice(), locale))
+                            .collect(Collectors.joining("   ·   "))
+                        : variantNamesLine(variants);
+                PdfPCell vc = new PdfPCell(new Phrase(vline, varFont));
+                vc.setBorder(Rectangle.NO_BORDER);
+                vc.setPadding(0);
+                vc.setPaddingTop(1);
+                col.addCell(vc);
+            }
+
+            // Dietary tags, if any (still no description in this layout).
+            String dietary = renderDietary(item);
+            if (dietary != null) {
+                PdfPCell dc = new PdfPCell(new Phrase(dietary, tagsFont));
+                dc.setBorder(Rectangle.NO_BORDER);
+                dc.setPadding(0);
+                dc.setPaddingTop(1);
+                col.addCell(dc);
+            }
+        }
+        return col;
     }
 
     // ---------- COMPACT ----------
