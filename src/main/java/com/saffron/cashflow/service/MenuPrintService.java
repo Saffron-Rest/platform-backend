@@ -1362,8 +1362,8 @@ public class MenuPrintService {
         Font priceFont    = font(SANS_BOLD,    11.5f, INK_SOFT);
         Font tagsFont     = font(SANS_ITALIC,   8f,   MUTED);
         Font pillFont     = font(SANS_BOLD,     6.5f, SAFFRON_DEEP);
-        Font varNameFont  = font(SANS_REG,      9.5f, INK_SOFT);
-        Font varPriceFont = font(SANS_REG,      9.5f, PRICE_COLOR);
+        Font varNameFont  = font(SANS_REG,     10f,   INK);
+        Font varPriceFont = font(SANS_BOLD,    10.5f, INK_SOFT);
 
         PdfPTable col = new PdfPTable(1);
         col.setWidthPercentage(100);
