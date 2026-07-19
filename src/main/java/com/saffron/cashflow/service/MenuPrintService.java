@@ -1404,38 +1404,38 @@ public class MenuPrintService {
             head.addCell(pc);
             col.addCell(simpleWrap(head));
 
-            // Options with their own prices: one indented line per size, price
-            // right-aligned in the same column as the base prices.
+            // Options with their own prices: option label sits right next to its
+            // price (both pushed toward the price column), not far left.
             if (varPrices) {
                 for (VariantEntry v : variants) {
-                    PdfPTable vr = new PdfPTable(2);
-                    vr.setWidthPercentage(100);
-                    try { vr.setWidths(new float[]{5f, 2f}); } catch (DocumentException ignored) {}
-
-                    PdfPCell vn = new PdfPCell(new Phrase(v.name(), varNameFont));
-                    vn.setBorder(Rectangle.NO_BORDER);
-                    vn.setPadding(0);
-                    vn.setPaddingTop(2);
-                    vn.setPaddingLeft(10);
-                    vr.addCell(vn);
-
+                    // Keep the price at the right edge (aligned with the base
+                    // prices) and bring the option name up next to it, separated
+                    // by a fixed ~6pt gap. The whole "name  price" reads as one
+                    // right-aligned line.
                     BigDecimal vp = v.price() != null ? v.price() : item.getSellPrice();
-                    PdfPCell vpc = new PdfPCell(new Phrase(formatPrice(vp, locale), varPriceFont));
-                    vpc.setBorder(Rectangle.NO_BORDER);
-                    vpc.setPadding(0);
-                    vpc.setPaddingTop(2);
-                    vpc.setHorizontalAlignment(Element.ALIGN_RIGHT);
-                    vpc.setNoWrap(true);
-                    vr.addCell(vpc);
-                    col.addCell(simpleWrap(vr));
+                    Phrase line = new Phrase();
+                    line.add(new Chunk(v.name(), varNameFont));
+                    Chunk gap = new Chunk(" ", varNameFont);
+                    gap.setHorizontalScaling(2.4f);   // ≈ 6pt gap before the price
+                    line.add(gap);
+                    line.add(new Chunk(formatPrice(vp, locale), varPriceFont));
+
+                    PdfPCell vc = new PdfPCell(line);
+                    vc.setBorder(Rectangle.NO_BORDER);
+                    vc.setPadding(0);
+                    vc.setPaddingTop(2);
+                    vc.setHorizontalAlignment(Element.ALIGN_RIGHT);
+                    vc.setNoWrap(true);
+                    col.addCell(vc);
                 }
             } else if (!variants.isEmpty()) {
-                // Options that share the base price: just list the size names.
+                // Options that share the base price: list the names right-aligned,
+                // under the single price.
                 PdfPCell vc = new PdfPCell(new Phrase(variantNamesLine(variants), varNameFont));
                 vc.setBorder(Rectangle.NO_BORDER);
                 vc.setPadding(0);
                 vc.setPaddingTop(2);
-                vc.setPaddingLeft(10);
+                vc.setHorizontalAlignment(Element.ALIGN_RIGHT);
                 col.addCell(vc);
             }
 
@@ -1447,6 +1447,17 @@ public class MenuPrintService {
                 dc.setPadding(0);
                 dc.setPaddingTop(1);
                 col.addCell(dc);
+            }
+
+            // Thin rule between drinks (not after the last one in the column).
+            if (i < items.size() - 1) {
+                PdfPCell rule = new PdfPCell();
+                rule.setBorder(Rectangle.BOTTOM);
+                rule.setBorderColorBottom(HAIRLINE);
+                rule.setBorderWidthBottom(0.4f);
+                rule.setFixedHeight(7f);
+                rule.setPadding(0);
+                col.addCell(rule);
             }
         }
         return col;
