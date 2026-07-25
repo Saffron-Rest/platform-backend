@@ -9,9 +9,9 @@ RUN mvn -q -B -DskipTests package
 
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
-# libwebp-tools provides `dwebp`, used by MenuPrintService to transcode WEBP
-# menu photos to PNG (OpenPDF cannot decode WEBP directly).
-RUN apk add --no-cache libwebp-tools
+# libwebp-tools provides `dwebp` (transcode WEBP menu photos, OpenPDF can't decode
+# WEBP) and ghostscript provides `gs` (convert the print-ready menu PDF to CMYK).
+RUN apk add --no-cache libwebp-tools ghostscript
 RUN addgroup -S app && adduser -S app -G app && mkdir -p /data/uploads && chown -R app:app /data/uploads
 USER app
 COPY --from=build /app/target/cashflow-api-*.jar /app/app.jar

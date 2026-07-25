@@ -204,15 +204,65 @@ public class MenuPrintService {
     public byte[] buildMenu(String layoutKey, String customTitle, String customSubtitle,
                             boolean showPrices, String language,
                             String storyTitle, String storyBody, String contactBlock) {
+        return buildMenu(layoutKey, customTitle, customSubtitle, showPrices, language,
+                storyTitle, storyBody, contactBlock, false);
+    }
+
+    public byte[] buildMenu(String layoutKey, String customTitle, String customSubtitle,
+                            boolean showPrices, String language,
+                            String storyTitle, String storyBody, String contactBlock,
+                            boolean forPrint) {
         return build(new Options(
                 Layout.from(layoutKey), customTitle, customSubtitle, showPrices,
                 "pl".equalsIgnoreCase(language) ? Locale.forLanguageTag("pl-PL") : Locale.ENGLISH,
-                storyTitle, storyBody, contactBlock));
+                storyTitle, storyBody, contactBlock, forPrint));
     }
 
     public record Options(Layout layout, String customTitle, String customSubtitle,
                           boolean showPrices, Locale locale,
-                          String storyTitle, String storyBody, String contactBlock) {}
+                          String storyTitle, String storyBody, String contactBlock,
+                          boolean forPrint) {}
+
+    /**
+     * Convert an RGB menu PDF to DeviceCMYK with Ghostscript (installed in the
+     * runtime image). Trim/Bleed boxes are preserved, so the file stays print-ready.
+     * If Ghostscript is missing or fails, the original RGB bytes are returned
+     * unchanged — the download never breaks, it just stays RGB.
+     */
+    public byte[] convertToCmyk(byte[] rgbPdf) {
+        Path in = null, out = null;
+        try {
+            in  = Files.createTempFile("menu-rgb-",  ".pdf");
+            out = Files.createTempFile("menu-cmyk-", ".pdf");
+            Files.write(in, rgbPdf);
+            Process proc = new ProcessBuilder(
+                    "gs", "-q", "-dBATCH", "-dNOPAUSE", "-dSAFER",
+                    "-sDEVICE=pdfwrite",
+                    "-dProcessColorModel=/DeviceCMYK",
+                    "-sColorConversionStrategy=CMYK",
+                    "-o", out.toString(), in.toString())
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+                    .redirectError(ProcessBuilder.Redirect.DISCARD)
+                    .start();
+            if (!proc.waitFor(90, TimeUnit.SECONDS)) {
+                proc.destroyForcibly();
+                LOG.warn("Ghostscript CMYK conversion timed out; returning RGB PDF");
+                return rgbPdf;
+            }
+            if (proc.exitValue() != 0) {
+                LOG.warn("Ghostscript CMYK conversion exited {}; returning RGB PDF", proc.exitValue());
+                return rgbPdf;
+            }
+            byte[] cmyk = Files.readAllBytes(out);
+            return cmyk.length > 0 ? cmyk : rgbPdf;
+        } catch (Exception e) {
+            LOG.warn("Ghostscript CMYK conversion failed ({}); returning RGB PDF", e.getMessage());
+            return rgbPdf;
+        } finally {
+            try { if (in  != null) Files.deleteIfExists(in);  } catch (IOException ignore) { /* temp */ }
+            try { if (out != null) Files.deleteIfExists(out); } catch (IOException ignore) { /* temp */ }
+        }
+    }
 
     private byte[] build(Options opt) {
         String title = blankToDefault(opt.customTitle(), "Saffron");
@@ -235,19 +285,37 @@ public class MenuPrintService {
 
         boolean isA3   = opt.layout() == Layout.A3;
         boolean isDeco = opt.layout() == Layout.DECO;
+        boolean isPhoto = opt.layout() == Layout.PHOTOLIST;
         // A3.rotate() only sets a metadata flag — actual landscape needs swapped dimensions.
         Rectangle a3Landscape = new Rectangle(PageSize.A3.getHeight(), PageSize.A3.getWidth());
-        Rectangle pageRect = (isA3 || isDeco) ? a3Landscape : PageSize.A4;
-        boolean isPhoto = opt.layout() == Layout.PHOTOLIST;
-        float mSide = (isA3 || isDeco) ? 54 : 50;
+        Rectangle trimRect = (isA3 || isDeco) ? a3Landscape : PageSize.A4;
+
+        // Print prep: grow the page by a 3mm bleed (the cream background extends
+        // into it) plus a small margin that holds the crop marks. Content keeps
+        // the same inset from the trim edge, so the artwork is unchanged.
+        final float MM = 72f / 25.4f;
+        float bleed    = opt.forPrint() ? 3f * MM : 0f;
+        float markRoom = opt.forPrint() ? 5f * MM : 0f;
+        float outer    = bleed + markRoom;                 // added to every edge
+
+        Rectangle pageRect = opt.forPrint()
+                ? new Rectangle(trimRect.getWidth() + 2 * outer, trimRect.getHeight() + 2 * outer)
+                : trimRect;
+        float mSide   = ((isA3 || isDeco) ? 54 : 50) + outer;
         // Photolist packs the page: smaller top/bottom margin fits more items.
-        float mTopBot = isDeco ? 54 : (isA3 ? 68 : (isPhoto ? 44 : 64));
+        float mTopBot = (isDeco ? 54 : (isA3 ? 68 : (isPhoto ? 44 : 64))) + outer;
         Document doc = new Document(pageRect, mSide, mSide, mTopBot, mTopBot);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
             PdfWriter writer = PdfWriter.getInstance(doc, out);
+            if (opt.forPrint()) {
+                float pw = pageRect.getWidth(), ph = pageRect.getHeight();
+                writer.setBoxSize("trim",  new Rectangle(outer, outer, pw - outer, ph - outer));
+                writer.setBoxSize("bleed", new Rectangle(markRoom, markRoom, pw - markRoom, ph - markRoom));
+            }
             MenuChrome chrome = new MenuChrome();
             if (isPhoto) chrome.setTightMargins();
+            if (opt.forPrint()) chrome.setPrintMode(bleed, markRoom);
             writer.setPageEvent(chrome);
             doc.open();
 
@@ -3023,6 +3091,9 @@ public class MenuPrintService {
         private boolean suppressChrome = false;
         private float   headerInset  = 52f;   // "SAFFRON" running head, from top edge
         private float   folioInset   = 38f;   // page number, from bottom edge
+        private boolean printMode    = false; // add bleed background + crop marks
+        private float   bleed        = 0f;
+        private float   markRoom     = 0f;
 
         void suppressNext()  { this.suppressPageNumber = true; }
         void setSuppressAll(boolean v) { this.suppressChrome = v; }
@@ -3030,6 +3101,16 @@ public class MenuPrintService {
         /** Pull the running head / folio closer to the edges so a smaller page
          *  margin can fit more items without the chrome overlapping the content. */
         void setTightMargins() { this.headerInset = 32f; this.folioInset = 24f; }
+        /** Print prep: fill the background only to the bleed box, draw crop marks,
+         *  and keep the running head / folio the same distance from the trim edge. */
+        void setPrintMode(float bleed, float markRoom) {
+            this.printMode = true;
+            this.bleed = bleed;
+            this.markRoom = markRoom;
+            float outer = bleed + markRoom;
+            this.headerInset += outer;
+            this.folioInset  += outer;
+        }
 
         void setTheme(Color bg, Color brand, Color pageNum) {
             this.bgColor = bg; this.brandColor = brand; this.pageNumColor = pageNum;
@@ -3046,14 +3127,44 @@ public class MenuPrintService {
                 Rectangle page = doc.getPageSize();
                 cb.saveState();
                 cb.setColorFill(bgColor);
-                cb.rectangle(0, 0, page.getWidth(), page.getHeight());
+                if (printMode) {
+                    // Fill only up to the bleed box; the crop-mark margin stays white.
+                    cb.rectangle(markRoom, markRoom,
+                            page.getWidth() - 2 * markRoom, page.getHeight() - 2 * markRoom);
+                } else {
+                    cb.rectangle(0, 0, page.getWidth(), page.getHeight());
+                }
                 cb.fill();
                 cb.restoreState();
             } catch (Exception ignored) {}
         }
 
+        /** Crop (trim) marks at the four trim corners, drawn in the outer margin. */
+        private void drawCropMarks(PdfContentByte cb, Rectangle page) {
+            float w = page.getWidth(), h = page.getHeight();
+            float o = bleed + markRoom;   // trim inset from the page edge
+            cb.saveState();
+            cb.setColorStroke(Color.BLACK);
+            cb.setLineWidth(0.3f);
+            // Each corner: one mark on the trim's vertical line, one on the horizontal.
+            cb.moveTo(o, 0);         cb.lineTo(o, markRoom);            // bottom-left ┃
+            cb.moveTo(0, o);         cb.lineTo(markRoom, o);            // bottom-left ━
+            cb.moveTo(w - o, 0);     cb.lineTo(w - o, markRoom);       // bottom-right ┃
+            cb.moveTo(w - markRoom, o); cb.lineTo(w, o);               // bottom-right ━
+            cb.moveTo(o, h - markRoom); cb.lineTo(o, h);               // top-left ┃
+            cb.moveTo(0, h - o);     cb.lineTo(markRoom, h - o);       // top-left ━
+            cb.moveTo(w - o, h - markRoom); cb.lineTo(w - o, h);       // top-right ┃
+            cb.moveTo(w - markRoom, h - o); cb.lineTo(w, h - o);       // top-right ━
+            cb.stroke();
+            cb.restoreState();
+        }
+
         @Override
         public void onEndPage(PdfWriter writer, Document doc) {
+            if (printMode) {
+                try { drawCropMarks(writer.getDirectContent(), doc.getPageSize()); }
+                catch (Exception ignored) {}
+            }
             if (suppressPageNumber) { suppressPageNumber = false; }
             if (suppressChrome) return;
             try {

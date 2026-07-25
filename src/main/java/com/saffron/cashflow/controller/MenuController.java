@@ -130,10 +130,18 @@ public class MenuController {
             // to a curated Azerbaijani-heritage narrative.
             @RequestParam(value = "storyTitle", required = false) String storyTitle,
             @RequestParam(value = "storyBody", required = false) String storyBody,
-            @RequestParam(value = "contactBlock", required = false) String contactBlock) {
+            @RequestParam(value = "contactBlock", required = false) String contactBlock,
+            // Print-ready output: 3mm bleed, crop marks and PDF trim/bleed boxes.
+            @RequestParam(value = "forPrint", defaultValue = "false") boolean forPrint) {
         byte[] pdf = menuPrintService.buildMenu(
-                layout, title, subtitle, showPrices, language, storyTitle, storyBody, contactBlock);
-        String filename = "saffron-menu-" + java.time.LocalDate.now() + ".pdf";
+                layout, title, subtitle, showPrices, language, storyTitle, storyBody, contactBlock, forPrint);
+        // Print-ready output is converted to CMYK on the server (Ghostscript);
+        // falls back to RGB automatically if Ghostscript is unavailable.
+        if (forPrint) {
+            pdf = menuPrintService.convertToCmyk(pdf);
+        }
+        String suffix = forPrint ? "-print" : "";
+        String filename = "saffron-menu" + suffix + "-" + java.time.LocalDate.now() + ".pdf";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_PDF);
         headers.add(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"");
