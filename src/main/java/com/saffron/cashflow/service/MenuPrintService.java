@@ -148,6 +148,14 @@ public class MenuPrintService {
     private static final DateTimeFormatter MENU_DATE =
             DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH);
 
+    /** Today's date with month names in the menu's language (Polish or English). */
+    private static String menuDateStr(Locale locale) {
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("d MMMM yyyy",
+                (locale != null && "pl".equalsIgnoreCase(locale.getLanguage()))
+                        ? Locale.forLanguageTag("pl") : Locale.ENGLISH);
+        return LocalDate.now().format(fmt);
+    }
+
     /** English → Azerbaijani translations used on category dividers. */
     private static final Map<String, String> CATEGORY_TRANSLATIONS = Map.ofEntries(
             Map.entry("starters", "Başlanğıclar"),
@@ -185,6 +193,17 @@ public class MenuPrintService {
                     + "festival when families gather around dolma and şəkərbura. Others are everyday food, made "
                     + "for sharing slowly, talking long, and leaving the table a little fuller than we planned to. "
                     + "We hope you do the same.";
+
+    private static final String DEFAULT_STORY_BODY_PL =
+            "Saffron to list miłosny do Azerbejdżanu — kraju, w którym szlaki przypraw spotykały się z jedwabnymi "
+                    + "szlakami, gdzie jeden plov potrafi zająć pół dnia, a każdy posiłek zaczyna się od szklanki "
+                    + "herbaty armudu. Nasza kuchnia przenosi ten stół do Warszawy — z przepisami z Şəki, Lənkəran "
+                    + "i Baku, składnikami sprowadzanymi tak blisko domu, jak to możliwe, i szafranem, który sami "
+                    + "uprawiamy.\n\n"
+                    + "Każde danie w tym menu ma swoją historię. Niektóre należą do wesel i Nowruzu — wiosennego "
+                    + "święta, gdy rodziny zbierają się wokół dolmy i şəkərbury. Inne to codzienne jedzenie, "
+                    + "stworzone do dzielenia się powoli, długich rozmów i wstawania od stołu trochę bardziej "
+                    + "sytym, niż planowaliśmy. Mamy nadzieję, że zrobicie to samo.";
 
     private final MenuService menuService;
     private final FileStorageService fileStorage;
@@ -266,7 +285,8 @@ public class MenuPrintService {
 
     private byte[] build(Options opt) {
         String title = blankToDefault(opt.customTitle(), "Saffron");
-        String subtitle = blankToDefault(opt.customSubtitle(), "Authentic Azerbaijani Restaurant");
+        String subtitle = blankToDefault(opt.customSubtitle(),
+                isPl(opt.locale()) ? "Autentyczna Kuchnia Azerbejdżańska" : "Authentic Azerbaijani Restaurant");
 
         List<MenuCategory> allCategories = menuService.activeCategoriesInOrder();
         List<MenuCategory> categories = new ArrayList<>();
@@ -333,11 +353,12 @@ public class MenuPrintService {
 
                 chrome.suppressNext();
                 if (dark) drawDarkCover(doc, writer, title, subtitle);
-                else      drawCover(doc, writer, title, subtitle);
+                else      drawCover(doc, writer, title, subtitle, opt.locale());
 
                 if (!dark) {
                     doc.newPage(); drawStory(doc, writer, opt);
-                    doc.newPage(); drawHeritage(doc);
+                    // Photolist skips the "Notes from our kitchen" heritage page.
+                    if (!isPhoto) { doc.newPage(); drawHeritage(doc); }
                 }
 
                 for (int ci = 0; ci < categories.size(); ci++) {
@@ -398,7 +419,8 @@ public class MenuPrintService {
                     }
                 }
 
-                if (!dark) { doc.newPage(); drawAllergens(doc); }
+                // Photolist skips the "Allergens & advisories" page.
+                if (!dark && !isPhoto) { doc.newPage(); drawAllergens(doc); }
 
                 doc.newPage();
                 chrome.suppressNext();
@@ -458,7 +480,7 @@ public class MenuPrintService {
      *       16pt inset) creates a layered frame that feels handcrafted.</li>
      * </ul></p>
      */
-    private void drawCover(Document doc, PdfWriter writer, String title, String subtitle)
+    private void drawCover(Document doc, PdfWriter writer, String title, String subtitle, Locale locale)
             throws DocumentException {
         PdfContentByte cb = writer.getDirectContent();
         Rectangle page   = doc.getPageSize();
@@ -480,8 +502,10 @@ public class MenuPrintService {
         Font foot      = font(SANS_REG,    7.5f, new Color(0xB0, 0xA8, 0x9C));
 
         // ── Top: cuisine eyebrow ──────────────────────────────────────────────
+        boolean pl = isPl(locale);
         float topY = h - inset - 55f;
-        showCentered(cb, spacedCaps("Azerbaijani cuisine  ·  Warszawa"), eyebrow, cx, topY);
+        showCentered(cb, spacedCaps(pl ? "Kuchnia Azerbejdżańska  ·  Warszawa"
+                                        : "Azerbaijani cuisine  ·  Warszawa"), eyebrow, cx, topY);
 
         // ── Upper decorative rule (frames the title from above) ───────────────
         float titleY = h * 0.62f;          // golden-ratio focal point
@@ -501,7 +525,7 @@ public class MenuPrintService {
 
         // ── Lower-third anchor: location ─────────────────────────────────────
         float midY = h * 0.28f;
-        showCentered(cb, "Warszawa  ·  Poland", locLabel, cx, midY);
+        showCentered(cb, pl ? "Warszawa  ·  Polska" : "Warszawa  ·  Poland", locLabel, cx, midY);
         // very short saffron rule above the location text
         cb.saveState();
         cb.setColorStroke(SAFFRON);
@@ -513,9 +537,9 @@ public class MenuPrintService {
 
         // ── Footer: date ──────────────────────────────────────────────────────
         showCentered(cb,
-                spacedCaps("Menu  ·  " + LocalDate.now().format(MENU_DATE)),
+                spacedCaps("Menu  ·  " + menuDateStr(locale)),
                 menuLabel, cx, inset + 50f);
-        showCentered(cb, "Saffron Restaurant", foot, cx, inset + 33f);
+        showCentered(cb, pl ? "Restauracja Saffron" : "Saffron Restaurant", foot, cx, inset + 33f);
     }
 
     /**
@@ -549,11 +573,12 @@ public class MenuPrintService {
         Font quote = font(SERIF_ITALIC, 16, SAFFRON_DEEP);
         Font attribution = font(SANS_REG, 8.5f, MUTED);
 
-        Paragraph eb = new Paragraph(spacedCaps("Welcome"), eyebrow);
+        boolean pl = isPl(opt.locale());
+        Paragraph eb = new Paragraph(spacedCaps(pl ? "Witamy" : "Welcome"), eyebrow);
         eb.setAlignment(Element.ALIGN_CENTER);
         doc.add(eb);
 
-        Paragraph h = new Paragraph(blankToDefault(opt.storyTitle(), "Our story"), head);
+        Paragraph h = new Paragraph(blankToDefault(opt.storyTitle(), pl ? "Nasza historia" : "Our story"), head);
         h.setAlignment(Element.ALIGN_CENTER);
         h.setSpacingBefore(6);
         h.setSpacingAfter(0);
@@ -565,7 +590,8 @@ public class MenuPrintService {
         LineSeparator centerRule = new LineSeparator(1.5f, 18, SAFFRON, Element.ALIGN_CENTER, 0);
         doc.add(new Chunk(centerRule));
 
-        String[] paragraphs = blankToDefault(opt.storyBody(), DEFAULT_STORY_BODY).split("\\n\\s*\\n");
+        String[] paragraphs = blankToDefault(opt.storyBody(),
+                pl ? DEFAULT_STORY_BODY_PL : DEFAULT_STORY_BODY).split("\\n\\s*\\n");
         if (paragraphs.length > 0 && !paragraphs[0].isBlank()) {
             String first = paragraphs[0].trim();
             String initial = first.substring(0, 1);
@@ -607,11 +633,12 @@ public class MenuPrintService {
         diamondRule(writer.getDirectContent(), doc.getPageSize().getWidth() / 2f,
                 writer.getVerticalPosition(true) - 4, 90f);
 
-        Paragraph q = new Paragraph("\u201CA guest is the gift of God.\u201D", quote);
+        Paragraph q = new Paragraph(
+                pl ? "\u201EGo\u015B\u0107 jest darem od Boga.\u201D" : "\u201CA guest is the gift of God.\u201D", quote);
         q.setAlignment(Element.ALIGN_CENTER);
         q.setSpacingBefore(28);
         doc.add(q);
-        Paragraph a = new Paragraph("— Azerbaijani proverb", attribution);
+        Paragraph a = new Paragraph(pl ? "— przysłowie azerbejdżańskie" : "— Azerbaijani proverb", attribution);
         a.setAlignment(Element.ALIGN_CENTER);
         a.setSpacingBefore(4);
         doc.add(a);
@@ -773,13 +800,13 @@ public class MenuPrintService {
      * it does not fit the remaining space.</p>
      */
     private void drawCompactSectionDivider(Document doc, String name, boolean showEyebrow) throws DocumentException {
-        Font head    = font(SERIF_BOLD,    16,    INK);
+        Font head    = font(SERIF_BOLD,    18,    INK);
         Font azFont  = font(SERIF_ITALIC,  10,    MUTED);
         Font eyebrow = font(SANS_BOLD,      7.5f, SAFFRON_DEEP);
 
         // Wide hairline spacer — clear visual break between previous section and this one
         Paragraph preSpacer = new Paragraph(" ");
-        preSpacer.setSpacingBefore(5);
+        preSpacer.setSpacingBefore(3);
         doc.add(preSpacer);
         doc.add(new Chunk(new LineSeparator(0.5f, 100, HAIRLINE, Element.ALIGN_LEFT, 0)));
 
@@ -792,17 +819,20 @@ public class MenuPrintService {
 
         // Category name — left-aligned, reads like a chapter title
         Paragraph h = new Paragraph(name, head);
-        h.setSpacingBefore(showEyebrow ? 3 : 4);
+        h.setSpacingBefore(3);
         h.setSpacingAfter(0);
         // keepWithNext not available in this iText version — rely on spacing to stay together
         doc.add(h);
 
-        // Optional Azerbaijani translation
-        String az = azFor(name);
-        if (az != null) {
-            Paragraph azP = new Paragraph(az, azFont);
-            azP.setSpacingBefore(2);
-            doc.add(azP);
+        // Azerbaijani translation — only for layouts that keep the decorative
+        // eyebrow (photolist passes showEyebrow=false and drops it).
+        if (showEyebrow) {
+            String az = azFor(name);
+            if (az != null) {
+                Paragraph azP = new Paragraph(az, azFont);
+                azP.setSpacingBefore(2);
+                doc.add(azP);
+            }
         }
 
         // Short saffron rule — visual closure under the heading
@@ -960,7 +990,7 @@ public class MenuPrintService {
         // Remaining content sits on white background
         // ── Featured pill ─────────────────────────────────────────────────────
         if (item.isFeatured()) {
-            PdfPCell pill = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
+            PdfPCell pill = new PdfPCell(new Phrase(spacedCaps(chefLabel(locale)), pillFont));
             pill.setBorder(Rectangle.NO_BORDER);
             pill.setBackgroundColor(CARD_BG);
             pill.setPaddingTop(10);
@@ -1025,7 +1055,7 @@ public class MenuPrintService {
         }
 
         // ── Dietary + allergens ───────────────────────────────────────────────
-        String dietary = renderDietary(item);
+        String dietary = renderDietary(item, locale);
         if (dietary != null) {
             PdfPCell c = new PdfPCell(new Phrase(dietary, tagsFont));
             c.setBorder(Rectangle.NO_BORDER);
@@ -1035,7 +1065,7 @@ public class MenuPrintService {
             c.setPaddingBottom(2);
             card.addCell(c);
         }
-        String allergen = renderAllergens(item);
+        String allergen = renderAllergens(item, locale);
         if (allergen != null) {
             PdfPCell c = new PdfPCell(new Phrase(allergen, allergenFont));
             c.setBorder(Rectangle.NO_BORDER);
@@ -1139,7 +1169,7 @@ public class MenuPrintService {
 
             // ── 1. Featured pill ──────────────────────────────────────────────
             if (item.isFeatured()) {
-                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                Paragraph pill = new Paragraph(spacedCaps(chefLabel(locale)), pillFont);
                 pill.setSpacingBefore(i == 0 ? 0 : 4);
                 doc.add(pill);
             }
@@ -1170,13 +1200,13 @@ public class MenuPrintService {
             }
 
             // ── 4. Dietary + allergens ────────────────────────────────────────
-            String dietary = renderDietary(item);
+            String dietary = renderDietary(item, locale);
             if (dietary != null) {
                 Paragraph d = new Paragraph(dietary, tagsFont);
                 d.setSpacingBefore(4);
                 doc.add(d);
             }
-            String allergen = renderAllergens(item);
+            String allergen = renderAllergens(item, locale);
             if (allergen != null) {
                 Paragraph d = new Paragraph(allergen, allergenFont);
                 d.setSpacingBefore(2);
@@ -1255,9 +1285,10 @@ public class MenuPrintService {
         Font portionFont   = font(SANS_REG,      8.5f, MUTED);
         Font priceFont     = font(SANS_BOLD,    13f,   INK_SOFT);
         Font pillFont      = font(SANS_BOLD,     7f,   SAFFRON_DEEP);
-        Font descFont      = font(SERIF_ITALIC, 10.5f, MUTED);
-        Font tagsFont      = font(SANS_ITALIC,   8.5f, MUTED);
-        Font allergenFont  = font(SANS_REG,      7.5f, MUTED);
+        // Bigger and darker than before: pale muted italic washed out in print.
+        Font descFont      = font(SERIF_ITALIC, 11.5f, INK_SOFT);
+        Font tagsFont      = font(SANS_ITALIC,   8.5f, INK_SOFT);
+        Font allergenFont  = font(SANS_REG,      8f,   MUTED);
         Font optLabelFont  = font(SANS_BOLD,     7f,   MUTED);
         Font varNameFont   = font(SANS_REG,     10f,   INK_SOFT);
         Font varPriceFont  = font(SANS_BOLD,    10f,   INK_SOFT);
@@ -1286,7 +1317,7 @@ public class MenuPrintService {
             details.setVerticalAlignment(Element.ALIGN_TOP);
 
             if (item.isFeatured()) {
-                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                Paragraph pill = new Paragraph(spacedCaps(chefLabel(locale)), pillFont);
                 pill.setSpacingAfter(3);
                 details.addElement(pill);
             }
@@ -1308,17 +1339,17 @@ public class MenuPrintService {
             String desc = chooseDescription(item);
             if (desc != null) {
                 Paragraph d = new Paragraph(desc, descFont);
-                d.setLeading(13.5f);
+                d.setLeading(14.5f);
                 d.setSpacingBefore(3);
                 details.addElement(d);
             }
-            String dietary = renderDietary(item);
+            String dietary = renderDietary(item, locale);
             if (dietary != null) {
                 Paragraph d = new Paragraph(dietary, tagsFont);
                 d.setSpacingBefore(3);
                 details.addElement(d);
             }
-            String allergen = renderAllergens(item);
+            String allergen = renderAllergens(item, locale);
             if (allergen != null) {
                 Paragraph d = new Paragraph(allergen, allergenFont);
                 d.setSpacingBefore(1);
@@ -1468,7 +1499,7 @@ public class MenuPrintService {
             nameC.setPadding(0);
             nameC.setPaddingTop(i == 0 ? 0 : 7);
             if (item.isFeatured()) {
-                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                Paragraph pill = new Paragraph(spacedCaps(chefLabel(locale)), pillFont);
                 pill.setSpacingAfter(1);
                 nameC.addElement(pill);
             }
@@ -1523,7 +1554,7 @@ public class MenuPrintService {
             }
 
             // Dietary tags, if any (still no description in this layout).
-            String dietary = renderDietary(item);
+            String dietary = renderDietary(item, locale);
             if (dietary != null) {
                 PdfPCell dc = new PdfPCell(new Phrase(dietary, tagsFont));
                 dc.setBorder(Rectangle.NO_BORDER);
@@ -1601,7 +1632,7 @@ public class MenuPrintService {
 
             // ── 1. Featured pill ──────────────────────────────────────────────
             if (item.isFeatured()) {
-                PdfPCell p = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
+                PdfPCell p = new PdfPCell(new Phrase(spacedCaps(chefLabel(locale)), pillFont));
                 p.setBorder(Rectangle.NO_BORDER);
                 col.addCell(p);
             }
@@ -1635,7 +1666,7 @@ public class MenuPrintService {
             }
 
             // ── 4. Dietary ────────────────────────────────────────────────────
-            String dietary = renderDietary(item);
+            String dietary = renderDietary(item, locale);
             if (dietary != null) {
                 PdfPCell c = new PdfPCell(new Phrase(dietary, tagsFont));
                 c.setBorder(Rectangle.NO_BORDER);
@@ -1712,7 +1743,7 @@ public class MenuPrintService {
             boolean showBasePrice = showPrices && !varPrices;
 
             if (item.isFeatured()) {
-                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                Paragraph pill = new Paragraph(spacedCaps(chefLabel(locale)), pillFont);
                 pill.setSpacingBefore(i == 0 ? 0 : 3);
                 doc.add(pill);
             }
@@ -1808,7 +1839,7 @@ public class MenuPrintService {
 
             // Chef badge
             if (item.isFeatured()) {
-                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                Paragraph pill = new Paragraph(spacedCaps(chefLabel(locale)), pillFont);
                 pill.setAlignment(Element.ALIGN_CENTER);
                 pill.setSpacingBefore(4);
                 doc.add(pill);
@@ -1999,7 +2030,7 @@ public class MenuPrintService {
             boolean showBasePrice = showPrices && !varPrices;
 
             if (item.isFeatured()) {
-                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                Paragraph pill = new Paragraph(spacedCaps(chefLabel(locale)), pillFont);
                 pill.setSpacingBefore(i == 0 ? 0 : 4); doc.add(pill);
             }
             PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
@@ -2018,7 +2049,7 @@ public class MenuPrintService {
             if (desc != null) {
                 Paragraph d = new Paragraph(desc, descFont); d.setLeading(15.5f); d.setSpacingBefore(4); doc.add(d);
             }
-            String dietary = renderDietary(item);
+            String dietary = renderDietary(item, locale);
             if (dietary != null) { Paragraph d = new Paragraph(dietary, tagsFont); d.setSpacingBefore(4); doc.add(d); }
 
             if (!variants.isEmpty()) {
@@ -2139,7 +2170,7 @@ public class MenuPrintService {
             boolean showBasePrice = showPrices && !varPrices;
 
             if (item.isFeatured()) {
-                Paragraph pill = new Paragraph(spacedCaps("Chef's signature"), pillFont);
+                Paragraph pill = new Paragraph(spacedCaps(chefLabel(locale)), pillFont);
                 pill.setSpacingBefore(i == 0 ? 0 : 4); doc.add(pill);
             }
             PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
@@ -2158,7 +2189,7 @@ public class MenuPrintService {
             if (desc != null) {
                 Paragraph d = new Paragraph(desc, descFont); d.setLeading(15f); d.setSpacingBefore(4); doc.add(d);
             }
-            String dietary = renderDietary(item);
+            String dietary = renderDietary(item, locale);
             if (dietary != null) { Paragraph d = new Paragraph(dietary, tagsFont); d.setSpacingBefore(4); doc.add(d); }
 
             if (!variants.isEmpty()) {
@@ -2235,7 +2266,7 @@ public class MenuPrintService {
             boolean showBasePrice = showPrices && !varPrices;
 
             if (item.isFeatured()) {
-                PdfPCell p = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
+                PdfPCell p = new PdfPCell(new Phrase(spacedCaps(chefLabel(locale)), pillFont));
                 p.setBorder(Rectangle.NO_BORDER); col.addCell(p);
             }
             PdfPTable head = new PdfPTable(showBasePrice ? 2 : 1);
@@ -2393,7 +2424,7 @@ public class MenuPrintService {
             Image img = tryLoadImage(item.getImagePath());
 
             if (item.isFeatured()) {
-                PdfPCell pill = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
+                PdfPCell pill = new PdfPCell(new Phrase(spacedCaps(chefLabel(locale)), pillFont));
                 pill.setBorder(Rectangle.NO_BORDER); pill.setPaddingTop(2); inner.addCell(pill);
             }
 
@@ -2552,7 +2583,7 @@ public class MenuPrintService {
                 Image img = tryLoadImage(item.getImagePath());
 
                 if (item.isFeatured()) {
-                    PdfPCell p = new PdfPCell(new Phrase(spacedCaps("Chef's signature"), pillFont));
+                    PdfPCell p = new PdfPCell(new Phrase(spacedCaps(chefLabel(locale)), pillFont));
                     p.setBorder(Rectangle.NO_BORDER); col.addCell(p);
                 }
 
@@ -2729,12 +2760,13 @@ public class MenuPrintService {
         Font addr = font(SANS_REG, 9.5f, INK);
         Font year = font(SANS_REG, 8.5f, MUTED);
 
-        showCentered(cb, spacedCaps("Until we see you again"), eyebrow,
+        boolean pl = isPl(opt.locale());
+        showCentered(cb, spacedCaps(pl ? "Do zobaczenia" : "Until we see you again"), eyebrow,
                 cx, h - inset - 80);
 
         showCentered(cb, "Çox sağ olun", hero, cx, h * 0.60f);
         diamondRule(cb, cx - 45f, h * 0.60f - 30, 90f);
-        showCentered(cb, "Thank you for dining with us.", subItalic,
+        showCentered(cb, pl ? "Dziękujemy za wizytę." : "Thank you for dining with us.", subItalic,
                 cx, h * 0.60f - 56);
 
         if (opt.contactBlock() != null && !opt.contactBlock().isBlank()) {
@@ -2746,7 +2778,7 @@ public class MenuPrintService {
             }
         }
 
-        showCentered(cb, spacedCaps("Menu · " + LocalDate.now().format(MENU_DATE)),
+        showCentered(cb, spacedCaps("Menu · " + menuDateStr(opt.locale())),
                 year, cx, inset + 50);
     }
 
@@ -3021,31 +3053,51 @@ public class MenuPrintService {
         return (desc == null || desc.isBlank()) ? null : desc;
     }
 
-    private static String renderDietary(MenuItem item) {
+    private static boolean isPl(Locale locale) {
+        return locale != null && "pl".equalsIgnoreCase(locale.getLanguage());
+    }
+
+    /** "Chef's signature" pill label, localised. */
+    private static String chefLabel(Locale locale) {
+        return isPl(locale) ? "Specjalność szefa" : "Chef's signature";
+    }
+
+    private static String renderDietary(MenuItem item, Locale locale) {
         if (item.getDietaryTags() == null) return null;
         List<String> parts = new ArrayList<>();
         for (String t : item.getDietaryTags().split(",")) {
-            if (!t.isBlank()) parts.add(prettyTag(t));
+            if (!t.isBlank()) parts.add(prettyTag(t, locale));
         }
         return parts.isEmpty() ? null : String.join("  ·  ", parts);
     }
 
-    private static String renderAllergens(MenuItem item) {
+    private static String renderAllergens(MenuItem item, Locale locale) {
         if (item.getAllergens() == null) return null;
         List<String> al = new ArrayList<>();
         for (String t : item.getAllergens().split(",")) {
-            if (!t.isBlank()) al.add(prettyTag(t));
+            if (!t.isBlank()) al.add(prettyTag(t, locale));
         }
-        return al.isEmpty() ? null : "Contains: " + String.join(", ", al);
+        if (al.isEmpty()) return null;
+        return (isPl(locale) ? "Zawiera: " : "Contains: ") + String.join(", ", al);
     }
 
-    private static String prettyTag(String slug) {
+    private static String prettyTag(String slug, Locale locale) {
+        boolean pl = isPl(locale);
         return switch (slug.toLowerCase(Locale.ROOT)) {
-            case "vegetarian", "vege", "veggie" -> "vegetarian";
-            case "vegan" -> "vegan";
-            case "gluten-free", "gf" -> "gluten-free";
-            case "spicy", "hot" -> "spicy";
-            case "signature", "chef", "chefs" -> "chef's signature";
+            case "vegetarian", "vege", "veggie" -> pl ? "wegetariańskie" : "vegetarian";
+            case "vegan"                          -> pl ? "wegańskie"      : "vegan";
+            case "gluten-free", "gf"              -> pl ? "bezglutenowe"   : "gluten-free";
+            case "spicy", "hot"                   -> pl ? "ostre"          : "spicy";
+            case "signature", "chef", "chefs"     -> pl ? "specjalność szefa" : "chef's signature";
+            case "gluten"    -> pl ? "gluten"     : "gluten";
+            case "dairy"     -> pl ? "nabiał"     : "dairy";
+            case "eggs"      -> pl ? "jajka"      : "eggs";
+            case "nuts", "tree nuts", "tree-nuts" -> pl ? "orzechy" : "nuts";
+            case "peanuts"   -> pl ? "orzeszki ziemne" : "peanuts";
+            case "sesame"    -> pl ? "sezam"      : "sesame";
+            case "soya", "soy" -> pl ? "soja"     : "soya";
+            case "fish"      -> pl ? "ryby"       : "fish";
+            case "shellfish" -> pl ? "skorupiaki" : "shellfish";
             default -> slug.replace('-', ' ');
         };
     }
