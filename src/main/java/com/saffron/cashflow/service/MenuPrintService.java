@@ -280,7 +280,18 @@ public class MenuPrintService {
                     float avail = ci == 0 ? 0 : writer.getVerticalPosition(false) - doc.bottomMargin();
                     // Photolist rows are tall (big photos); let categories keep
                     // flowing down a page instead of leaving a large tail blank.
-                    float minTail = opt.layout() == Layout.PHOTOLIST ? 190f : 260f;
+                    // Drinks-style categories (no photo, no description) render as a
+                    // short two-column grid, so they need far less room to start —
+                    // otherwise a small one (e.g. "Piwo") gets orphaned on its own page.
+                    float minTail;
+                    if (opt.layout() == Layout.PHOTOLIST) {
+                        boolean gridCat = items.stream()
+                                .noneMatch(it -> it.getImagePath() != null && !it.getImagePath().isBlank())
+                                && items.stream().noneMatch(it -> chooseDescription(it) != null);
+                        minTail = gridCat ? 95f : 190f;
+                    } else {
+                        minTail = 260f;
+                    }
                     boolean freshPage = ci == 0 || avail < minTail;
                     if (freshPage) doc.newPage();
 
