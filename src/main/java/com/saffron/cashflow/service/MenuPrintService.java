@@ -286,13 +286,14 @@ public class MenuPrintService {
                         else           drawDarkCompactDivider(doc, cat.getName());
                     } else if (opt.layout() == Layout.BOLD) {
                         drawBoldSectionHeader(doc, cat.getName());
+                    } else if (opt.layout() == Layout.PHOTOLIST) {
+                        // Photolist: every category (including the first) uses the
+                        // same compact left-aligned header so they look consistent,
+                        // and drops the decorative eyebrow label for a cleaner look.
+                        drawCompactSectionDivider(doc, cat.getName(), false);
                     } else {
-                        // Photolist drops the decorative eyebrow label
-                        // ("FROM THE KITCHEN" …) above each category for a
-                        // tighter, cleaner header.
-                        boolean eyebrowLabel = opt.layout() != Layout.PHOTOLIST;
-                        if (freshPage) drawSectionDivider(doc, cat.getName(), eyebrowLabel);
-                        else           drawCompactSectionDivider(doc, cat.getName(), eyebrowLabel);
+                        if (freshPage) drawSectionDivider(doc, cat.getName(), true);
+                        else           drawCompactSectionDivider(doc, cat.getName(), true);
                     }
 
                     boolean hasVisualContent = items.stream().anyMatch(
