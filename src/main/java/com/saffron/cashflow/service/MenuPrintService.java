@@ -965,7 +965,7 @@ public class MenuPrintService {
 
         // ── Options ───────────────────────────────────────────────────────────
         if (!variants.isEmpty()) {
-            PdfPCell optLabel = new PdfPCell(new Phrase(spacedCaps("Options"), optLabelFont));
+            PdfPCell optLabel = new PdfPCell(new Phrase(spacedCaps("Wybór"), optLabelFont));
             optLabel.setBorder(Rectangle.NO_BORDER);
             optLabel.setBackgroundColor(CARD_BG);
             optLabel.setPaddingTop(8);
@@ -1102,7 +1102,7 @@ public class MenuPrintService {
 
             // ── 5. Options section (after description — price choices last) ────
             if (!variants.isEmpty()) {
-                Paragraph optLabel = new Paragraph(spacedCaps("Options"), optLabelFont);
+                Paragraph optLabel = new Paragraph(spacedCaps("Wybór"), optLabelFont);
                 optLabel.setSpacingBefore(6);
                 doc.add(optLabel);
 
@@ -1242,7 +1242,7 @@ public class MenuPrintService {
                 details.addElement(d);
             }
             if (!variants.isEmpty()) {
-                Paragraph optLabel = new Paragraph(spacedCaps("Options"), optLabelFont);
+                Paragraph optLabel = new Paragraph(spacedCaps("Wybór"), optLabelFont);
                 optLabel.setSpacingBefore(3);
                 details.addElement(optLabel);
                 if (varPrices) {
@@ -1562,7 +1562,7 @@ public class MenuPrintService {
 
             // ── 5. Options after description ──────────────────────────────────
             if (!variants.isEmpty()) {
-                PdfPCell optLabel = new PdfPCell(new Phrase(spacedCaps("Options"), optLabelFont));
+                PdfPCell optLabel = new PdfPCell(new Phrase(spacedCaps("Wybór"), optLabelFont));
                 optLabel.setBorder(Rectangle.NO_BORDER);
                 optLabel.setPaddingTop(5);
                 optLabel.setPaddingBottom(2);
@@ -1760,7 +1760,7 @@ public class MenuPrintService {
 
             // Variants
             if (!variants.isEmpty()) {
-                Paragraph optHead = new Paragraph(spacedCaps("Options"), varLabel);
+                Paragraph optHead = new Paragraph(spacedCaps("Wybór"), varLabel);
                 optHead.setAlignment(Element.ALIGN_CENTER);
                 optHead.setSpacingBefore(8);
                 doc.add(optHead);
@@ -1939,7 +1939,7 @@ public class MenuPrintService {
             if (dietary != null) { Paragraph d = new Paragraph(dietary, tagsFont); d.setSpacingBefore(4); doc.add(d); }
 
             if (!variants.isEmpty()) {
-                Paragraph ol = new Paragraph(spacedCaps("Options"), optLabelFont); ol.setSpacingBefore(6); doc.add(ol);
+                Paragraph ol = new Paragraph(spacedCaps("Wybór"), optLabelFont); ol.setSpacingBefore(6); doc.add(ol);
                 if (varPrices) {
                     for (VariantEntry v : variants) {
                         PdfPTable vr = new PdfPTable(2);
@@ -2079,7 +2079,7 @@ public class MenuPrintService {
             if (dietary != null) { Paragraph d = new Paragraph(dietary, tagsFont); d.setSpacingBefore(4); doc.add(d); }
 
             if (!variants.isEmpty()) {
-                Paragraph ol = new Paragraph(spacedCaps("Options"), optLabelFont); ol.setSpacingBefore(6); doc.add(ol);
+                Paragraph ol = new Paragraph(spacedCaps("Wybór"), optLabelFont); ol.setSpacingBefore(6); doc.add(ol);
                 if (varPrices) {
                     for (VariantEntry v : variants) {
                         PdfPTable vr = new PdfPTable(2);
@@ -2174,7 +2174,7 @@ public class MenuPrintService {
             }
 
             if (!variants.isEmpty()) {
-                PdfPCell ol = new PdfPCell(new Phrase(spacedCaps("Options"), optLabelFont));
+                PdfPCell ol = new PdfPCell(new Phrase(spacedCaps("Wybór"), optLabelFont));
                 ol.setBorder(Rectangle.NO_BORDER); ol.setPaddingTop(4); ol.setPaddingBottom(2); col.addCell(ol);
                 if (varPrices) {
                     for (VariantEntry v : variants) {
