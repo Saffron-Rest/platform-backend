@@ -288,7 +288,7 @@ public class MenuPrintService {
                         boolean gridCat = items.stream()
                                 .noneMatch(it -> it.getImagePath() != null && !it.getImagePath().isBlank())
                                 && items.stream().noneMatch(it -> chooseDescription(it) != null);
-                        minTail = gridCat ? 95f : 190f;
+                        minTail = gridCat ? 70f : 190f;
                     } else {
                         minTail = 260f;
                     }
@@ -711,20 +711,20 @@ public class MenuPrintService {
 
         // Wide hairline spacer — clear visual break between previous section and this one
         Paragraph preSpacer = new Paragraph(" ");
-        preSpacer.setSpacingBefore(8);
+        preSpacer.setSpacingBefore(5);
         doc.add(preSpacer);
         doc.add(new Chunk(new LineSeparator(0.5f, 100, HAIRLINE, Element.ALIGN_LEFT, 0)));
 
         // Compact eyebrow (e.g. "FRESH & VIBRANT") — dropped for photolist.
         if (showEyebrow) {
             Paragraph eb = new Paragraph(spacedCaps(eyebrowFor(name)), eyebrow);
-            eb.setSpacingBefore(5);
+            eb.setSpacingBefore(4);
             doc.add(eb);
         }
 
         // Category name — left-aligned, reads like a chapter title
         Paragraph h = new Paragraph(name, head);
-        h.setSpacingBefore(showEyebrow ? 3 : 5);
+        h.setSpacingBefore(showEyebrow ? 3 : 4);
         h.setSpacingAfter(0);
         // keepWithNext not available in this iText version — rely on spacing to stay together
         doc.add(h);
@@ -741,7 +741,7 @@ public class MenuPrintService {
         doc.add(new Chunk(new LineSeparator(1.2f, 32, SAFFRON, Element.ALIGN_LEFT, 0)));
 
         Paragraph post = new Paragraph(" ");
-        post.setSpacingAfter(3);
+        post.setSpacingAfter(1);
         doc.add(post);
     }
 
@@ -1196,7 +1196,7 @@ public class MenuPrintService {
         Font varSameFont   = font(SANS_ITALIC,   9.5f, MUTED);
 
         final float THUMB = 118f;   // square photo edge (points)
-        final float GAP   = 8f;     // equal breathing room above and below the hairline
+        final float GAP   = 5f;     // equal breathing room above and below the hairline
 
         for (int i = 0; i < items.size(); i++) {
             MenuItem item        = items.get(i);
