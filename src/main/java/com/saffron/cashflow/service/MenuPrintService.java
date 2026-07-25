@@ -238,13 +238,16 @@ public class MenuPrintService {
         // A3.rotate() only sets a metadata flag — actual landscape needs swapped dimensions.
         Rectangle a3Landscape = new Rectangle(PageSize.A3.getHeight(), PageSize.A3.getWidth());
         Rectangle pageRect = (isA3 || isDeco) ? a3Landscape : PageSize.A4;
+        boolean isPhoto = opt.layout() == Layout.PHOTOLIST;
         float mSide = (isA3 || isDeco) ? 54 : 50;
-        float mTopBot = isDeco ? 54 : (isA3 ? 68 : 64);
+        // Photolist packs the page: smaller top/bottom margin fits more items.
+        float mTopBot = isDeco ? 54 : (isA3 ? 68 : (isPhoto ? 44 : 64));
         Document doc = new Document(pageRect, mSide, mSide, mTopBot, mTopBot);
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try {
             PdfWriter writer = PdfWriter.getInstance(doc, out);
             MenuChrome chrome = new MenuChrome();
+            if (isPhoto) chrome.setTightMargins();
             writer.setPageEvent(chrome);
             doc.open();
 
@@ -3007,10 +3010,15 @@ public class MenuPrintService {
         private Color   pageNumColor = MUTED;
         private boolean decoMode     = false;
         private boolean suppressChrome = false;
+        private float   headerInset  = 52f;   // "SAFFRON" running head, from top edge
+        private float   folioInset   = 38f;   // page number, from bottom edge
 
         void suppressNext()  { this.suppressPageNumber = true; }
         void setSuppressAll(boolean v) { this.suppressChrome = v; }
         void setSection(@SuppressWarnings("unused") String s) {}
+        /** Pull the running head / folio closer to the edges so a smaller page
+         *  margin can fit more items without the chrome overlapping the content. */
+        void setTightMargins() { this.headerInset = 32f; this.folioInset = 24f; }
 
         void setTheme(Color bg, Color brand, Color pageNum) {
             this.bgColor = bg; this.brandColor = brand; this.pageNumColor = pageNum;
@@ -3048,11 +3056,11 @@ public class MenuPrintService {
                     Font fBrand = font(SANS_BOLD, 7.5f, brandColor);
                     ColumnText.showTextAligned(cb, Element.ALIGN_RIGHT,
                             new Phrase("SAFFRON", fBrand),
-                            page.getWidth() - 68f, page.getHeight() - 52f, 0);
+                            page.getWidth() - 68f, page.getHeight() - headerInset, 0);
                     Font fNum = font(SERIF_REG, 9.5f, pageNumColor);
                     ColumnText.showTextAligned(cb, Element.ALIGN_CENTER,
                             new Phrase(String.valueOf(p), fNum),
-                            page.getWidth() / 2f, 38, 0);
+                            page.getWidth() / 2f, folioInset, 0);
                 }
             } catch (Exception ignored) {}
         }
