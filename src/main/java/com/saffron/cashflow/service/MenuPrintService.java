@@ -336,6 +336,9 @@ public class MenuPrintService {
             MenuChrome chrome = new MenuChrome();
             if (isPhoto) chrome.setTightMargins();
             if (opt.forPrint()) chrome.setPrintMode(bleed, markRoom);
+            chrome.setFooterNote(isPl(opt.locale())
+                    ? "Do rachunków dla grup od 6 osób doliczamy 10% opłaty serwisowej."
+                    : "A 10% service charge is added to bills for groups of 6 or more.");
             writer.setPageEvent(chrome);
             doc.open();
 
@@ -523,6 +526,9 @@ public class MenuPrintService {
         // ── Lower decorative rule (closes the title block) ────────────────────
         drawDecorativeLine(cb, cx, titleY - 88f, 110f);
 
+        // ── Halal seal — tucked into the top-right corner, inside the frame ───
+        drawHalalSeal(cb, w - inset - 48f, h - inset - 48f, 24f, pl);
+
         // ── Lower-third anchor: location ─────────────────────────────────────
         float midY = h * 0.28f;
         showCentered(cb, pl ? "Warszawa  ·  Polska" : "Warszawa  ·  Poland", locLabel, cx, midY);
@@ -540,6 +546,57 @@ public class MenuPrintService {
                 spacedCaps("Menu  ·  " + menuDateStr(locale)),
                 menuLabel, cx, inset + 50f);
         showCentered(cb, pl ? "Restauracja Saffron" : "Saffron Restaurant", foot, cx, inset + 33f);
+    }
+
+    /**
+     * A small round "HALAL" seal — two saffron rings, a crescent above the word,
+     * and a caption below. Drawn on the cover so guests see the menu is halal.
+     * No external logo needed; carved from the cream page colour.
+     */
+    private void drawHalalSeal(PdfContentByte cb, float cx, float cy, float r, boolean pl) {
+        // Prefer the real halal logo bundled as a classpath resource (/img.png).
+        try (InputStream in = MenuPrintService.class.getResourceAsStream("/img.png")) {
+            if (in != null) {
+                Image logo = Image.getInstance(in.readAllBytes());
+                float size = r * 2.1f;
+                logo.scaleToFit(size, size);
+                logo.setAbsolutePosition(cx - logo.getScaledWidth() / 2f,
+                                         cy - logo.getScaledHeight() / 2f);
+                cb.addImage(logo);
+                return;
+            }
+        } catch (Exception e) {
+            LOG.warn("Halal logo /img.png not usable ({}); drawing fallback seal", e.getMessage());
+        }
+
+        // Fallback: a simple drawn green seal.
+        Color green = new Color(0x1E, 0x7A, 0x3C);   // halal green
+        cb.saveState();
+        // Solid green disc + white inner ring.
+        cb.setColorFill(green);
+        cb.circle(cx, cy, r);
+        cb.fill();
+        cb.setColorStroke(Color.WHITE);
+        cb.setLineWidth(1.1f);
+        cb.circle(cx, cy, r - 4f);
+        cb.stroke();
+
+        // White crescent in the upper part: white disc carved by a green disc.
+        float rc  = r * 0.24f;
+        float cyC = cy + r * 0.42f;
+        cb.setColorFill(Color.WHITE);
+        cb.circle(cx, cyC, rc);
+        cb.fill();
+        cb.setColorFill(green);
+        cb.circle(cx + rc * 0.6f, cyC, rc * 0.92f);
+        cb.fill();
+        cb.restoreState();
+
+        // White "HALAL" across the middle, small caption underneath.
+        showCentered(cb, spacedCaps("Halal"), font(SERIF_BOLD, r * 0.38f, Color.WHITE),
+                cx, cy - r * 0.14f);
+        showCentered(cb, spacedCaps(pl ? "Certyfikat" : "Certified"),
+                font(SANS_BOLD, r * 0.13f, new Color(0xCF, 0xE6, 0xD4)), cx, cy - r * 0.48f);
     }
 
     /**
@@ -3146,7 +3203,9 @@ public class MenuPrintService {
         private boolean printMode    = false; // add bleed background + crop marks
         private float   bleed        = 0f;
         private float   markRoom     = 0f;
+        private String  footerNote   = null;  // small legal note on every content page
 
+        void setFooterNote(String note) { this.footerNote = note; }
         void suppressNext()  { this.suppressPageNumber = true; }
         void setSuppressAll(boolean v) { this.suppressChrome = v; }
         void setSection(@SuppressWarnings("unused") String s) {}
@@ -3231,10 +3290,13 @@ public class MenuPrintService {
                     ColumnText.showTextAligned(cb, Element.ALIGN_RIGHT,
                             new Phrase("SAFFRON", fBrand),
                             page.getWidth() - 68f, page.getHeight() - headerInset, 0);
-                    Font fNum = font(SERIF_REG, 9.5f, pageNumColor);
-                    ColumnText.showTextAligned(cb, Element.ALIGN_CENTER,
-                            new Phrase(String.valueOf(p), fNum),
-                            page.getWidth() / 2f, folioInset, 0);
+                    // Service-charge note centred at the bottom (no page numbers).
+                    if (footerNote != null && !footerNote.isBlank()) {
+                        Font fNote = font(SANS_REG, 8f, pageNumColor);
+                        ColumnText.showTextAligned(cb, Element.ALIGN_CENTER,
+                                new Phrase(footerNote, fNote),
+                                page.getWidth() / 2f, folioInset, 0);
+                    }
                 }
             } catch (Exception ignored) {}
         }
