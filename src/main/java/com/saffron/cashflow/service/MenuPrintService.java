@@ -380,7 +380,10 @@ public class MenuPrintService {
                         boolean gridCat = items.stream()
                                 .noneMatch(it -> it.getImagePath() != null && !it.getImagePath().isBlank())
                                 && items.stream().noneMatch(it -> chooseDescription(it) != null);
-                        minTail = gridCat ? 70f : 190f;
+                        // Enough room for the divider PLUS its first rows, so a
+                        // grid category's heading never gets orphaned at the very
+                        // bottom of a page (its items landing on the next one).
+                        minTail = gridCat ? 130f : 190f;
                     } else {
                         minTail = 260f;
                     }
