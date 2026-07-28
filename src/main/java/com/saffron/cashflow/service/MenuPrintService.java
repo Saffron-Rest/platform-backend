@@ -384,7 +384,10 @@ public class MenuPrintService {
                     } else {
                         minTail = 260f;
                     }
-                    boolean freshPage = ci == 0 || avail < minTail;
+                    // Photolist: the last category always starts on a fresh page.
+                    boolean lastCategory = ci == categories.size() - 1;
+                    boolean freshPage = ci == 0 || avail < minTail
+                            || (opt.layout() == Layout.PHOTOLIST && lastCategory);
                     if (freshPage) doc.newPage();
 
                     if (dark) {
