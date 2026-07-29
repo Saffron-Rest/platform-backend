@@ -380,17 +380,15 @@ public class MenuPrintService {
                         boolean gridCat = items.stream()
                                 .noneMatch(it -> it.getImagePath() != null && !it.getImagePath().isBlank())
                                 && items.stream().noneMatch(it -> chooseDescription(it) != null);
-                        // Enough room for the divider PLUS its first rows, so a
-                        // grid category's heading never gets orphaned at the very
-                        // bottom of a page (its items landing on the next one).
-                        minTail = gridCat ? 130f : 190f;
+                        // Enough room for the divider PLUS its first row, so the
+                        // heading is never orphaned — but small enough that a short
+                        // drinks category still flows onto the current page when
+                        // there is reasonable room left.
+                        minTail = gridCat ? 100f : 190f;
                     } else {
                         minTail = 260f;
                     }
-                    // Photolist: the last category always starts on a fresh page.
-                    boolean lastCategory = ci == categories.size() - 1;
-                    boolean freshPage = ci == 0 || avail < minTail
-                            || (opt.layout() == Layout.PHOTOLIST && lastCategory);
+                    boolean freshPage = ci == 0 || avail < minTail;
                     if (freshPage) doc.newPage();
 
                     if (dark) {
