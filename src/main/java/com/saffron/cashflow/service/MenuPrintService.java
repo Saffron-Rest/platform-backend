@@ -369,25 +369,26 @@ public class MenuPrintService {
                     List<MenuItem> items = itemsByCategory.get(cat.getId());
                     if (items == null || items.isEmpty()) continue;
 
+                    // Drinks-style categories (no photo, no description) render as a
+                    // short two-column grid.
+                    boolean gridCat = items.stream()
+                            .noneMatch(it -> it.getImagePath() != null && !it.getImagePath().isBlank())
+                            && items.stream().noneMatch(it -> chooseDescription(it) != null);
+
+                    // Photolist grid category: heading + grid drawn as ONE
+                    // keep-together block, so the heading is never orphaned at the
+                    // bottom of a page. Page breaks are handled by keepTogether,
+                    // not by a fragile space estimate.
+                    if (opt.layout() == Layout.PHOTOLIST && gridCat) {
+                        if (ci == 0) doc.newPage();
+                        drawPhotoGridSection(doc, cat.getName(), items, opt.showPrices(), opt.locale());
+                        continue;
+                    }
+
                     float avail = ci == 0 ? 0 : writer.getVerticalPosition(false) - doc.bottomMargin();
                     // Photolist rows are tall (big photos); let categories keep
                     // flowing down a page instead of leaving a large tail blank.
-                    // Drinks-style categories (no photo, no description) render as a
-                    // short two-column grid, so they need far less room to start —
-                    // otherwise a small one (e.g. "Piwo") gets orphaned on its own page.
-                    float minTail;
-                    if (opt.layout() == Layout.PHOTOLIST) {
-                        boolean gridCat = items.stream()
-                                .noneMatch(it -> it.getImagePath() != null && !it.getImagePath().isBlank())
-                                && items.stream().noneMatch(it -> chooseDescription(it) != null);
-                        // Enough room for the divider PLUS its first row, so the
-                        // heading is never orphaned — but small enough that a short
-                        // drinks category still flows onto the current page when
-                        // there is reasonable room left.
-                        minTail = gridCat ? 100f : 190f;
-                    } else {
-                        minTail = 260f;
-                    }
+                    float minTail = (opt.layout() == Layout.PHOTOLIST) ? 190f : 260f;
                     boolean freshPage = ci == 0 || avail < minTail;
                     if (freshPage) doc.newPage();
 
@@ -1511,6 +1512,11 @@ public class MenuPrintService {
      */
     private void drawPhotoSimpleGrid(Document doc, List<MenuItem> items, boolean showPrices, Locale locale)
             throws DocumentException {
+        doc.add(buildSimpleGrid(items, showPrices, locale));
+    }
+
+    /** Builds the two-column drinks grid table (see {@link #drawPhotoSimpleGrid}). */
+    private PdfPTable buildSimpleGrid(List<MenuItem> items, boolean showPrices, Locale locale) {
         int half = (items.size() + 1) / 2;
         PdfPTable two = new PdfPTable(2);
         two.setWidthPercentage(100);
@@ -1526,8 +1532,48 @@ public class MenuPrintService {
         right.setBorder(Rectangle.NO_BORDER);
         right.setPaddingLeft(22);
         two.addCell(right);
+        return two;
+    }
 
-        doc.add(two);
+    /**
+     * A drinks-style grid category rendered as ONE keep-together block — the
+     * compact heading and the grid stay on the same page, so the heading can
+     * never be orphaned at the bottom with its items pushed to the next page.
+     * If the whole block does not fit, it moves to the next page together.
+     */
+    private void drawPhotoGridSection(Document doc, String name, List<MenuItem> items,
+                                      boolean showPrices, Locale locale) throws DocumentException {
+        PdfPTable section = new PdfPTable(1);
+        section.setWidthPercentage(100);
+        section.setKeepTogether(true);
+        section.setSplitLate(false);
+        section.setSpacingBefore(3);
+        section.getDefaultCell().setBorder(Rectangle.NO_BORDER);
+
+        // Heading: hairline, category name, short saffron rule.
+        PdfPCell head = new PdfPCell();
+        head.setBorder(Rectangle.NO_BORDER);
+        head.setPadding(0);
+        Paragraph pre = new Paragraph();
+        pre.add(new Chunk(new LineSeparator(0.5f, 100, HAIRLINE, Element.ALIGN_LEFT, 0)));
+        head.addElement(pre);
+        Paragraph h = new Paragraph(name, font(SERIF_BOLD, 18, INK));
+        h.setSpacingBefore(4);
+        head.addElement(h);
+        Paragraph rule = new Paragraph();
+        rule.setSpacingBefore(2);
+        rule.add(new Chunk(new LineSeparator(1.2f, 32, SAFFRON, Element.ALIGN_LEFT, 0)));
+        head.addElement(rule);
+        section.addCell(head);
+
+        // The grid itself.
+        PdfPCell gridCell = new PdfPCell(buildSimpleGrid(items, showPrices, locale));
+        gridCell.setBorder(Rectangle.NO_BORDER);
+        gridCell.setPadding(0);
+        gridCell.setPaddingTop(6);
+        section.addCell(gridCell);
+
+        doc.add(section);
     }
 
     /** One column of the drinks-style grid: name (+ portion) · price, aligned. */
