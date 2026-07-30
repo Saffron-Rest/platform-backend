@@ -121,7 +121,10 @@ public class MenuPrintService {
     private static final Color INK_SOFT     = new Color(0x3A, 0x33, 0x29);
     private static final Color SAFFRON      = new Color(0xC9, 0x6A, 0x1A);
     private static final Color SAFFRON_DEEP = new Color(0xA4, 0x52, 0x12);
-    private static final Color CREAM        = new Color(0xFA, 0xF5, 0xEB);
+    // Warm cream page background. Kept a touch darker/more saturated than a
+    // near-white so it still reads as tinted paper after printing (light creams
+    // wash out to white on press).
+    private static final Color CREAM        = new Color(0xF2, 0xE7, 0xCF);
     private static final Color CARD_BG      = new Color(0xFF, 0xFF, 0xFF);
     private static final Color MUTED        = new Color(0x7A, 0x6B, 0x5A);
     private static final Color HAIRLINE     = new Color(0xDF, 0xD8, 0xCC);
